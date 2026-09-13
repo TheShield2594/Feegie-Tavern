@@ -1,0 +1,109 @@
+import { Color } from 'three';
+
+/**
+ * One palette for the whole island. Every material pulls from here so the world
+ * reads as a single hand-painted set rather than a pile of unrelated meshes.
+ */
+export const PALETTE = {
+  grass: {
+    base: '#7cb85f',
+    shadow: '#4f8c4a',
+    highlight: '#a8d97a',
+    dry: '#b6c46a',
+  },
+  sand: {
+    base: '#e8d3a8',
+    wet: '#c9ae7f',
+    shadow: '#c2a878',
+  },
+  dirt: {
+    base: '#b9835a',
+    path: '#d6b98c',
+    tilled: '#7a5537',
+  },
+  rock: {
+    base: '#8b9490',
+    light: '#b4bcb7',
+    dark: '#5d6764',
+  },
+  water: {
+    shallow: '#6fc9d6',
+    mid: '#2f92b8',
+    deep: '#17557f',
+    foam: '#f2fbff',
+  },
+  foliage: {
+    canopyLight: '#8ccd66',
+    canopyMid: '#5aa356',
+    canopyDark: '#39763f',
+    pine: '#3d7a54',
+    autumn: '#d98a3c',
+    bark: '#8a6242',
+    barkDark: '#5f432c',
+  },
+  flowers: ['#f4b5c7', '#f5d66c', '#c9b3f6', '#fdfdfb', '#f2946b', '#8fd0e8'],
+  wood: {
+    plank: '#c49a6c',
+    plankDark: '#8a6238',
+    beam: '#6b4a2c',
+  },
+  roof: {
+    slate: '#537c96',
+    terracotta: '#c06a4e',
+    moss: '#5f7f56',
+    plum: '#6a5378',
+  },
+  plaster: {
+    cream: '#f2e2c4',
+    warm: '#e8d0aa',
+    white: '#f8f5ec',
+  },
+  accent: {
+    gold: '#f0c05a',
+    lamp: '#ffd9a0',
+    window: '#bfe7ed',
+    windowLit: '#ffdfa0',
+    sign: '#3d4a6b',
+  },
+  sky: {
+    dawnTop: '#4f6fa8',
+    dawnBottom: '#f6b98a',
+    dayTop: '#4a9fd8',
+    dayBottom: '#c8e8f5',
+    sunsetTop: '#3f4f8f',
+    sunsetBottom: '#f28f5f',
+    nightTop: '#0d1430',
+    nightBottom: '#2a3a63',
+    overcastTop: '#7d8794',
+    overcastBottom: '#c0c7ce',
+  },
+  light: {
+    sunDawn: '#ffb98a',
+    sunDay: '#fff4dc',
+    sunSunset: '#ff9d63',
+    moon: '#9fb6e8',
+    ambientDay: '#bcd8e8',
+    ambientNight: '#3a4a75',
+    groundBounce: '#7f9a5f',
+  },
+} as const;
+
+export const COLORS = {
+  grassBase: new Color(PALETTE.grass.base),
+  grassShadow: new Color(PALETTE.grass.shadow),
+  grassHighlight: new Color(PALETTE.grass.highlight),
+  sand: new Color(PALETTE.sand.base),
+  sandWet: new Color(PALETTE.sand.wet),
+  dirt: new Color(PALETTE.dirt.base),
+  path: new Color(PALETTE.dirt.path),
+  rock: new Color(PALETTE.rock.base),
+  rockDark: new Color(PALETTE.rock.dark),
+};
+
+/** Season tint applied over foliage and grass. */
+export const SEASON_TINT: Record<string, { grass: string; canopy: string; saturation: number }> = {
+  Spring: { grass: '#8ecb6a', canopy: '#7ec46a', saturation: 1.05 },
+  Summer: { grass: '#6fb257', canopy: '#4f9a4c', saturation: 1.0 },
+  Autumn: { grass: '#a8b060', canopy: '#d08b3f', saturation: 0.95 },
+  Winter: { grass: '#9db08c', canopy: '#7f9a86', saturation: 0.78 },
+};
