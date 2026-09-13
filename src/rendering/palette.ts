@@ -18,7 +18,7 @@ export const PALETTE = {
   },
   dirt: {
     base: '#b9835a',
-    path: '#d6b98c',
+    path: '#c9a878',
     tilled: '#7a5537',
   },
   rock: {
@@ -33,9 +33,9 @@ export const PALETTE = {
     foam: '#f2fbff',
   },
   foliage: {
-    canopyLight: '#8ccd66',
-    canopyMid: '#5aa356',
-    canopyDark: '#39763f',
+    canopyLight: '#93c47b',
+    canopyMid: '#6a9a5f',
+    canopyDark: '#456e46',
     pine: '#3d7a54',
     autumn: '#d98a3c',
     bark: '#8a6242',
@@ -84,7 +84,7 @@ export const PALETTE = {
     moon: '#9fb6e8',
     ambientDay: '#bcd8e8',
     ambientNight: '#3a4a75',
-    groundBounce: '#7f9a5f',
+    groundBounce: '#96977f',
   },
 } as const;
 
@@ -102,8 +102,8 @@ export const COLORS = {
 
 /** Season tint applied over foliage and grass. */
 export const SEASON_TINT: Record<string, { grass: string; canopy: string; saturation: number }> = {
-  Spring: { grass: '#8ecb6a', canopy: '#7ec46a', saturation: 1.05 },
-  Summer: { grass: '#6fb257', canopy: '#4f9a4c', saturation: 1.0 },
+  Spring: { grass: '#84bd68', canopy: '#7bb268', saturation: 0.98 },
+  Summer: { grass: '#6faa58', canopy: '#579355', saturation: 0.96 },
   Autumn: { grass: '#a8b060', canopy: '#d08b3f', saturation: 0.95 },
   Winter: { grass: '#9db08c', canopy: '#7f9a86', saturation: 0.78 },
 };

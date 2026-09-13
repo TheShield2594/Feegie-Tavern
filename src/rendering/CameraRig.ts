@@ -24,10 +24,10 @@ export interface CameraPreset {
 export const CAMERA_PRESETS: Record<string, CameraPreset> = {
   // The default exterior framing: high enough to read the island as a diorama,
   // shallow enough that buildings still have visible faces.
-  exterior: { distance: 17, height: 12.5, pitchOffset: 0.0, fov: 38 },
-  exteriorClose: { distance: 11, height: 8, pitchOffset: 0.1, fov: 40 },
+  exterior: { distance: 14.5, height: 10.2, pitchOffset: 0.0, fov: 38 },
+  exteriorClose: { distance: 13, height: 9.5, pitchOffset: 0.1, fov: 40 },
   exteriorWide: { distance: 26, height: 19, pitchOffset: -0.05, fov: 36 },
-  interior: { distance: 9.5, height: 8.5, pitchOffset: 0.05, fov: 44 },
+  interior: { distance: 11.0, height: 8.5, pitchOffset: 0.1, fov: 44 },
   fishing: { distance: 12, height: 7.5, pitchOffset: 0.16, fov: 36 },
   dialogue: { distance: 8.5, height: 5.6, pitchOffset: 0.2, fov: 34 },
   vista: { distance: 34, height: 26, pitchOffset: -0.1, fov: 34 },
@@ -79,6 +79,11 @@ export class CameraRig {
   occluders: Object3D[] = [];
   /** Bounds the camera target is kept inside, so it never drifts off the island. */
   bounds: Box3 | null = null;
+  /**
+   * Keeps the camera itself inside a rectangle. Interiors set this to the room
+   * so the view never ends up buried in a wall.
+   */
+  positionBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
 
   constructor(
     private camera: PerspectiveCamera,
@@ -179,6 +184,11 @@ export class CameraRig {
 
     const offset = new Vector3(Math.sin(this.yaw) * distance, height, Math.cos(this.yaw) * distance);
     const desired = this.smoothedFocus.clone().add(offset);
+
+    if (this.positionBounds) {
+      desired.x = clamp(desired.x, this.positionBounds.minX, this.positionBounds.maxX);
+      desired.z = clamp(desired.z, this.positionBounds.minZ, this.positionBounds.maxZ);
+    }
 
     if (immediate) {
       this.currentPosition.copy(desired);

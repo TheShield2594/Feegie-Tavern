@@ -27,12 +27,23 @@ import { PALETTE } from '@/rendering/palette';
  * geometry, ready to be swapped for a GLTF later without touching placement.
  */
 
-/** A box with rounded vertical edges — the base shape of every wall mass. */
+/**
+ * A box with rounded vertical edges — the base shape of every wall mass.
+ *
+ * The bevel is subtracted from the requested size rather than added to it, so
+ * the finished mesh measures exactly width × height × depth and is centred on
+ * its origin, matching BoxGeometry.
+ */
 export function roundedBoxGeometry(width: number, height: number, depth: number, radius = 0.22): BufferGeometry {
-  const r = Math.min(radius, width / 2 - 0.01, depth / 2 - 0.01);
+  const bevel = Math.max(0.005, Math.min(0.06, width * 0.2, height * 0.3, depth * 0.2));
+  const innerW = Math.max(0.02, width - bevel * 2);
+  const innerD = Math.max(0.02, depth - bevel * 2);
+  const innerH = Math.max(0.02, height - bevel * 2);
+
+  const r = Math.min(radius, innerW / 2 - 0.005, innerD / 2 - 0.005);
   const shape = new Shape();
-  const w = width / 2;
-  const d = depth / 2;
+  const w = innerW / 2;
+  const d = innerD / 2;
   shape.moveTo(-w + r, -d);
   shape.lineTo(w - r, -d);
   shape.quadraticCurveTo(w, -d, w, -d + r);
@@ -44,15 +55,15 @@ export function roundedBoxGeometry(width: number, height: number, depth: number,
   shape.quadraticCurveTo(-w, -d, -w + r, -d);
 
   const geometry = new ExtrudeGeometry(shape, {
-    depth: height,
+    depth: innerH,
     bevelEnabled: true,
-    bevelThickness: 0.06,
-    bevelSize: 0.06,
+    bevelThickness: bevel,
+    bevelSize: bevel,
     bevelSegments: 2,
     curveSegments: 4,
   });
   geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, height, 0);
+  geometry.translate(0, -innerH / 2, 0);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -296,11 +307,11 @@ export function makeSign(options: SignOptions): Group {
   group.add(board);
 
   const label = new Mesh(new PlaneGeometry(width * 0.9, height * 0.72), makeTextMaterial(text, textColor, boardColor));
-  label.position.z = 0.075;
+  label.position.z = 0.068;
   group.add(label);
 
   const back = label.clone();
-  back.position.z = -0.075;
+  back.position.z = -0.068;
   back.rotation.y = Math.PI;
   group.add(back);
 

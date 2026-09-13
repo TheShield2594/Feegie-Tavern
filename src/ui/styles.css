@@ -793,8 +793,8 @@ html, body {
   display: grid;
   place-items: center;
   background:
-    radial-gradient(120% 90% at 50% 0%, rgba(120, 190, 220, 0.35), transparent 60%),
-    linear-gradient(180deg, #1d3550, #14243a 55%, #0f1b2c);
+    radial-gradient(90% 70% at 50% 42%, rgba(10, 20, 32, 0.34), rgba(8, 16, 26, 0.72));
+  backdrop-filter: blur(2px) saturate(1.05);
   pointer-events: auto;
   animation: cc-fade-in 700ms var(--ease-out) both;
   z-index: 20;
@@ -810,8 +810,12 @@ html, body {
   box-shadow: var(--lift-3);
   border: 1px solid rgba(255, 255, 255, 0.55);
   text-align: center;
-  animation: cc-sheet-in 620ms var(--spring) 180ms both;
+  animation: cc-title-in 620ms var(--spring) 180ms both;
   transform-origin: center;
+}
+@keyframes cc-title-in {
+  from { opacity: 0; transform: translateY(26px) scale(0.955); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 .cc-title-mark { width: 76px; height: 76px; margin: 0 auto 12px; }
 .cc-title-card h1 {

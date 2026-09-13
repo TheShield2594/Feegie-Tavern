@@ -101,7 +101,7 @@ export const BUILDINGS: BuildingConfig[] = [
     id: 'townHall',
     name: 'Town Hall',
     sign: 'Town Hall',
-    x: 0, z: -62, rotation: 0,
+    x: 0, z: -54, rotation: 0,
     width: 12, depth: 9, wallHeight: 4.8,
     roof: 'hip', roofColor: '#5f7f56', bodyColor: '#f2e2c4',
     trimColor: '#fdf8ea', doorColor: '#4f6b45',
@@ -111,7 +111,7 @@ export const BUILDINGS: BuildingConfig[] = [
   {
     id: 'lighthouse',
     name: 'Cove Lighthouse',
-    x: 52, z: -58, rotation: 0,
+    x: 42, z: -46, rotation: 0,
     width: 4.6, depth: 4.6, wallHeight: 15,
     roof: 'tower', roofColor: '#c9524a', bodyColor: '#f8f5ec',
     trimColor: '#c9524a', doorColor: '#3d4a6b',
@@ -220,7 +220,7 @@ export class Buildings {
       roundedBoxGeometry(config.width, config.wallHeight, config.depth, 0.28),
       createStylizedMaterial({ color: config.bodyColor, roughness: 0.9 }),
     );
-    body.position.y = 0.25;
+    body.position.y = 0.25 + config.wallHeight / 2;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
@@ -263,14 +263,22 @@ export class Buildings {
         roundedBoxGeometry(0.7, config.wallHeight * 0.55 + roofRise, 0.7, 0.1),
         createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.95, flatShading: true }),
       );
-      chimney.position.set(config.width * 0.26, config.wallHeight * 0.4, -config.depth * 0.18);
+      chimney.position.set(
+        config.width * 0.26,
+        config.wallHeight * 0.4 + (config.wallHeight * 0.55 + roofRise) / 2,
+        -config.depth * 0.18,
+      );
       chimney.castShadow = true;
       group.add(chimney);
       const cap = new Mesh(
         roundedBoxGeometry(0.9, 0.16, 0.9, 0.06),
         createStylizedMaterial({ color: PALETTE.rock.dark, roughness: 0.9 }),
       );
-      cap.position.set(chimney.position.x, chimney.position.y + (config.wallHeight * 0.55 + roofRise), chimney.position.z);
+      cap.position.set(
+        chimney.position.x,
+        chimney.position.y + (config.wallHeight * 0.55 + roofRise) / 2 + 0.08,
+        chimney.position.z,
+      );
       group.add(cap);
     }
 

@@ -59,10 +59,10 @@ const KEEP_OUT: { x: number; z: number; r: number }[] = [
   { x: 30, z: -34, r: 10 },    // Pip
   { x: -46, z: -8, r: 10 },    // Mallow
   { x: 44, z: 6, r: 10 },      // Bruno
-  { x: 0, z: -62, r: 13 },     // town hall
-  { x: 52, z: -58, r: 13 },    // lighthouse
-  { x: -40, z: 26, r: 13 },    // farm
-  { x: 14, z: 44, r: 10 },     // harbour
+  { x: 0, z: -54, r: 13 },     // town hall
+  { x: 42, z: -46, r: 13 },    // lighthouse
+  { x: -34, z: 20, r: 13 },    // farm
+  { x: 12, z: 52, r: 11 },     // harbour
 ];
 
 function distanceToPaths(x: number, z: number): number {
@@ -156,7 +156,7 @@ export class Foliage {
   });
 
   private bushMaterial = createStylizedMaterial({
-    color: PALETTE.foliage.canopyDark,
+    color: PALETTE.foliage.canopyMid,
     roughness: 0.95,
     wind: 'foliage',
     windScale: 0.8,
@@ -222,10 +222,16 @@ export class Foliage {
         if (blockedByStructure(x, z, plan.rule.clearance)) continue;
         // Fruit trees belong in the orchard and around the farm.
         if (plan.kind === 'fruit') {
-          const nearOrchard = Math.hypot(x - 62, z - 30) < 26 || Math.hypot(x + 40, z - 26) < 20;
+          const nearOrchard = Math.hypot(x - 50, z - 22) < 22 || Math.hypot(x + 34, z - 20) < 18;
           if (!nearOrchard) continue;
         }
-        if (plan.kind === 'palm' && Math.abs(z) < 24) continue;
+        if (plan.kind === 'palm') {
+          // Palms belong on the shoreline, not scattered across the meadows.
+          const coastal = [[9, 0], [-9, 0], [0, 9], [0, -9]].some(
+            ([dx, dz]) => sampleSurface(x + dx, z + dz).height < 0.2,
+          );
+          if (!coastal) continue;
+        }
 
         records.push({
           id: `tree_${records.length}`,
@@ -234,7 +240,7 @@ export class Foliage {
           x,
           z,
           y: sample.height,
-          scale: rng.range(0.82, 1.28) * (plan.kind === 'palm' ? 1.1 : 1),
+          scale: rng.range(0.68, 1.02) * (plan.kind === 'palm' ? 1.15 : 1),
           rotation: rng.range(0, Math.PI * 2),
           hasFruit: plan.kind === 'fruit',
           harvestedOnDay: -99,
@@ -286,15 +292,18 @@ export class Foliage {
     // Three offset blobs per tree gives a canopy real volume from every angle,
     // at the cost of three instanced draws for the entire island.
     this.canopyOffsets = [
-      { dx: -0.85, dy: 3.6, dz: 0.35, scale: 1.55 },
-      { dx: 0.9, dy: 3.95, dz: -0.3, scale: 1.42 },
-      { dx: 0.05, dy: 4.85, dz: 0.15, scale: 1.28 },
+      { dx: -0.7, dy: 3.3, dz: 0.3, scale: 1.32 },
+      { dx: 0.75, dy: 3.6, dz: -0.26, scale: 1.2 },
+      { dx: 0.04, dy: 4.35, dz: 0.12, scale: 1.06 },
     ];
 
-    const blobGeometry = roughen(new IcosahedronGeometry(1, 1), 0.24, 21);
+    const blobGeometry = roughen(new IcosahedronGeometry(1, 1), 0.13, 21);
     const pineGeometry = roughen(new ConeGeometry(1, 2.4, 7, 2), 0.14, 23);
-    const palmFrond = roughen(new SphereGeometry(1, 7, 5), 0.3, 27);
-    palmFrond.scale(1.5, 0.34, 1.5);
+    // A frond is a long tapered blade rather than a disc, so palms read as
+    // palms from every angle.
+    const palmFrond = roughen(new SphereGeometry(1, 8, 6), 0.18, 27);
+    palmFrond.scale(0.34, 0.16, 1.7);
+    palmFrond.translate(0, 0, 1.5);
 
     for (let layer = 0; layer < this.canopyOffsets.length; layer++) {
       const mesh = new InstancedMesh(blobGeometry, this.canopyMaterial, records.length);
@@ -335,13 +344,10 @@ export class Foliage {
       palmRecords.forEach((record, i) => {
         for (let f = 0; f < 5; f++) {
           const angle = record.rotation + (f / 5) * Math.PI * 2;
-          this.dummy.position.set(
-            record.x + Math.cos(angle) * 0.9 * record.scale,
-            record.y + 5.2 * record.scale,
-            record.z + Math.sin(angle) * 0.9 * record.scale,
-          );
-          this.dummy.rotation.set(0.28, angle, 0);
-          this.dummy.scale.set(record.scale * 1.5, record.scale, record.scale * 1.5);
+          this.dummy.position.set(record.x, record.y + 5.3 * record.scale, record.z);
+          // Fronds fan out and droop, alternating slightly for variety.
+          this.dummy.rotation.set(0.36 + (f % 2) * 0.16, angle, 0);
+          this.dummy.scale.setScalar(record.scale * 1.35);
           this.dummy.updateMatrix();
           palms.setMatrixAt(i * 5 + f, this.dummy.matrix);
         }
@@ -362,7 +368,7 @@ export class Foliage {
         mesh.setMatrixAt(i, this.matrix);
         // Vary each blob so the forest is not one flat green.
         const mix = ((i * 7 + layer * 3) % 10) / 10;
-        canopyColor.set(PALETTE.foliage.canopyDark).lerp(new Color(PALETTE.foliage.canopyLight), mix * 0.8 + layer * 0.08);
+        canopyColor.set(PALETTE.foliage.canopyDark).lerp(new Color(PALETTE.foliage.canopyLight), mix * 0.55 + layer * 0.14);
         mesh.setColorAt(i, canopyColor);
       });
       mesh.instanceMatrix.needsUpdate = true;
@@ -469,7 +475,7 @@ export class Foliage {
       const x = rng.spread(ISLAND_HALF - 6);
       const z = rng.spread(ISLAND_HALF - 6);
       const sample = sampleSurface(x, z);
-      if (sample.height < 1.8 || sample.slope > 0.5) continue;
+      if (sample.height < 2.1 || sample.slope > 0.5) continue;
       if (sample.surface !== 'grass') continue;
       if (distanceToPaths(x, z) < 1.4) continue;
       if (blockedByStructure(x, z, 1)) continue;
@@ -487,7 +493,7 @@ export class Foliage {
       this.dummy.scale.set(b.s * 1.15, b.s * 0.85, b.s * 1.15);
       this.dummy.updateMatrix();
       mesh.setMatrixAt(i, this.dummy.matrix);
-      color.set(PALETTE.foliage.canopyDark).lerp(new Color(PALETTE.foliage.canopyMid), b.tint);
+      color.set(PALETTE.foliage.canopyMid).lerp(new Color(PALETTE.foliage.canopyLight), b.tint * 0.7);
       mesh.setColorAt(i, color);
     });
     mesh.instanceMatrix.needsUpdate = true;
@@ -508,7 +514,7 @@ export class Foliage {
       petals.push(g);
     }
     const merged = mergeSimple(petals);
-    merged.scale(0.34, 0.34, 0.34);
+    merged.scale(0.24, 0.24, 0.24);
     merged.translate(0, 0.26, 0);
 
     const count = Math.round(700 * density);
@@ -519,7 +525,7 @@ export class Foliage {
       const x = rng.spread(ISLAND_HALF - 6);
       const z = rng.spread(ISLAND_HALF - 6);
       const sample = sampleSurface(x, z);
-      if (sample.height < 1.6 || sample.slope > 0.42) continue;
+      if (sample.height < 2.0 || sample.slope > 0.42) continue;
       if (sample.surface !== 'grass') continue;
       if (blockedByStructure(x, z, -6)) continue;
       placed.push({
@@ -549,8 +555,8 @@ export class Foliage {
     this.group.add(mesh);
 
     // Yellow centres, so flowers read at distance.
-    const centre = new SphereGeometry(0.09, 6, 4);
-    centre.translate(0, 0.3, 0);
+    const centre = new SphereGeometry(0.062, 6, 4);
+    centre.translate(0, 0.21, 0);
     const centres = new InstancedMesh(centre, createStylizedMaterial({ color: '#f2c94c', roughness: 0.7 }), placed.length);
     centres.name = 'FlowerCentres';
     placed.forEach((f, i) => {
@@ -576,7 +582,7 @@ export class Foliage {
 
     const chunkSize = 20;
     const chunksPerSide = Math.ceil((ISLAND_HALF * 2) / chunkSize);
-    const perChunk = Math.round(260 * density);
+    const perChunk = Math.round(520 * density);
 
     for (let cz = 0; cz < chunksPerSide; cz++) {
       for (let cx = 0; cx < chunksPerSide; cx++) {
@@ -588,9 +594,9 @@ export class Foliage {
           const x = originX + rng.next() * chunkSize;
           const z = originZ + rng.next() * chunkSize;
           const sample = sampleSurface(x, z);
-          if (sample.height < 1.5 || sample.slope > 0.55) continue;
+          if (sample.height < 1.9 || sample.slope > 0.55) continue;
           if (sample.surface !== 'grass') continue;
-          placed.push({ x, y: sample.height, z, s: rng.range(0.7, 1.5), r: rng.range(0, 6.28), t: rng.next() });
+          placed.push({ x, y: sample.height, z, s: rng.range(0.6, 1.15), r: rng.range(0, 6.28), t: rng.next() });
         }
         if (placed.length < 8) continue;
 
@@ -625,7 +631,7 @@ export class Foliage {
     const tint = SEASON_TINT[season] ?? SEASON_TINT.Spring;
     this.canopyMaterial.color.set(tint.canopy);
     this.grassMaterial.color.set(tint.grass);
-    this.bushMaterial.color.set(new Color(tint.canopy).multiplyScalar(0.82));
+    this.bushMaterial.color.set(new Color(tint.canopy).multiplyScalar(0.94));
     if (this.fruitMesh) this.fruitMesh.visible = season !== 'Winter';
   }
 
@@ -648,7 +654,10 @@ export class Foliage {
       for (const mesh of this.canopyLayers) mesh.instanceMatrix.needsUpdate = true;
     }
 
-    const cullSq = this.grassDistance * this.grassDistance;
+    // Chunks are 20 m square, so allow for their half-diagonal before hiding
+    // one; otherwise a chunk the player is standing at the edge of vanishes.
+    const cull = this.grassDistance + 15;
+    const cullSq = cull * cull;
     for (const chunk of this.grassChunks) {
       const d = (chunk.cx - cameraX) ** 2 + (chunk.cz - cameraZ) ** 2;
       chunk.mesh.visible = d < cullSq;
@@ -681,8 +690,8 @@ export class Foliage {
 /** A single curved grass blade. `uv.y` runs 0 at the root to 1 at the tip. */
 function makeBladeGeometry(): BufferGeometry {
   const segments = 4;
-  const height = 0.62;
-  const halfWidth = 0.055;
+  const height = 0.5;
+  const halfWidth = 0.06;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];

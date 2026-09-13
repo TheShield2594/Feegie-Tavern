@@ -2,6 +2,7 @@ import {
   BoxGeometry,
   Color,
   CylinderGeometry,
+  DoubleSide,
   Group,
   Mesh,
   MeshStandardMaterial,
@@ -34,8 +35,18 @@ export interface RoomOptions {
   name?: string;
 }
 
+export interface RoomWall {
+  /** Every mesh belonging to this wall, including its trim. */
+  parts: Mesh[];
+  /** Outward normal, pointing away from the room's centre. */
+  nx: number;
+  nz: number;
+}
+
 export interface BuiltRoom {
   group: Group;
+  /** The four walls, so the camera can drop whichever one it is behind. */
+  walls: RoomWall[];
   /** Interior walkable bounds, in local space. */
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** Where the player appears when entering. */
@@ -188,40 +199,56 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
   const trimMaterial = createStylizedMaterial({ color: trimColor, roughness: 0.85 });
   const windowGlass: MeshStandardMaterial[] = [];
 
-  const addWall = (w: number, x: number, z: number, rotation: number) => {
-    const wall = new Mesh(new BoxGeometry(w, height, WALL_THICKNESS), wallMaterial);
+  const walls: RoomWall[] = [];
+
+  const addWall = (w: number, x: number, z: number, rotation: number, nx = 0, nz = 0) => {
+    const parts: Mesh[] = [];
+    // Each wall gets its own material clone so the camera can fade just the
+    // one standing between it and the player.
+    const wall = new Mesh(new BoxGeometry(w, height, WALL_THICKNESS), wallMaterial.clone());
     wall.position.set(x, height / 2, z);
     wall.rotation.y = rotation;
     wall.castShadow = true;
     wall.receiveShadow = true;
-    // Walls between the camera and the player fade rather than block the view.
+    wall.userData.noFade = true;
     group.add(wall);
+    parts.push(wall);
 
-    const skirting = new Mesh(new BoxGeometry(w, 0.22, WALL_THICKNESS + 0.06), trimMaterial);
+    const skirting = new Mesh(new BoxGeometry(w, 0.22, WALL_THICKNESS + 0.06), trimMaterial.clone());
     skirting.position.set(x, 0.11, z);
     skirting.rotation.y = rotation;
+    skirting.userData.noFade = true;
     group.add(skirting);
+    parts.push(skirting);
 
-    const picture = new Mesh(new BoxGeometry(w, 0.1, WALL_THICKNESS + 0.05), trimMaterial);
+    const picture = new Mesh(new BoxGeometry(w, 0.1, WALL_THICKNESS + 0.05), trimMaterial.clone());
     picture.position.set(x, height - 0.32, z);
     picture.rotation.y = rotation;
+    picture.userData.noFade = true;
     group.add(picture);
+    parts.push(picture);
+
+    // Group the wall so the renderer can hide the one nearest the camera and
+    // present the room as an open-fronted model.
+    if (nx !== 0 || nz !== 0) walls.push({ parts, nx, nz });
   };
 
   // Back and sides are solid; the front wall carries the doorway.
-  addWall(width, 0, -halfD, 0);
-  addWall(depth, -halfW, 0, Math.PI / 2);
-  addWall(depth, halfW, 0, Math.PI / 2);
+  addWall(width, 0, -halfD, 0, 0, -1);
+  addWall(depth, -halfW, 0, Math.PI / 2, -1, 0);
+  addWall(depth, halfW, 0, Math.PI / 2, 1, 0);
 
   if (doorway) {
     const sideWidth = (width - doorwayWidth) / 2;
-    addWall(sideWidth, -(doorwayWidth / 2 + sideWidth / 2), halfD, 0);
-    addWall(sideWidth, doorwayWidth / 2 + sideWidth / 2, halfD, 0);
+    addWall(sideWidth, -(doorwayWidth / 2 + sideWidth / 2), halfD, 0, 0, 1);
+    addWall(sideWidth, doorwayWidth / 2 + sideWidth / 2, halfD, 0, 0, 1);
 
     // Lintel above the opening.
-    const lintel = new Mesh(new BoxGeometry(doorwayWidth + 0.4, height - 2.5, WALL_THICKNESS), wallMaterial);
+    const lintel = new Mesh(new BoxGeometry(doorwayWidth + 0.4, height - 2.5, WALL_THICKNESS), wallMaterial.clone());
     lintel.position.set(0, height - (height - 2.5) / 2, halfD);
+    lintel.userData.noFade = true;
     group.add(lintel);
+    walls[walls.length - 1]?.parts.push(lintel);
 
     const frame = new Mesh(roundedBoxGeometry(doorwayWidth + 0.36, 2.6, 0.16, 0.06), trimMaterial);
     frame.rotation.x = Math.PI / 2;
@@ -237,20 +264,51 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     threshold.position.set(0, 0.012, halfD - 0.6);
     group.add(threshold);
   } else {
-    addWall(width, 0, halfD, 0);
+    addWall(width, 0, halfD, 0, 0, 1);
   }
 
   // --- Windows -------------------------------------------------------------
-  for (let i = 0; i < windows; i++) {
-    const spacing = width / (windows + 1);
-    const x = -halfW + spacing * (i + 1);
-    if (doorway && Math.abs(x) < doorwayWidth) continue;
+  // Split between the back wall and the sides: the camera hides whichever wall
+  // it is behind, so windows only on the front would rarely be seen.
+  const addInteriorWindow = (x: number, z: number, rotation: number) => {
     const built = makeWindow({ frameColor: trimColor, width: 1.3, height: 1.5, panes: true });
-    built.group.position.set(x, height * 0.56, halfD - WALL_THICKNESS / 2 - 0.02);
-    built.group.rotation.y = Math.PI;
+    built.group.position.set(x, height * 0.56, z);
+    built.group.rotation.y = rotation;
+    // Seen from inside, so the glass needs to read from both faces.
+    built.glass.side = DoubleSide;
+    built.glass.emissiveIntensity = 0.55;
     group.add(built.group);
     windowGlass.push(built.glass);
+  };
+
+  const backCount = Math.max(1, Math.ceil(windows / 2));
+  for (let i = 0; i < backCount; i++) {
+    const spacing = width / (backCount + 1);
+    addInteriorWindow(-halfW + spacing * (i + 1), -halfD + WALL_THICKNESS / 2 + 0.02, 0);
   }
+  for (let i = 0; i < windows - backCount; i++) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const z = -halfD * 0.3 + Math.floor(i / 2) * (depth * 0.35);
+    addInteriorWindow(side * (halfW - WALL_THICKNESS / 2 - 0.02), z, side * Math.PI / 2);
+  }
+
+  // A plinth under the floor grounds the room when it is seen from outside.
+  const plinth = new Mesh(
+    new BoxGeometry(width + 1.4, 0.7, depth + 1.4),
+    createStylizedMaterial({ color: '#b8ad99', roughness: 0.95 }),
+  );
+  plinth.position.y = -0.36;
+  plinth.receiveShadow = true;
+  plinth.userData.noFade = true;
+  group.add(plinth);
+
+  const skirt = new Mesh(
+    new BoxGeometry(width + 1.9, 0.24, depth + 1.9),
+    createStylizedMaterial({ color: '#a49a86', roughness: 0.96 }),
+  );
+  skirt.position.y = -0.74;
+  skirt.userData.noFade = true;
+  group.add(skirt);
 
   // --- Ceiling and lights --------------------------------------------------
   const ceiling = new Mesh(new PlaneGeometry(width, depth), createStylizedMaterial({ color: trimColor, roughness: 0.95 }));
@@ -287,7 +345,7 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     bulb.position.y = -0.68;
     fixture.add(bulb);
 
-    const light = new PointLight(spot.color ?? PALETTE.accent.lamp, spot.intensity ?? 9, 13, 2);
+    const light = new PointLight(spot.color ?? PALETTE.accent.lamp, spot.intensity ?? 18, 16, 2);
     light.position.y = -0.72;
     light.castShadow = false;
     fixture.add(light);
@@ -298,6 +356,7 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
 
   return {
     group,
+    walls,
     bounds: {
       minX: -halfW + WALL_THICKNESS,
       maxX: halfW - WALL_THICKNESS,

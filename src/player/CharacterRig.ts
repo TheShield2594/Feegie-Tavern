@@ -144,7 +144,8 @@ export class CharacterRig {
       roundedBoxGeometry(h * 0.24 * girth * scale, torsoLength, h * 0.15 * girth * scale, h * 0.05),
       this.shirtMaterial,
     );
-    torsoMesh.position.y = 0;
+    // The torso rises from the hip joint, so lift the centred box by half.
+    torsoMesh.position.y = torsoLength / 2;
     this.dress(torsoMesh);
     torso.add(torsoMesh);
 

@@ -213,11 +213,11 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
     windows: 4,
     doorwayWidth: 2.6,
     lights: [
-      { x: 0, z: 8, intensity: 6 },
-      { x: -12, z: -4, intensity: 4, color: '#cfe8f5' },
-      { x: 12, z: -4, intensity: 4, color: '#e2f5cf' },
-      { x: -12, z: -16, intensity: 4, color: '#f5e6cf' },
-      { x: 12, z: -16, intensity: 4, color: '#cfd9f5' },
+      { x: 0, z: 8, intensity: 14 },
+      { x: -12, z: -4, intensity: 10, color: '#cfe8f5' },
+      { x: 12, z: -4, intensity: 10, color: '#e2f5cf' },
+      { x: -12, z: -16, intensity: 10, color: '#f5e6cf' },
+      { x: 12, z: -16, intensity: 10, color: '#cfd9f5' },
     ],
   });
 

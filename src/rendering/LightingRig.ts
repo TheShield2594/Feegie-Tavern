@@ -245,10 +245,10 @@ export class LightingRig {
     scratchB.set(b.ambient);
     const ambientColor = scratchA.clone().lerp(scratchB, t);
     this.hemi.color.copy(ambientColor);
-    this.hemi.groundColor.set(PALETTE.light.groundBounce).lerp(ambientColor, 0.35 + overcast * 0.3);
+    this.hemi.groundColor.set(PALETTE.light.groundBounce).lerp(ambientColor, 0.55 + overcast * 0.25);
     // Overcast skies flatten the key light but raise the fill.
-    this.hemi.intensity = lerp(a.ambientIntensity, b.ambientIntensity, t) * lerp(1, 1.45, overcast) * (indoors ? 0.5 : 1);
-    this.ambient.intensity = 0.2 + overcast * 0.12 + (indoors ? 0.22 : 0);
+    this.hemi.intensity = lerp(a.ambientIntensity, b.ambientIntensity, t) * 1.15 * lerp(1, 1.35, overcast) * (indoors ? 0.34 : 1);
+    this.ambient.intensity = 0.2 + overcast * 0.12 + (indoors ? 0.05 : 0);
 
     // --- Fog ---------------------------------------------------------------
     scratchA.set(a.fog);
@@ -289,13 +289,16 @@ export class LightingRig {
     ];
     // Rain desaturates and cools; mist lifts the blacks.
     const desat = 1 - overcast * 0.22 - (weather.kind === 'fog' ? 0.08 : 0);
-    const darkness = clamp01(1 - dayness * cloudCut) * (indoors ? 0.55 : 1);
+    // Darkness drives lamps, window glow and fireflies, so it tracks the sun
+    // rather than the weather: an overcast afternoon should not light the
+    // street lamps.
+    const darkness = clamp01(1 - dayness) * (indoors ? 0.55 : 1);
 
     return {
       tint: [tint[0] * (1 - gloom * 0.16), tint[1] * (1 - gloom * 0.13), tint[2] * (1 - gloom * 0.06)],
       saturation: 1.1 * desat,
       contrast: 1.045 - overcast * 0.035,
-      vignette: 0.3 + darkness * 0.18,
+      vignette: 0.3 + darkness * 0.18 + overcast * 0.05,
       lift: lerp(a.lift, b.lift, t) + (weather.kind === 'fog' ? 0.03 : 0),
       flash: lightningFlash * 0.65,
       exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.9, overcast),

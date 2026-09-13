@@ -29,8 +29,8 @@ export interface QualityProfile {
 }
 
 export const QUALITY_PROFILES: Record<QualityLevel, QualityProfile> = {
-  low: { pixelRatioCap: 1, shadowMapSize: 1024, shadowsEnabled: true, bloom: false, foliageDensity: 0.4, grassDistance: 26, waterReflections: false },
-  medium: { pixelRatioCap: 1.5, shadowMapSize: 2048, shadowsEnabled: true, bloom: true, foliageDensity: 0.7, grassDistance: 40, waterReflections: true },
+  low: { pixelRatioCap: 1, shadowMapSize: 1024, shadowsEnabled: true, bloom: false, foliageDensity: 0.4, grassDistance: 34, waterReflections: false },
+  medium: { pixelRatioCap: 1.5, shadowMapSize: 2048, shadowsEnabled: true, bloom: true, foliageDensity: 0.7, grassDistance: 46, waterReflections: true },
   high: { pixelRatioCap: 2, shadowMapSize: 3072, shadowsEnabled: true, bloom: true, foliageDensity: 1, grassDistance: 58, waterReflections: true },
 };
 

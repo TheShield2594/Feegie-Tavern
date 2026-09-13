@@ -17,7 +17,7 @@ import { PALETTE } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
 import { smoothstep } from '@/util/math';
 import { makeSign, makeStreetLamp, roundedBoxGeometry } from './BuildingKit';
-import { BRIDGES, ISLAND_HALF, LANDMARKS, sampleSurface, terrainHeight } from './heightfield';
+import { BRIDGES, ISLAND_HALF, LANDMARKS, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
 
 export interface GatherNode {
   id: string;
@@ -102,8 +102,8 @@ export class Props {
     rim.castShadow = true;
     square.add(rim);
 
-    const pool = new Mesh(new CylinderGeometry(2.92, 2.92, 0.1, 24), water);
-    pool.position.y = 0.62;
+    const pool = new Mesh(new CylinderGeometry(2.94, 2.94, 0.1, 24), water);
+    pool.position.y = 0.66;
     square.add(pool);
     this.waterTrough = pool;
 
@@ -117,33 +117,50 @@ export class Props {
     upperBowl.castShadow = true;
     square.add(upperBowl);
 
-    const spout = new Mesh(new SphereGeometry(0.3, 12, 10), stoneDark);
+    const spout = new Mesh(new SphereGeometry(0.28, 12, 10), stoneDark);
     spout.position.y = 2.62;
     square.add(spout);
+
+    // A falling ribbon of water so the fountain reads as running.
+    const fall = new Mesh(new CylinderGeometry(0.07, 0.13, 1.5, 8, 1, true), water);
+    fall.position.y = 1.6;
+    square.add(fall);
+    const upperWater = new Mesh(new CylinderGeometry(1.24, 1.24, 0.06, 18), water);
+    upperWater.position.y = 2.42;
+    square.add(upperWater);
     this.colliders.push({ x: centre.x, z: centre.z, radius: 3.5 });
 
     // Paving ring around the fountain, laid as radial slabs.
-    const slab = roundedBoxGeometry(2.2, 0.12, 1.5, 0.1);
-    const slabMesh = new InstancedMesh(slab, stoneDark, 40);
-    slabMesh.receiveShadow = true;
+    // Paving: a wide apron disc with joint lines cut into it, rather than
+    // separate tiles, so the square reads as one worked surface.
+    const apron = new Mesh(new CylinderGeometry(8.8, 9.1, 0.14, 48), stone);
+    apron.position.y = 0.02;
+    apron.receiveShadow = true;
+    square.add(apron);
+
+    const joint = roundedBoxGeometry(1.55, 0.05, 1.05, 0.07);
+    const jointMesh = new InstancedMesh(joint, stoneDark, 66);
+    jointMesh.receiveShadow = true;
+    let slabIndex = 0;
     for (let ring = 0; ring < 2; ring++) {
-      const radius = 5.2 + ring * 2.6;
-      const count = 16 + ring * 4;
-      for (let i = 0; i < count && ring * 20 + i < 40; i++) {
-        const a = (i / count) * Math.PI * 2 + ring * 0.2;
-        this.dummy.position.set(Math.cos(a) * radius, 0.04, Math.sin(a) * radius);
+      const radius = 4.4 + ring * 2.4;
+      const count = 16 + ring * 6;
+      for (let i = 0; i < count && slabIndex < 66; i++) {
+        const a = (i / count) * Math.PI * 2 + ring * 0.18;
+        this.dummy.position.set(Math.cos(a) * radius, 0.09, Math.sin(a) * radius);
         this.dummy.rotation.set(0, -a, 0);
         this.dummy.scale.setScalar(1);
         this.dummy.updateMatrix();
-        slabMesh.setMatrixAt(ring * 20 + i, this.dummy.matrix);
+        jointMesh.setMatrixAt(slabIndex++, this.dummy.matrix);
       }
     }
-    slabMesh.instanceMatrix.needsUpdate = true;
-    square.add(slabMesh);
+    jointMesh.count = slabIndex;
+    jointMesh.instanceMatrix.needsUpdate = true;
+    square.add(jointMesh);
 
     // Notice board.
-    const board = makeSign({ text: 'Cozy Cove', width: 2.6, height: 1.5, boardColor: '#f2e2c4' });
-    board.position.set(-8.5, 1.9, 3.4);
+    const board = makeSign({ text: 'Cozy Cove', width: 2.4, height: 1.1, boardColor: '#f2e2c4' });
+    board.position.set(-7.4, 2.0, 3.0);
     board.rotation.y = 0.5;
     square.add(board);
     const boardPosts = new Group();
@@ -156,13 +173,13 @@ export class Props {
     boardPosts.position.copy(board.position).setY(0);
     boardPosts.rotation.y = board.rotation.y;
     square.add(boardPosts);
-    this.colliders.push({ x: centre.x - 8.5, z: centre.z + 3.4, radius: 1.4 });
+    this.colliders.push({ x: centre.x - 7.4, z: centre.z + 3.0, radius: 1.4 });
 
     // Benches around the square.
     const benchSpots = [
-      { x: 7, z: 6, r: -0.8 },
-      { x: -7, z: -6.5, r: 2.4 },
-      { x: 8.5, z: -5, r: -2.1 },
+      { x: 6, z: 5.4, r: -0.8 },
+      { x: -6.2, z: -5.6, r: 2.4 },
+      { x: 7.2, z: -4.4, r: -2.1 },
     ];
     for (const spot of benchSpots) {
       const bench = this.makeBench();
@@ -175,22 +192,29 @@ export class Props {
     // Flower beds.
     const bedMaterial = createStylizedMaterial({ color: PALETTE.dirt.tilled, roughness: 0.97 });
     const bloomMaterials = PALETTE.flowers.map((c) => createStylizedMaterial({ color: c, roughness: 0.85, wind: 'foliage', windScale: 1.6 }));
-    const bedSpots = [{ x: -8, z: 6 }, { x: 9, z: 2 }, { x: -3, z: -9 }];
+    const bedSpots = [{ x: -6.8, z: 5.2 }, { x: 7.6, z: 1.6 }, { x: -2.6, z: -7.6 }];
     bedSpots.forEach((spot, bedIndex) => {
       const bed = new Mesh(roundedBoxGeometry(3.4, 0.28, 2.0, 0.4), bedMaterial);
       bed.position.set(spot.x, 0.12, spot.z);
       bed.receiveShadow = true;
       square.add(bed);
-      for (let i = 0; i < 9; i++) {
-        const bloom = new Mesh(new SphereGeometry(0.16, 7, 6), bloomMaterials[(i + bedIndex) % bloomMaterials.length]);
-        bloom.position.set(spot.x - 1.3 + (i % 5) * 0.65, 0.42, spot.z - 0.5 + Math.floor(i / 5) * 0.7);
+      const stemMaterial = createStylizedMaterial({ color: '#5f8b4a', roughness: 0.95, wind: 'foliage', windScale: 1.2 });
+      for (let i = 0; i < 14; i++) {
+        const bx = spot.x - 1.45 + (i % 7) * 0.48;
+        const bz = spot.z - 0.42 + Math.floor(i / 7) * 0.62;
+        const stem = new Mesh(new CylinderGeometry(0.022, 0.03, 0.4, 5), stemMaterial);
+        stem.position.set(bx, 0.42, bz);
+        square.add(stem);
+        const bloom = new Mesh(new SphereGeometry(0.085, 7, 6), bloomMaterials[(i + bedIndex) % bloomMaterials.length]);
+        bloom.position.set(bx, 0.64, bz);
+        bloom.scale.y = 0.75;
         bloom.castShadow = true;
         square.add(bloom);
       }
     });
 
     // Square lamps.
-    for (const spot of [{ x: -5.5, z: 8.5 }, { x: 6, z: 9 }, { x: -9.5, z: -3 }, { x: 10, z: -6 }]) {
+    for (const spot of [{ x: -4.8, z: 7.4 }, { x: 5.2, z: 7.8 }, { x: -8.2, z: -2.6 }, { x: 8.4, z: -5.2 }]) {
       const lamp = makeStreetLamp({ height: 3.9 });
       lamp.group.position.set(spot.x, 0, spot.z);
       square.add(lamp.group);
@@ -236,25 +260,26 @@ export class Props {
     const plank = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.92 });
     const post = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.95 });
 
-    // Decking marches out over the water, with pilings under each bay.
+    // Decking starts on the sand and marches out over the water.
+    const deckY = 1.7;
     const bays = 9;
     for (let i = 0; i < bays; i++) {
-      const z = pier.z - 6 + i * 3.0;
+      const z = pier.z - 3 + i * 3.0;
       const deck = new Mesh(roundedBoxGeometry(5.2, 0.24, 3.0, 0.06), plank);
-      deck.position.set(pier.x, 1.05, z);
+      deck.position.set(pier.x, deckY, z);
       deck.castShadow = true;
       deck.receiveShadow = true;
       group.add(deck);
 
       for (const dx of [-2.1, 2.1]) {
-        const piling = new Mesh(new CylinderGeometry(0.22, 0.26, 5.5, 8), post);
-        piling.position.set(pier.x + dx, -1.6, z);
+        const piling = new Mesh(new CylinderGeometry(0.22, 0.26, 7.5, 8), post);
+        piling.position.set(pier.x + dx, deckY - 3.9, z);
         piling.castShadow = true;
         group.add(piling);
 
         if (i % 2 === 0) {
           const rail = new Mesh(new BoxGeometry(0.12, 0.9, 0.12), post);
-          rail.position.set(pier.x + dx, 1.6, z);
+          rail.position.set(pier.x + dx, deckY + 0.55, z);
           rail.castShadow = true;
           group.add(rail);
         }
@@ -262,7 +287,7 @@ export class Props {
       if (i > 0) {
         for (const dx of [-2.1, 2.1]) {
           const beam = new Mesh(new BoxGeometry(0.1, 0.1, 3.0), post);
-          beam.position.set(pier.x + dx, 2.0, z - 1.5);
+          beam.position.set(pier.x + dx, deckY + 0.95, z - 1.5);
           group.add(beam);
         }
       }
@@ -271,15 +296,20 @@ export class Props {
     // Mooring bollards and a rowboat.
     for (const offset of [-3.5, 3.5]) {
       const bollard = new Mesh(new CylinderGeometry(0.24, 0.3, 0.9, 10), post);
-      bollard.position.set(pier.x + offset, 1.55, pier.z + 2);
+      bollard.position.set(pier.x + offset, deckY + 0.45, pier.z + 4);
       bollard.castShadow = true;
       group.add(bollard);
     }
-    group.add(this.makeRowboat(pier.x + 4.6, pier.z - 1, 0.4));
+    group.add(this.makeRowboat(pier.x + 4.8, pier.z + 13, 0.4));
 
     // Crates and barrels on the apron.
     const crateMaterial = createStylizedMaterial({ color: '#c49a6c', roughness: 0.92 });
-    for (const spot of [{ x: 8, z: 40, r: 0.3 }, { x: 9.4, z: 41.4, r: -0.6 }, { x: 19, z: 43, r: 0.9 }]) {
+    const apron = [
+      { x: pier.x - 4, z: pier.z - 7, r: 0.3 },
+      { x: pier.x - 2.6, z: pier.z - 5.6, r: -0.6 },
+      { x: pier.x + 6, z: pier.z - 4, r: 0.9 },
+    ];
+    for (const spot of apron) {
       const y = terrainHeight(spot.x, spot.z);
       const crate = new Mesh(roundedBoxGeometry(1.0, 1.0, 1.0, 0.08), crateMaterial);
       crate.position.set(spot.x, y + 0.5, spot.z);
@@ -292,7 +322,7 @@ export class Props {
 
     // Lamp at the pier head.
     const lamp = makeStreetLamp({ height: 3.2 });
-    lamp.group.position.set(pier.x - 2.4, 1.2, pier.z + 4);
+    lamp.group.position.set(pier.x - 2.4, deckY + 0.12, pier.z + 4);
     group.add(lamp.group);
     this.lampLights.push(lamp.light);
     this.lampGlass.push(lamp.glass);
@@ -300,7 +330,8 @@ export class Props {
 
   private makeRowboat(x: number, z: number, rotation: number): Group {
     const boat = new Group();
-    boat.position.set(x, 0.05, z);
+    // Floats on the waterline rather than sitting on the terrain.
+    boat.position.set(x, SEA_LEVEL + 0.22, z);
     boat.rotation.y = rotation;
 
     const hullMaterial = createStylizedMaterial({ color: '#d8e0e4', roughness: 0.8 });
@@ -372,8 +403,8 @@ export class Props {
     group.name = 'MeadowStairs';
     this.group.add(group);
 
-    const start = { x: -36, z: -30 };
-    const end = { x: -46, z: -41 };
+    const start = { x: -30, z: -24 };
+    const end = { x: -39, z: -34 };
     const steps = 14;
     for (let i = 0; i < steps; i++) {
       const t = i / (steps - 1);
@@ -438,9 +469,10 @@ export class Props {
     this.colliders.push({ x: log.x, z: log.z, radius: 1.6 });
 
     // Beach umbrellas and towels near the dunes.
+    const dunes = LANDMARKS['beach.dunes'];
     for (let i = 0; i < 2; i++) {
-      const x = -14 - i * 7 + rng.spread(2);
-      const z = 36 + rng.spread(3);
+      const x = dunes.x + i * 6 + rng.spread(2);
+      const z = dunes.z + rng.spread(3);
       const y = terrainHeight(x, z);
       const pole = new Mesh(new CylinderGeometry(0.06, 0.06, 2.4, 8), createStylizedMaterial({ color: '#e8dcc0', roughness: 0.8 }));
       pole.position.set(x, y + 1.2, z);
@@ -536,8 +568,9 @@ export class Props {
   }
 
   private buildShells(rng: Rng): void {
-    const geometry = new SphereGeometry(0.16, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-    const material = createStylizedMaterial({ color: '#f4e2c8', roughness: 0.6 });
+    const geometry = new SphereGeometry(0.1, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    geometry.scale(1, 0.6, 1.25);
+    const material = createStylizedMaterial({ color: '#e8cfa8', roughness: 0.55 });
     const count = 18;
     const mesh = new InstancedMesh(geometry, material, count);
     mesh.castShadow = true;
@@ -547,13 +580,18 @@ export class Props {
     let attempts = 0;
     while (placed < count && attempts < 900) {
       attempts++;
-      const x = rng.spread(ISLAND_HALF - 20);
-      const z = rng.range(22, ISLAND_HALF - 20);
+      const x = rng.spread(ISLAND_HALF - 24);
+      const z = rng.range(20, ISLAND_HALF - 18);
       const sample = sampleSurface(x, z);
       if (sample.surface !== 'sand' || sample.height < 0.15 || sample.height > 1.3) continue;
-      this.dummy.position.set(x, sample.height + 0.05, z);
+      // Only genuinely coastal sand: there must be water within a few metres.
+      const nearWater = [[6, 0], [-6, 0], [0, 6], [0, -6]].some(
+        ([dx, dz]) => sampleSurface(x + dx, z + dz).height < SEA_LEVEL,
+      );
+      if (!nearWater) continue;
+      this.dummy.position.set(x, sample.height + 0.03, z);
       this.dummy.rotation.set(rng.range(-0.2, 0.2), rng.range(0, 6.28), rng.range(-0.2, 0.2));
-      this.dummy.scale.setScalar(rng.range(0.8, 1.4));
+      this.dummy.scale.setScalar(rng.range(0.8, 1.3));
       this.dummy.updateMatrix();
       mesh.setMatrixAt(placed, this.dummy.matrix);
       this.gatherNodes.push({

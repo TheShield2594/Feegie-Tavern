@@ -267,6 +267,8 @@ export class HomeFurnishing {
     const size = this.footprintMetres(def);
     for (let z = this.bounds.minZ + size.d / 2; z <= this.bounds.maxZ - size.d / 2; z += GRID) {
       for (let x = this.bounds.minX + size.w / 2; x <= this.bounds.maxX - size.w / 2; x += GRID) {
+        // Leave the doorway clear so the player never materialises inside a sofa.
+        if (z > this.bounds.maxZ - 2.2 && Math.abs(x) < 1.6) continue;
         const probe = { def, rotation: 0, x, z } as PlacedPiece;
         if (this.isFree(probe, x, z)) return { x: Math.round(x / GRID) * GRID, z: Math.round(z / GRID) * GRID };
       }

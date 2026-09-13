@@ -48,7 +48,7 @@ export class Terrain {
   private extent: number;
 
   constructor(options: TerrainOptions = {}) {
-    this.resolution = options.resolution ?? 220;
+    this.resolution = options.resolution ?? 300;
     this.extent = options.extent ?? ISLAND_HALF * 2 + 40;
 
     const plane = new PlaneGeometry(this.extent, this.extent, this.resolution, this.resolution);
@@ -84,8 +84,8 @@ export class Terrain {
       }
 
       // Damp sand right at the waterline, and a wet band just below it.
-      if (sample.height < 1.6 && sample.height > SEA_LEVEL - 1.2) {
-        const wetness = 1 - smoothstep(SEA_LEVEL - 0.1, 1.5, sample.height);
+      if (sample.height < 2.0 && sample.height > SEA_LEVEL - 1.2) {
+        const wetness = 1 - smoothstep(SEA_LEVEL - 0.1, 1.9, sample.height);
         color.lerp(new Color(PALETTE.sand.wet), wetness * 0.7);
       }
       if (sample.height <= SEA_LEVEL) {
