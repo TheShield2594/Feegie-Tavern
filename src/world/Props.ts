@@ -1,6 +1,8 @@
 import {
   BoxGeometry,
+  ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   Group,
   IcosahedronGeometry,
   InstancedMesh,
@@ -331,16 +333,26 @@ export class Props {
   private makeRowboat(x: number, z: number, rotation: number): Group {
     const boat = new Group();
     // Floats on the waterline rather than sitting on the terrain.
-    boat.position.set(x, SEA_LEVEL + 0.22, z);
+    boat.position.set(x, SEA_LEVEL + 0.52, z);
     boat.rotation.y = rotation;
 
     const hullMaterial = createStylizedMaterial({ color: '#d8e0e4', roughness: 0.8 });
     const trimMaterial = createStylizedMaterial({ color: '#4a7fa8', roughness: 0.8 });
 
-    const hull = new Mesh(new SphereGeometry(1.3, 14, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), hullMaterial);
+    // The hull is seen from above, so it needs both faces.
+    hullMaterial.side = DoubleSide;
+    const hull = new Mesh(new SphereGeometry(1.3, 16, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), hullMaterial);
     hull.scale.set(1.0, 0.62, 2.3);
     hull.castShadow = true;
+    hull.receiveShadow = true;
     boat.add(hull);
+
+    const floorBoard = new Mesh(
+      roundedBoxGeometry(1.9, 0.06, 4.4, 0.3),
+      createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.9 }),
+    );
+    floorBoard.position.y = -0.34;
+    boat.add(floorBoard);
 
     const rim = new Mesh(new TorusGeometry(1.28, 0.09, 6, 20), trimMaterial);
     rim.rotation.x = Math.PI / 2;
@@ -479,13 +491,22 @@ export class Props {
       pole.castShadow = true;
       group.add(pole);
 
+      // A proper parasol: a shallow cone reads far better than a sphere cap.
       const canopy = new Mesh(
-        new SphereGeometry(1.6, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2.6),
-        createStylizedMaterial({ color: i ? '#f2946b' : '#7fc9de', roughness: 0.86, side: undefined }),
+        new ConeGeometry(1.5, 0.62, 10),
+        createStylizedMaterial({ color: i ? '#f2946b' : '#7fc9de', roughness: 0.86 }),
       );
-      canopy.position.set(x, y + 2.3, z);
+      canopy.position.set(x, y + 2.32, z);
+      canopy.rotation.z = 0.06;
       canopy.castShadow = true;
       group.add(canopy);
+
+      const finial = new Mesh(
+        new SphereGeometry(0.09, 8, 6),
+        createStylizedMaterial({ color: '#e8dcc0', roughness: 0.8 }),
+      );
+      finial.position.set(x, y + 2.68, z);
+      group.add(finial);
     }
   }
 

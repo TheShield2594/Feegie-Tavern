@@ -200,8 +200,8 @@ export class Foliage {
 
   private buildTrees(rng: Rng, density: number): void {
     const plans: { kind: TreeKind; rule: ScatterRule }[] = [
-      { kind: 'broadleaf', rule: { count: Math.round(190 * density), minHeight: 2.2, maxHeight: 16, maxSlope: 0.45, clearance: 2 } },
-      { kind: 'pine', rule: { count: Math.round(110 * density), minHeight: 6.5, maxHeight: 26, maxSlope: 0.58, clearance: 2 } },
+      { kind: 'broadleaf', rule: { count: Math.round(120 * density), minHeight: 2.2, maxHeight: 16, maxSlope: 0.45, clearance: 2 } },
+      { kind: 'pine', rule: { count: Math.round(70 * density), minHeight: 6.5, maxHeight: 26, maxSlope: 0.58, clearance: 2 } },
       { kind: 'palm', rule: { count: Math.round(34 * density), minHeight: 0.9, maxHeight: 3.0, maxSlope: 0.34, clearance: 3 } },
       { kind: 'fruit', rule: { count: Math.round(26 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.3, clearance: 4 } },
     ];
@@ -368,7 +368,7 @@ export class Foliage {
         mesh.setMatrixAt(i, this.matrix);
         // Vary each blob so the forest is not one flat green.
         const mix = ((i * 7 + layer * 3) % 10) / 10;
-        canopyColor.set(PALETTE.foliage.canopyDark).lerp(new Color(PALETTE.foliage.canopyLight), mix * 0.55 + layer * 0.14);
+        canopyColor.set(PALETTE.foliage.canopyMid).lerp(new Color(PALETTE.foliage.canopyLight), mix * 0.6 + layer * 0.18);
         mesh.setColorAt(i, canopyColor);
       });
       mesh.instanceMatrix.needsUpdate = true;

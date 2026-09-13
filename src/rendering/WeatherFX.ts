@@ -14,7 +14,7 @@ import {
 import { clamp01 } from '@/util/math';
 import type { WeatherProfile } from '@/time/WeatherSystem';
 
-const RAIN_COUNT = 2600;
+const RAIN_COUNT = 3600;
 const FIREFLY_COUNT = 90;
 const MIST_LAYERS = 3;
 
@@ -41,7 +41,7 @@ export class WeatherFX {
   private mistMaterial: ShaderMaterial;
 
   /** Radius around the camera that precipitation covers. */
-  private readonly radius = 30;
+  private readonly radius = 22;
   private time = 0;
 
   constructor() {

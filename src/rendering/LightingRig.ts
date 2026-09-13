@@ -32,9 +32,9 @@ const DAY_STOPS: GradeStops[] = [
     at: 0,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
     sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.5,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
     fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.78, 0.85, 1.08], lift: 0.045, exposure: 0.92,
+    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
   },
   {
     at: 5.1,
@@ -80,7 +80,7 @@ const DAY_STOPS: GradeStops[] = [
     at: 18.6,
     skyTop: PALETTE.sky.sunsetTop, skyBottom: PALETTE.sky.sunsetBottom, horizon: '#ff9a5c',
     sun: PALETTE.light.sunSunset, sunIntensity: 1.45,
-    ambient: '#8f8fb8', ambientIntensity: 0.66,
+    ambient: '#8f8fb8', ambientIntensity: 0.74,
     fog: '#c98f74', fogDensity: 0.0068,
     tint: [1.11, 0.96, 0.9], lift: 0.012, exposure: 1.02,
   },
@@ -88,7 +88,7 @@ const DAY_STOPS: GradeStops[] = [
     at: 20.2,
     skyTop: '#26325e', skyBottom: '#7a5a86', horizon: '#c76d72',
     sun: '#c07a92', sunIntensity: 0.6,
-    ambient: '#5a6698', ambientIntensity: 0.56,
+    ambient: '#5a6698', ambientIntensity: 0.68,
     fog: '#54527a', fogDensity: 0.0086,
     tint: [0.95, 0.9, 1.04], lift: 0.03, exposure: 0.96,
   },
@@ -96,17 +96,17 @@ const DAY_STOPS: GradeStops[] = [
     at: 22,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
     sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.5,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
     fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.78, 0.85, 1.08], lift: 0.045, exposure: 0.92,
+    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
   },
   { // Wraps back to midnight.
     at: 24,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
     sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.5,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
     fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.78, 0.85, 1.08], lift: 0.045, exposure: 0.92,
+    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
   },
 ];
 
@@ -228,7 +228,7 @@ export class LightingRig {
 
     // --- Intensities -------------------------------------------------------
     const dayness = clamp01(sunHeight * 1.4);
-    const cloudCut = lerp(1, 0.34, overcast);
+    const cloudCut = lerp(1, 0.52, overcast);
     const indoorCut = indoors ? 0.45 : 1;
 
     scratchA.set(a.sun);
@@ -301,7 +301,7 @@ export class LightingRig {
       vignette: 0.3 + darkness * 0.18 + overcast * 0.05,
       lift: lerp(a.lift, b.lift, t) + (weather.kind === 'fog' ? 0.03 : 0),
       flash: lightningFlash * 0.65,
-      exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.9, overcast),
+      exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.94, overcast),
       bloom: 0.3 + darkness * 0.4 + (weather.kind === 'rain' || weather.kind === 'storm' ? 0.15 : 0),
       darkness,
     };

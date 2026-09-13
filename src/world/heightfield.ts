@@ -154,8 +154,7 @@ export function distanceToCreek(x: number, z: number): number {
  * inland. The outline is a noisy circle so the island has bays and headlands
  * rather than reading as a disc.
  */
-export function landMask(x: number, z: number): number {
-  const d = Math.hypot(x, z);
+export function coastRadius(x: number, z: number): number {
   const angle = Math.atan2(z, x);
   // Two noise bands: a slow one for bays, a fast one for a ragged edge.
   const bays = valueNoise2D(Math.cos(angle) * 1.6 + 8, Math.sin(angle) * 1.6 + 8, SHAPE_SEED) - 0.5;
@@ -165,17 +164,27 @@ export function landMask(x: number, z: number): number {
   radius -= smoothstep(-0.2, 1.2, Math.sin(angle)) * 10;
   // Push the north-east out for the lighthouse headland.
   radius += smoothstep(0.2, 1.0, Math.cos(angle - 0.9)) * 12;
-  return clamp01((radius - d) / 34);
+  return radius;
+}
+
+/**
+ * How far a point is inside the coastline, 0 at the waterline and 1 well
+ * inland. The outline is a noisy circle so the island has bays and headlands
+ * rather than reading as a disc.
+ */
+export function landMask(x: number, z: number): number {
+  return clamp01((coastRadius(x, z) - Math.hypot(x, z)) / 34);
 }
 
 /** Raw inland elevation before flattening, paths and the creek. */
 function baseElevation(x: number, z: number): number {
   const mask = landMask(x, z);
   if (mask <= 0) {
-    // Seabed: slope away from the coast and level off at the floor.
+    // Seabed: slope away from *this* stretch of coast, so a bay shelves as
+    // gently as it should while the open water still goes properly deep.
     const d = Math.hypot(x, z);
-    const drop = smoothstep(0, 40, d - 68);
-    return lerp(-0.6, SEABED_FLOOR, drop);
+    const drop = smoothstep(0, 22, d - coastRadius(x, z));
+    return lerp(-0.5, SEABED_FLOOR, drop);
   }
 
   const rolling = fbm2D(x * 0.012, z * 0.012, 4, SHAPE_SEED) * 7.5;

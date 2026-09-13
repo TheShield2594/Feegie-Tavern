@@ -1,13 +1,15 @@
 import {
+  ClampToEdgeWrapping,
   Color,
   DataTexture,
   DoubleSide,
-  FloatType,
   LinearFilter,
   Mesh,
+  NoColorSpace,
   PlaneGeometry,
-  RedFormat,
+  RGBAFormat,
   ShaderMaterial,
+  UnsignedByteType,
   Vector3,
 } from 'three';
 import { PALETTE } from '@/rendering/palette';
@@ -25,7 +27,10 @@ export class Water {
   private material: ShaderMaterial;
   private depthTexture: DataTexture;
 
-  private static readonly DEPTH_RES = 256;
+  private static readonly DEPTH_RES = 512;
+  /** Terrain heights are encoded into one byte across this range, in metres. */
+  private static readonly DEPTH_MIN = -12;
+  private static readonly DEPTH_MAX = 6;
 
   constructor(extent = ISLAND_HALF * 2 + 260) {
     this.depthTexture = Water.bakeDepthTexture();
@@ -45,6 +50,7 @@ export class Water {
         uSunColor: { value: new Color('#fff4dc') },
         uDepthMap: { value: this.depthTexture },
         uMapExtent: { value: ISLAND_HALF * 2 + 40 },
+        uDepthRange: { value: new Vector3(Water.DEPTH_MIN, Water.DEPTH_MAX - Water.DEPTH_MIN, 0) },
         uWind: { value: 0.4 },
         uChoppiness: { value: 0.35 },
         uOpacity: { value: 0.94 },
@@ -55,15 +61,18 @@ export class Water {
         uniform float uChoppiness;
         uniform sampler2D uDepthMap;
         uniform float uMapExtent;
+        uniform vec3 uDepthRange;
 
         varying vec3 vWorldPos;
         varying float vDepth;
         varying vec3 vNormal;
 
+        // Terrain height is stored as a plain 8-bit channel rather than a float
+        // texture, because float textures are not filterable everywhere.
         float sampleGround(vec2 world) {
           vec2 uv = world / uMapExtent + 0.5;
-          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return -12.0;
-          return texture2D(uDepthMap, uv).r;
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return uDepthRange.x;
+          return uDepthRange.x + texture2D(uDepthMap, uv).r * uDepthRange.y;
         }
 
         // Two crossing swells plus a fine ripple. Amplitude is scaled down in
@@ -127,8 +136,8 @@ export class Water {
           vec3 normal = normalize(vNormal);
 
           // Depth ramp: turquoise over sand, deepening to navy off the shelf.
-          vec3 color = mix(uShallow, uMid, smoothstep(0.25, 2.6, vDepth));
-          color = mix(color, uDeep, smoothstep(2.4, 8.5, vDepth));
+          vec3 color = mix(uShallow, uMid, smoothstep(0.15, 1.7, vDepth));
+          color = mix(color, uDeep, smoothstep(1.5, 5.5, vDepth));
 
           // Fresnel sky reflection — the single biggest cue that this is water.
           float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.4);
@@ -143,8 +152,8 @@ export class Water {
 
           // Shoreline foam: a band that follows the depth contour, chewed up by
           // noise and pushed in and out with the swell.
-          float tideOffset = sin(uTime * 0.55 + vWorldPos.x * 0.05) * 0.14;
-          float foamBand = 1.0 - smoothstep(0.02, 0.62 + tideOffset, vDepth);
+          float tideOffset = sin(uTime * 0.55 + vWorldPos.x * 0.05) * 0.12;
+          float foamBand = 1.0 - smoothstep(0.02, 0.48 + tideOffset, vDepth);
           float foamNoise = noise(vWorldPos.xz * 1.5 + vec2(uTime * 0.35, uTime * 0.22));
           float foamNoise2 = noise(vWorldPos.xz * 4.1 - vec2(uTime * 0.5, 0.0));
           float foam = foamBand * smoothstep(0.28, 0.78, foamNoise * 0.6 + foamNoise2 * 0.4);
@@ -157,7 +166,7 @@ export class Water {
           color += (streak - 0.5) * 0.05 * uWind;
 
           // The shallows are translucent so the sand shows through.
-          float alpha = mix(0.55, uOpacity, smoothstep(0.0, 1.6, vDepth));
+          float alpha = mix(0.5, uOpacity, smoothstep(0.0, 1.2, vDepth));
           alpha = max(alpha, clamp(foam, 0.0, 1.0));
 
           gl_FragColor = vec4(color, alpha);
@@ -178,21 +187,34 @@ export class Water {
     this.mesh.frustumCulled = false;
   }
 
-  /** Bakes terrain height into a single-channel float texture for the shader. */
+  /** Bakes terrain height into an 8-bit texture the water shader can sample. */
   private static bakeDepthTexture(): DataTexture {
     const res = Water.DEPTH_RES;
     const extent = ISLAND_HALF * 2 + 40;
-    const data = new Float32Array(res * res);
+    const span = Water.DEPTH_MAX - Water.DEPTH_MIN;
+    const data = new Uint8Array(res * res * 4);
+
     for (let y = 0; y < res; y++) {
       for (let x = 0; x < res; x++) {
         const wx = (x / (res - 1) - 0.5) * extent;
         const wz = (y / (res - 1) - 0.5) * extent;
-        data[y * res + x] = terrainHeight(wx, wz);
+        const height = terrainHeight(wx, wz);
+        const normalized = Math.min(1, Math.max(0, (height - Water.DEPTH_MIN) / span));
+        const index = (y * res + x) * 4;
+        const byte = Math.round(normalized * 255);
+        data[index] = byte;
+        data[index + 1] = byte;
+        data[index + 2] = byte;
+        data[index + 3] = 255;
       }
     }
-    const texture = new DataTexture(data, res, res, RedFormat, FloatType);
+
+    const texture = new DataTexture(data, res, res, RGBAFormat, UnsignedByteType);
+    texture.colorSpace = NoColorSpace;
     texture.minFilter = LinearFilter;
     texture.magFilter = LinearFilter;
+    texture.wrapS = ClampToEdgeWrapping;
+    texture.wrapT = ClampToEdgeWrapping;
     texture.needsUpdate = true;
     return texture;
   }

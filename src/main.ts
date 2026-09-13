@@ -36,6 +36,15 @@ if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
     const game = new Game(container);
     game.start();
     (window as unknown as { cozy: Game }).cozy = game;
+    // Panel openers, exposed for automated visual checks.
+    void import('./ui/panels').then((panels) => {
+      Object.assign(window as unknown as Record<string, unknown>, {
+        __openShop: panels.openShop,
+        __openMuseum: panels.openMuseum,
+        __openJournal: panels.openJournal,
+        __openWardrobe: panels.openWardrobe,
+      });
+    });
 
     // Save on the way out so a closed tab does not lose the last few minutes.
     window.addEventListener('beforeunload', () => {

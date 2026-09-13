@@ -27,9 +27,9 @@ export const PALETTE = {
     dark: '#5d6764',
   },
   water: {
-    shallow: '#6fc9d6',
-    mid: '#2f92b8',
-    deep: '#17557f',
+    shallow: '#59c2cf',
+    mid: '#1d7fa8',
+    deep: '#0f3f66',
     foam: '#f2fbff',
   },
   foliage: {

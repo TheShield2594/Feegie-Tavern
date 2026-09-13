@@ -1597,7 +1597,8 @@ export class Game {
 
   // --- Panels --------------------------------------------------------------
 
-  private panelContext(): PanelContext {
+  /** Snapshot of state the UI panels read. Public so tooling can drive them. */
+  panelContext(): PanelContext {
     return {
       ui: this.uiRoot,
       coins: this.coins,
