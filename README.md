@@ -147,8 +147,24 @@ with doors, windows, signs, lamps and landscaping, a full day cycle with five
 weather states, animated characters, walkable interiors, and the complete
 interface.
 
-Systems that exist and work but have room to grow: diving, cooking beyond three
-recipes, festivals, landscaping/build mode (furniture placement is implemented;
-outdoor public decoration is not), and additional island regions. The
-architecture leaves space for each — regions are driven by the heightfield,
-decorations by the same instancing used for foliage.
+Everything still outstanding is filed on the
+[issue tracker](https://github.com/TheShield2594/Feegie-Tavern/issues), roughly
+in these groups:
+
+- **Gameplay not yet built** — diving (#1), insects as world entities (#2),
+  outdoor landscaping (#4), multi-room housing (#5), tabletop placement (#6),
+  festivals (#7), the regions outside the slice (#8), deeper quests and a
+  second story chapter (#19)
+- **Known bugs** — villagers never appear indoors (#3), unwired interaction
+  hooks including doors and sleeping (#17), grass popping (#16), the rowboat
+  hull (#15)
+- **Assets** — a GLTF pipeline (#9) and recorded audio (#10); both have seams
+  ready and neither has a loader yet
+- **Content** — the catalogues are small enough to exhaust in a couple of
+  in-game weeks (#11)
+- **Engineering** — no automated tests (#12), LOD and lazy loading (#13), and
+  a real device pass for tablets and phones (#14)
+
+The architecture leaves space for each: regions are driven by the heightfield,
+decorations by the same instancing used for foliage, and new species, recipes or
+villagers are one typed entry apiece.
