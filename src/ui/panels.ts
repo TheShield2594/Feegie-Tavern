@@ -14,6 +14,7 @@ import {
 import { PUBLIC_WORKS, STORY_BEATS } from '@/data/quests';
 import { VILLAGERS } from '@/data/villagers';
 import { iconFor } from '@/items/ItemIcons';
+import { getItemDef } from '@/data/items';
 import type { ItemCategory } from '@/items/types';
 import type { Stack } from '@/inventory/Inventory';
 import { WINGS } from '@/museum/Museum';
@@ -190,7 +191,11 @@ export function openInventory(context: PanelContext): void {
       };
 
       if (stacks.length === 0) {
-        grid.append(el('p', { class: 'cc-muted', text: 'Nothing here yet. The island is full of things worth picking up.' }));
+        grid.append(el('p', {
+          class: 'cc-muted',
+          style: 'grid-column:1 / -1',
+          text: 'Nothing here yet. The island is full of things worth picking up.',
+        }));
       }
 
       for (const stack of stacks) {
@@ -360,17 +365,20 @@ export function openShop(context: PanelContext): void {
       for (const entry of stock) {
         const affordable = context.coins >= entry.price;
         const owned = entry.kind === 'furniture' && context.ownedFurniture.includes(entry.defId);
-        const name = FURNITURE.find((f) => f.id === entry.defId)?.name
-          ?? HOUSE_STYLES.find((h) => h.id === entry.defId)?.name
-          ?? entry.defId;
-        const description = FURNITURE.find((f) => f.id === entry.defId)?.description ?? '';
+        const furniture = FURNITURE.find((f) => f.id === entry.defId);
+        const style = HOUSE_STYLES.find((h) => h.id === entry.defId);
+        const item = getItemDef(entry.defId);
+        const name = furniture?.name ?? style?.name ?? item?.name ?? entry.defId;
+        const blurb =
+          furniture?.description
+          ?? (style ? 'A fresh colourway for your cottage exterior.' : item?.description ?? '');
 
         buyGrid.append(el('div', { class: 'cc-card' }, [
           el('div', { class: 'row' }, [
             el('div', { class: 'thumb' }, [el('img', { src: iconFor(entry.defId, 96), alt: name })]),
             el('div', { style: 'flex:1 1 auto;min-width:0' }, [
               el('h3', { text: name }),
-              el('p', { text: description }),
+              el('p', { text: blurb }),
             ]),
           ]),
           el('div', { class: 'row' }, [
@@ -401,7 +409,11 @@ export function openShop(context: PanelContext): void {
         sellGrid.append(slot);
       }
       if (sellStacks.length === 0) {
-        sellGrid.append(el('p', { class: 'cc-muted', text: 'Your bag is empty. Bruno looks disappointed but supportive.' }));
+        sellGrid.append(el('p', {
+          class: 'cc-muted',
+          style: 'grid-column:1 / -1',
+          text: 'Your bag is empty. Bruno looks disappointed but supportive.',
+        }));
       }
 
       body.append(
@@ -737,9 +749,7 @@ export function openHome(context: PanelContext): void {
         const affordable = context.coins >= style.price;
         exteriors.append(el('div', { class: 'cc-card' }, [
           el('div', { class: 'row' }, [
-            el('div', { class: 'thumb', style: `background:${style.body}` }, [
-              el('span', { style: `display:block;width:32px;height:16px;border-radius:4px 4px 0 0;background:${style.roof}` }),
-            ]),
+            el('div', { class: 'thumb' }, [el('img', { src: iconFor(style.id, 96), alt: style.name })]),
             el('div', { style: 'flex:1 1 auto' }, [
               el('h3', { text: style.name }),
               el('p', { text: style.price === 0 ? 'Included' : `${formatCoins(style.price)} shells` }),
@@ -757,7 +767,11 @@ export function openHome(context: PanelContext): void {
       const owned = el('div', { class: 'cc-grid' });
       const placed = new Set(context.placedFurniture.map((f) => f.defId));
       if (context.ownedFurniture.length === 0) {
-        owned.append(el('p', { class: 'cc-muted', text: 'No furniture yet. Bruno keeps a rotating selection at the boardwalk.' }));
+        owned.append(el('p', {
+          class: 'cc-muted',
+          style: 'grid-column:1 / -1',
+          text: 'No furniture yet. Bruno keeps a rotating selection at the boardwalk.',
+        }));
       }
       for (const defId of context.ownedFurniture) {
         const def = FURNITURE.find((f) => f.id === defId);

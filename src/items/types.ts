@@ -62,7 +62,17 @@ export interface ItemVisual {
     | 'fiber'
     | 'dish'
     | 'seed'
-    | 'furniture';
+    | 'furniture'
+    | 'sofa'
+    | 'table'
+    | 'lamp'
+    | 'rug'
+    | 'music'
+    | 'plant'
+    | 'chair'
+    | 'shelf'
+    | 'bed'
+    | 'houseStyle';
   primary: string;
   secondary: string;
   accent?: string;

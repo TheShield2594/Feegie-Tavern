@@ -152,11 +152,15 @@ export class Renderer {
 
   render(dt: number): void {
     this.trackFrame(dt);
+    // The composer renders several passes per frame; accumulate their stats
+    // rather than letting each pass reset the counters.
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
     this.composer.render(dt);
   }
 
   private trackFrame(dt: number): void {
-    const ms = dt * 1000;
+    const ms = Math.max(0.1, dt * 1000);
     this.frameSamples.push(ms);
     if (this.frameSamples.length > 90) this.frameSamples.shift();
     this.frameMs = this.frameSamples.reduce((a, b) => a + b, 0) / this.frameSamples.length;

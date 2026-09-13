@@ -306,8 +306,9 @@ export class Game {
 
   private frame = (now: number): void => {
     if (!this.running) return;
-    // Clamp so a backgrounded tab does not fast-forward the island.
-    const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
+    // Clamp so a backgrounded tab does not fast-forward the island, and guard
+    // against a non-monotonic clock producing a negative step.
+    const dt = Math.max(0, Math.min(0.05, (now - this.lastFrame) / 1000));
     this.lastFrame = now;
     this.elapsed += dt;
 
@@ -362,7 +363,10 @@ export class Game {
 
   private applySave(data: SaveDataV5): void {
     this.time.load(data.clock.day, data.clock.minutes);
-    this.lastMinutes = this.time.minutes;
+    // The elapsed-minute counter is absolute (day * 1440 + minutes); seeding it
+    // with the time of day alone made the first frame after a load advance the
+    // clock by weeks, re-rolling the weather and instantly maturing every crop.
+    this.lastMinutes = this.time.day * 1440 + this.time.minutes;
     this.weather.set(data.weather.kind, data.weather.remaining, true);
 
     this.coins = data.player.coins;

@@ -1,5 +1,6 @@
 import type { ItemDef, ItemVisual } from './types';
 import { getItemDef } from '@/data/items';
+import { FURNITURE_BY_ID, HOUSE_STYLES_BY_ID } from '@/data/furniture';
 
 const cache = new Map<string, string>();
 
@@ -12,7 +13,7 @@ const cache = new Map<string, string>();
  * `visual.texture` at a production sprite.
  */
 export function iconFor(defIdOrDef: string | ItemDef, size = 96): string {
-  const def = typeof defIdOrDef === 'string' ? getItemDef(defIdOrDef) : defIdOrDef;
+  const def = typeof defIdOrDef === 'string' ? resolve(defIdOrDef) : defIdOrDef;
   if (!def) return fallbackIcon(size);
 
   const key = `${def.id}@${size}`;
@@ -38,6 +39,49 @@ export function iconFor(defIdOrDef: string | ItemDef, size = 96): string {
   const url = canvas.toDataURL('image/png');
   cache.set(key, url);
   return url;
+}
+
+/**
+ * Furniture and house styles are not inventory items, but the shop and home
+ * panels still need artwork for them, so they are described as item visuals
+ * on the fly from the same palette their 3D models use.
+ */
+function resolve(defId: string): ItemDef | undefined {
+  const item = getItemDef(defId);
+  if (item) return item;
+
+  const furniture = FURNITURE_BY_ID.get(defId);
+  if (furniture) {
+    return {
+      id: furniture.id,
+      name: furniture.name,
+      category: 'furniture',
+      rarity: 'common',
+      value: furniture.price,
+      description: furniture.description,
+      visual: {
+        shape: furniture.kind,
+        primary: furniture.palette.primary,
+        secondary: furniture.palette.secondary,
+        accent: furniture.palette.accent,
+      },
+    };
+  }
+
+  const style = HOUSE_STYLES_BY_ID.get(defId);
+  if (style) {
+    return {
+      id: style.id,
+      name: style.name,
+      category: 'furniture',
+      rarity: 'common',
+      value: style.price,
+      description: 'An exterior colourway for your cottage.',
+      visual: { shape: 'houseStyle', primary: style.roof, secondary: style.body, accent: style.door },
+    };
+  }
+
+  return undefined;
 }
 
 function fallbackIcon(size: number): string {
@@ -518,16 +562,180 @@ function drawShape(ctx: CanvasRenderingContext2D, visual: ItemVisual): void {
       break;
     }
 
+    case 'sofa': {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.roundRect(-38, -22, 76, 26, 11);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-38, -2, 76, 24, 10);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.roundRect(-42, -8, 12, 30, 6);
+      ctx.roundRect(30, -8, 12, 30, 6);
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.fillRect(-30, 22, 7, 10);
+      ctx.fillRect(23, 22, 7, 10);
+      break;
+    }
+
+    case 'table': {
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-40, -16, 80, 12, 5);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-32, -4, 8, 34);
+      ctx.fillRect(24, -4, 8, 34);
+      ctx.fillRect(-30, 6, 60, 5);
+      break;
+    }
+
+    case 'lamp': {
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-24, -8);
+      ctx.lineTo(24, -8);
+      ctx.lineTo(15, -34);
+      ctx.lineTo(-15, -34);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.ellipse(0, -6, 22, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-4, -6, 8, 36);
+      ctx.beginPath();
+      ctx.ellipse(0, 32, 18, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+
+    case 'rug': {
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 42, 26, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 31, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 16, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+
+    case 'music': {
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-36, -18, 72, 42, 7);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.arc(-8, 4, 19, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.arc(-8, 4, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(24, -8);
+      ctx.lineTo(6, 10);
+      ctx.stroke();
+      break;
+    }
+
+    case 'plant': {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.moveTo(-20, 4);
+      ctx.lineTo(20, 4);
+      ctx.lineTo(14, 34);
+      ctx.lineTo(-14, 34);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = primary;
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i - 2) * 0.5;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(a) * 20, 2 + Math.sin(a) * 22, 9, 22, a + Math.PI / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+
+    case 'shelf': {
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-38, -20, 76, 8, 3);
+      ctx.roundRect(-38, 14, 76, 8, 3);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-34, -12, 10, 26);
+      ctx.fillStyle = accent;
+      for (let i = 0; i < 4; i++) ctx.fillRect(-18 + i * 11, -12, 8, 26);
+      break;
+    }
+
+    case 'bed': {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.roundRect(-40, -4, 80, 26, 6);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.roundRect(-38, -14, 76, 14, 6);
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.roundRect(-38, -14, 34, 14, 6);
+      ctx.fill();
+      ctx.fillStyle = secondary;
+      ctx.fillRect(-44, -26, 9, 48);
+      break;
+    }
+
+    case 'houseStyle': {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.roundRect(-30, -6, 60, 38, 5);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-38, -4);
+      ctx.lineTo(0, -34);
+      ctx.lineTo(38, -4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.roundRect(-9, 8, 18, 24, 3);
+      ctx.fill();
+      break;
+    }
+
+    case 'chair':
     case 'furniture':
     default: {
       ctx.fillStyle = primary;
       ctx.beginPath();
-      ctx.roundRect(-32, -20, 64, 42, 10);
+      ctx.roundRect(-22, -6, 44, 12, 5);
       ctx.fill();
       ctx.fillStyle = secondary;
+      ctx.fillRect(-18, 6, 7, 26);
+      ctx.fillRect(11, 6, 7, 26);
       ctx.beginPath();
-      ctx.roundRect(-26, -14, 52, 18, 7);
+      ctx.roundRect(-22, -34, 44, 10, 5);
       ctx.fill();
+      ctx.fillRect(-20, -28, 6, 24);
+      ctx.fillRect(14, -28, 6, 24);
       break;
     }
   }

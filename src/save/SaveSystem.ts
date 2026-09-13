@@ -68,6 +68,12 @@ export function createNewSave(slot: number): SaveDataV5 {
 export class SaveSystem {
   private autosaveTimer = 0;
   private dirty = false;
+  /**
+   * Slots whose stored data was upgraded this session. Recorded because the
+   * upgrade is written back immediately, so a later read cannot tell that a
+   * migration happened — and the title screen wants to say so.
+   */
+  private migrated = new Map<number, number>();
 
   constructor(
     private bus: EventBus,
@@ -105,8 +111,9 @@ export class SaveSystem {
         // Persist the upgraded blob immediately so the migration only ever runs
         // once, and leave the legacy key untouched as a fallback.
         this.writeRaw(slot, result.data);
+        this.migrated.set(slot, result.migratedFrom ?? 4);
       }
-      return result;
+      return { data: result.data, migratedFrom: result.migratedFrom ?? this.migrated.get(slot) ?? null };
     } catch (err) {
       console.error(`[save] Slot ${slot} could not be read`, err);
       return null;
@@ -134,7 +141,7 @@ export class SaveSystem {
       donated: result.data.museum.donated.length,
       playtimeSeconds: result.data.playtimeSeconds,
       savedAt: result.data.savedAt,
-      legacyVersion: result.migratedFrom,
+      legacyVersion: result.migratedFrom ?? this.migrated.get(slot) ?? null,
     };
   }
 
