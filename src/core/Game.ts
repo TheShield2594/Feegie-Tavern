@@ -1303,9 +1303,16 @@ export class Game {
       return;
     }
 
+    // Into the bag first, and only then out of the world — the same order the
+    // reef uses, and for the same reason. A full bag makes `onCatch` refuse,
+    // and taking the insect first would delete it and award nothing.
+    if (!this.onCatch(species.id, undefined, 'Netted')) {
+      this.uiRoot.toast('No room in your bag for that.', 'warn');
+      this.bus.emit('audio:sfx', { id: 'ui.error' });
+      return;
+    }
     this.insects.take(insect);
     this.particles.burst('sparkle', at, 0.8);
-    this.onCatch(species.id, undefined, 'Netted');
   }
 
   /**
