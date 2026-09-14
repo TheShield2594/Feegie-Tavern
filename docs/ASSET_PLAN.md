@@ -96,6 +96,7 @@ fonts.gstatic.com
 2026-09-14 — both still return EGRESS_BLOCKED. This is an environment
 configuration change that has to be made outside this session; I cannot make it
 myself, and per the proxy's documentation I will not attempt to route around it.
+A later host-by-host re-test of this whole list is recorded in §9.
 
 Because option A was chosen, the third-party GitHub mirrors are **off the
 table** — everything comes from the creator's own download page, so the
@@ -291,7 +292,56 @@ rather than the reverse).
 | Blocker | State |
 | --- | --- |
 | PR #20 merged to `main` | ✅ **Cleared** 2026-09-14 (`cc5be5d`). This branch is rebased onto it. |
-| Egress allowlist (§2) | ❌ **Still blocking.** Re-tested `kenney.nl` and `quaternius.com` on 2026-09-14 — both `EGRESS_BLOCKED`. **No asset has been downloaded.** |
+| Egress allowlist (§2) | ❌ **Still blocking.** Full re-test of every §2 host on 2026-09-14 (table below) — all asset hosts denied. **No asset has been downloaded.** |
+
+### Egress re-test, 2026-09-14
+
+Re-ran the §2 allowlist host by host rather than spot-checking two hosts. Every
+host the plan depends on is refused at the CONNECT stage:
+
+| Host | Result |
+| --- | --- |
+| `kenney.nl` | ❌ 403 |
+| `quaternius.com` | ❌ 403 |
+| `kaylousberg.com` | ❌ 403 |
+| `kaylousberg.itch.io` | ❌ 403 |
+| `tallbeard.itch.io` | ❌ 403 |
+| `freesound.org` | ❌ 403 |
+| `polyhaven.com` | ❌ 403 |
+| `ambientcg.com` | ❌ 403 |
+| `fonts.google.com` | ❌ 403 |
+| `fonts.gstatic.com` | ✅ reachable |
+| `github.com` | ✅ reachable |
+
+The proxy's own failure log classifies each one as
+`connect_rejected — gateway answered 403 to CONNECT (policy denial)`, which its
+documentation defines as an **organization policy denial that must be reported,
+not routed around**. So the allowlist approved in §8 decision 1 has not been
+applied to this environment; it is a network-policy change on the environment
+itself, made outside the session.
+
+Two results are worth separating out:
+
+- `fonts.gstatic.com` is reachable while `fonts.google.com` is not. That is
+  enough to fetch the WOFF2 payload for asset #19 but **not** the `OFL.txt`
+  licence file, and §7 step 1 forbids committing anything whose licence has not
+  been read. So the font is blocked too — on licence verification, not bytes.
+- `github.com` is reachable. That does **not** unblock the plan as written:
+  §2 rules third-party GitHub mirrors out of scope precisely because option A
+  makes the creator's own `License.txt` authoritative. Switching to mirrors
+  would reverse a locked decision and weaken the licence chain, so it is left
+  for the owner to decide rather than taken unilaterally.
+
+### Verified again on the rebased branch
+
+Re-ran the full toolchain after the rebase onto `cc5be5d`, to confirm the
+loading layer did not regress against the merged game code:
+
+- `npm run typecheck` — clean.
+- `npm run assets:verify` — all ten import checks pass.
+- `npm run build` — succeeds; chunk sizes reproduce the baseline below exactly.
+- `npm run assets:credits` — regenerates `ASSET_CREDITS.md` with no diff, so the
+  credits file is in sync with the manifest.
 
 ### Done while blocked
 
