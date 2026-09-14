@@ -458,6 +458,7 @@ export class Game {
   private resetDiveState(): void {
     this.wasDiving = false;
     this.pendingDiveCards = [];
+    this.cancelDiveCards();
     this.underwater = 0;
     this.cameraRig.terrainClamp = true;
     this.cameraRig.heightCeiling = null;
@@ -809,7 +810,22 @@ export class Game {
   private resolveDiveCatches(): void {
     const cards = this.pendingDiveCards;
     this.pendingDiveCards = [];
-    cards.forEach((show, index) => window.setTimeout(show, index * 720));
+    // The handles are kept because the reveal outlives the call: come up with
+    // three creatures and the last card is still a second and a half away.
+    // Quitting inside that window would otherwise drop it on the title screen,
+    // or on whichever island is loaded next.
+    cards.forEach((show, index) => {
+      this.diveCardTimers.push(window.setTimeout(() => show(), index * 720));
+    });
+  }
+
+  /** Reveals still waiting to fire, so a session boundary can call them off. */
+  private diveCardTimers: number[] = [];
+
+  /** Drops any catch card that has been scheduled but not yet shown. */
+  private cancelDiveCards(): void {
+    for (const timer of this.diveCardTimers) window.clearTimeout(timer);
+    this.diveCardTimers = [];
   }
 
   /** Tracks the dive across frames so the camera only switches on the change. */
@@ -3073,6 +3089,7 @@ export class Game {
 
   dispose(): void {
     this.running = false;
+    this.cancelDiveCards();
     this.input.dispose();
     this.terrain.dispose();
     this.water.dispose();
