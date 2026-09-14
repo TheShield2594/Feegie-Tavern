@@ -339,9 +339,9 @@ function colourFor(node) {
 const SCALES = {
   tree_default: 3.2,
   tree_pineDefaultA: 4.1,
-  tree_palmShort: 5.7,
+  tree_palmDetailedTall: 4.2,
   tree_oak: 3.9,
-  plant_bush: 3.5,
+  plant_bushDetailed: 2.4,
   plant_bushLarge: 3.5,
 };
 

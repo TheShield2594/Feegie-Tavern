@@ -10,7 +10,12 @@
  * actually need, done directly on the glTF buffers:
  *
  *  - **Prune.** Only the models the game places are read; the other ~320 in the
- *    kit are never opened.
+ *    kit are never opened. Degenerate (zero-area) triangles are dropped too —
+ *    `tree_oak` ships two in its bark primitive.
+ *  - **Compose node transforms.** Not every model is flat: `tree_palmDetailedTall`
+ *    parents its fronds under the trunk, one rotated 45° and scaled on Y alone,
+ *    so the full TRS chain is walked and normals go through the inverse
+ *    transpose rather than being rotated and renormalised.
  *  - **Split by material role.** A Kenney tree is one mesh with two primitives
  *    sharing one vertex buffer: bark and leaves. The renderer wants those as
  *    separate geometries so `Foliage` can bind its own bark/canopy materials
@@ -66,8 +71,16 @@ const SOURCES = [
   { file: 'tree_default', roles: ['trunk', 'canopy'] },
   { file: 'tree_oak', roles: ['trunk', 'canopy'] },
   { file: 'tree_pineDefaultA', roles: ['trunk', 'canopy'] },
-  { file: 'tree_palmShort', roles: ['trunk', 'canopy'] },
-  { file: 'plant_bush', roles: ['whole'] },
+  // A tall palm rather than `tree_palmShort`: the short one had to be scaled
+  // ×5.7 to reach the height the procedural palm occupied, which made its trunk
+  // read far thicker than every other tree's. This one needs roughly half that.
+  // It is also the model that requires the transform composition above, since
+  // its fronds are rotated child nodes.
+  { file: 'tree_palmDetailedTall', roles: ['trunk', 'canopy'] },
+  // `plant_bushDetailed` over `plant_bush`: the procedural bush it replaces is
+  // a wide blob, and the plain one is a sparse few leaves that left ground
+  // cover looking thin.
+  { file: 'plant_bushDetailed', roles: ['whole'] },
   { file: 'plant_bushLarge', roles: ['whole'] },
 ];
 
@@ -114,14 +127,99 @@ function roleOf(materialName) {
   return null;
 }
 
-/** Node-local translation/scale, applied so the exported geometry needs none. */
-function nodeTransform(json, meshIndex) {
-  const node = json.nodes.find((n) => n.mesh === meshIndex);
-  return {
-    t: node?.translation ?? [0, 0, 0],
-    s: node?.scale ?? [1, 1, 1],
-  };
+// --- node transforms -------------------------------------------------------
+//
+// Kit models are not all flat. `tree_palmDetailedTall` parents two `leafs`
+// meshes under the trunk, one of them rotated 45° and scaled 1.35 on Y alone.
+// Reading only a node's own translation — which an earlier version of this
+// script did — silently dropped that rotation and left the fronds crossed and
+// squashed, so the whole chain is composed here, rotation included.
+
+/** Column-major 4x4, glTF's convention. */
+const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function multiply(a, b) {
+  const out = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = sum;
+    }
+  }
+  return out;
 }
+
+/** Builds T * R * S for a node, or takes its explicit matrix when it has one. */
+function localMatrix(node) {
+  if (node.matrix) return node.matrix.slice();
+  const [tx, ty, tz] = node.translation ?? [0, 0, 0];
+  const [qx, qy, qz, qw] = node.rotation ?? [0, 0, 0, 1];
+  const [sx, sy, sz] = node.scale ?? [1, 1, 1];
+
+  const x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+  const xx = qx * x2, xy = qx * y2, xz = qx * z2;
+  const yy = qy * y2, yz = qy * z2, zz = qz * z2;
+  const wx = qw * x2, wy = qw * y2, wz = qw * z2;
+
+  return [
+    (1 - (yy + zz)) * sx, (xy + wz) * sx, (xz - wy) * sx, 0,
+    (xy - wz) * sy, (1 - (xx + zz)) * sy, (yz + wx) * sy, 0,
+    (xz + wy) * sz, (yz - wx) * sz, (1 - (xx + yy)) * sz, 0,
+    tx, ty, tz, 1,
+  ];
+}
+
+/** World matrix per mesh index, by walking the scene graph from its roots. */
+function meshMatrices(json) {
+  const out = new Map();
+  const visit = (index, parent) => {
+    const node = json.nodes[index];
+    const world = multiply(parent, localMatrix(node));
+    if (node.mesh !== undefined) out.set(node.mesh, world);
+    for (const child of node.children ?? []) visit(child, world);
+  };
+  for (const root of json.scenes?.[json.scene ?? 0]?.nodes ?? []) visit(root, IDENTITY);
+  // A mesh on no reachable node still gets identity rather than being skipped.
+  for (let i = 0; i < json.meshes.length; i++) if (!out.has(i)) out.set(i, IDENTITY);
+  return out;
+}
+
+const transformPoint = (m, x, y, z) => [
+  m[0] * x + m[4] * y + m[8] * z + m[12],
+  m[1] * x + m[5] * y + m[9] * z + m[13],
+  m[2] * x + m[6] * y + m[10] * z + m[14],
+];
+
+/**
+ * Inverse transpose of the upper 3x3, which is what normals transform by.
+ *
+ * A plain rotate-and-renormalise is only correct under uniform scale; the
+ * palm's 1.35 on Y alone would skew its frond normals and light them wrongly.
+ * Falls back to the plain upper 3x3 for a degenerate (non-invertible) matrix.
+ */
+function normalMatrix(m) {
+  const a = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
+  const [a00, a01, a02, a10, a11, a12, a20, a21, a22] = a;
+  const c00 = a11 * a22 - a12 * a21;
+  const c01 = a12 * a20 - a10 * a22;
+  const c02 = a10 * a21 - a11 * a20;
+  const det = a00 * c00 + a01 * c01 + a02 * c02;
+  if (Math.abs(det) < 1e-12) return a;
+  const d = 1 / det;
+  // inverse = adj/det; transposed inverse reorders to the layout below.
+  return [
+    c00 * d, c01 * d, c02 * d,
+    (a02 * a21 - a01 * a22) * d, (a00 * a22 - a02 * a20) * d, (a01 * a20 - a00 * a21) * d,
+    (a01 * a12 - a02 * a11) * d, (a02 * a10 - a00 * a12) * d, (a00 * a11 - a01 * a10) * d,
+  ];
+}
+
+const transformNormal = (n, x, y, z) => {
+  const out = [n[0] * x + n[3] * y + n[6] * z, n[1] * x + n[4] * y + n[7] * z, n[2] * x + n[5] * y + n[8] * z];
+  const len = Math.hypot(out[0], out[1], out[2]) || 1;
+  return [out[0] / len, out[1] / len, out[2] / len];
+};
 
 /**
  * Pulls one model out of a source GLB as `{ role -> { positions, normals,
@@ -130,10 +228,13 @@ function nodeTransform(json, meshIndex) {
 function extractParts(path, wantedRoles) {
   const { json, bin } = readGlb(path);
   const parts = new Map();
+  const matrices = meshMatrices(json);
+  let dropped = 0;
 
   for (let meshIndex = 0; meshIndex < json.meshes.length; meshIndex++) {
     const mesh = json.meshes[meshIndex];
-    const { t, s } = nodeTransform(json, meshIndex);
+    const world = matrices.get(meshIndex) ?? IDENTITY;
+    const normals3 = normalMatrix(world);
 
     for (const primitive of mesh.primitives) {
       const material = json.materials?.[primitive.material]?.name ?? '';
@@ -147,21 +248,46 @@ function extractParts(path, wantedRoles) {
       const srcIdx = readAccessor(json, bin, primitive.indices);
 
       // Compact: keep only vertices this primitive references, remapped.
+      // Degenerate (zero-area) triangles are dropped on the way through —
+      // `tree_oak` ships two in its bark primitive. They draw nothing, but they
+      // carry vertices into the compacted buffer and skew a mesh's triangle
+      // count, so pruning them is free.
       const remap = new Map();
       const positions = [];
       const normals = [];
       const indices = [];
-      for (const oldIndex of srcIdx) {
+
+      const at = (i) => [srcPos[i * 3], srcPos[i * 3 + 1], srcPos[i * 3 + 2]];
+      const keep = [];
+      for (let t = 0; t + 2 < srcIdx.length; t += 3) {
+        const [a, b, c] = [at(srcIdx[t]), at(srcIdx[t + 1]), at(srcIdx[t + 2])];
+        const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        const area = Math.hypot(
+          e1[1] * e2[2] - e1[2] * e2[1],
+          e1[2] * e2[0] - e1[0] * e2[2],
+          e1[0] * e2[1] - e1[1] * e2[0],
+        );
+        if (area < 1e-12) {
+          dropped += 1;
+          continue;
+        }
+        keep.push(srcIdx[t], srcIdx[t + 1], srcIdx[t + 2]);
+      }
+
+      for (const oldIndex of keep) {
         let next = remap.get(oldIndex);
         if (next === undefined) {
           next = positions.length / 3;
           remap.set(oldIndex, next);
           positions.push(
-            srcPos[oldIndex * 3] * s[0] + t[0],
-            srcPos[oldIndex * 3 + 1] * s[1] + t[1],
-            srcPos[oldIndex * 3 + 2] * s[2] + t[2],
+            ...transformPoint(world, srcPos[oldIndex * 3], srcPos[oldIndex * 3 + 1], srcPos[oldIndex * 3 + 2]),
           );
-          if (srcNor) normals.push(srcNor[oldIndex * 3], srcNor[oldIndex * 3 + 1], srcNor[oldIndex * 3 + 2]);
+          if (srcNor) {
+            normals.push(
+              ...transformNormal(normals3, srcNor[oldIndex * 3], srcNor[oldIndex * 3 + 1], srcNor[oldIndex * 3 + 2]),
+            );
+          }
         }
         indices.push(next);
       }
@@ -178,6 +304,7 @@ function extractParts(path, wantedRoles) {
       }
     }
   }
+  if (dropped > 0) console.log(`  (dropped ${dropped} degenerate triangle${dropped > 1 ? 's' : ''} from ${path.split('/').pop()})`);
   return parts;
 }
 

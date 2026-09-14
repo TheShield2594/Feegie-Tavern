@@ -385,14 +385,14 @@ mode is still the documented one: a file that is missing or fails to decode
 leaves the placeholder playing rather than producing silence.
 
 **Models — `nature.glb` (§7 step 4, second bullet, partially).** 10 nodes,
-1,476 vertices, 822 triangles, **47,180 bytes**, built from the Nature Kit by
+1,912 vertices, 1,038 triangles, **58,984 bytes**, built from the Nature Kit by
 `tools/buildNatureKit.mjs`:
 
 | Node | Verts | Tris | | Node | Verts | Tris |
 | --- | --- | --- | --- | --- | --- | --- |
-| `tree_default_trunk` | 116 | 74 | | `tree_palmShort_trunk` | 68 | 34 |
-| `tree_default_canopy` | 76 | 40 | | `tree_palmShort_canopy` | 288 | 156 |
-| `tree_oak_trunk` | 210 | 132 | | `plant_bush` | 80 | 32 |
+| `tree_default_trunk` | 116 | 74 | | `tree_palmDetailedTall_trunk` | 72 | 36 |
+| `tree_default_canopy` | 76 | 40 | | `tree_palmDetailedTall_canopy` | 568 | 300 |
+| `tree_oak_trunk` | 210 | 130 | | `plant_bushDetailed` | 232 | 104 |
 | `tree_oak_canopy` | 114 | 64 | | `plant_bushLarge` | 132 | 60 |
 | `tree_pineDefaultA_trunk` | 84 | 50 | | | | |
 | `tree_pineDefaultA_canopy` | 308 | 180 | | | | |
@@ -589,30 +589,74 @@ It doubles as a check a person can actually perform: the numeric invariants in
 §9.5 assert that each canopy sits above its trunk, but a render shows whether
 the tree looks like a tree. Output is in `docs/preview/`.
 
-**Two things the renders show that the numbers did not**, both art judgements
-rather than defects, and neither acted on:
+**The renders immediately showed two things the numbers did not, and both have
+since been acted on:**
 
-- **`tree_palmShort` at ×5.7 is disproportionately chunky.** It is a short,
-  stubby palm scaled up a long way to reach the 6 m the procedural palm
-  occupied, so its trunk reads much thicker than the other trees'.
-  `tree_palmDetailedTall` would need far less scaling and should sit better next
-  to the rest — but it has extra `leafs` child nodes that the build script would
-  need to handle, so it is a change to make deliberately rather than in passing.
-- **The bushes are narrower than what they replace.** Height matches — the
-  procedural bush is ~0.84 m and `plant_bush` at ×3.5 is ~0.85 m — but the
-  procedural version is a wide icosahedron blob while Kenney's is a slim leafy
-  plant, so ground cover will read sparser than it does today.
-  `plant_bushDetailed` is the fuller alternative in the same kit.
+- **`tree_palmShort` at ×5.7 was disproportionately chunky** — a short, stubby
+  palm scaled a long way up to reach the 6 m the procedural palm occupied, so
+  its trunk read far thicker than every other tree's. **Replaced with
+  `tree_palmDetailedTall`**, which is 1.42 units tall against 1.06 and so needs
+  ×4.2 instead. It costs 300 triangles against 156 and is worth it: it reads as
+  a palm rather than a club.
+- **The bushes were narrower than what they replace.** Height matched (the
+  procedural bush is ~0.84 m, `plant_bush` at ×3.5 was ~0.85 m) but the
+  procedural version is a wide icosahedron blob and the plain Kenney one is a
+  few sparse leaves, so ground cover would have read thin. **Replaced with
+  `plant_bushDetailed`** at ×2.4 — same height, considerably fuller.
+
+Swapping the palm forced a real correction to the build script, described in
+§9.5d. Neither of these was a defect the numeric checks could have caught; both
+were obvious in a picture.
+
+### 9.5d Two build-script corrections the swap exposed
+
+- **Node transforms were only partly composed.** `buildNatureKit.mjs` read each
+  node's own `translation` and `scale` and ignored `rotation` and any parent
+  chain. Every model in the first commit is a single flat node, so this was
+  invisible — but `tree_palmDetailedTall` parents two `leafs` meshes under the
+  trunk, one of them rotated 45° about Y and scaled 1.35 on Y alone. Under the
+  old code its two frond sets would have landed on top of each other, unrotated:
+  a palm with half its crown missing. The script now walks the scene graph and
+  composes the full T·R·S chain, and transforms normals by the **inverse
+  transpose** of each node matrix rather than rotating and renormalising them —
+  which matters precisely because that frond scale is non-uniform. This is
+  groundwork as much as a fix: the buildings and furniture kits are hierarchical
+  throughout, so a flat reader would not have survived contact with them.
+- **Two zero-area triangles shipped in `tree_oak`.** Caught by the new
+  `assets:verify-kit` (below) the first time it ran. Confirmed to originate in
+  Kenney's own `tree_oak.glb` rather than in this pipeline, and now pruned at
+  build time along with the unplaced models — they draw nothing but drag
+  vertices into the compacted buffer.
+
+### 9.5e `npm run assets:verify-kit`
+
+The structural and geometric checks reported in §9.5 were, in the first commit,
+run from a throwaway script. They are now `tools/verifyKitGlb.mjs`, so they are
+reproducible rather than a claim in a document.
+
+It complements rather than duplicates `assets:verify`: that one exercises the
+**import path** (`gltfImport` against a synthetic glTF) and needs `three`; this
+one validates the **artefact the build script produces** and needs nothing but
+node, so it runs even in an environment where the dependencies cannot be
+installed — which is exactly the environment this work happened in.
+
+The checks are chosen for failures that are silent rather than loud: a wrong
+accessor `min`/`max` still loads and then culls wrongly at distance; an index
+past the end of a vertex buffer may render until a driver objects; a canopy
+grounded independently of its trunk passes every structural test and simply
+looks wrong. Normals are checked for unit length specifically to catch a botched
+inverse transpose, and triangles for zero area — the check that found the
+`tree_oak` pair. All pass on the current kit.
 
 ### 9.6 Asset payload measured
 
 | Group | Bytes |
 | --- | --- |
-| `nature.glb` | 47,180 |
+| `nature.glb` | 58,984 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **107,255 (104.7 KB)** |
+| **Total** | **119,059 (116.3 KB)** |
 
-Against the ≤ 8 MB first-load budget in §5 that is **1.3%**. Neither group is in
+Against the ≤ 8 MB first-load budget in §5 that is **1.5%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
 `nature.glb` is not fetched at all yet (see below).
 

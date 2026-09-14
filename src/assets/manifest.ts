@@ -96,11 +96,11 @@ export const MODELS: ModelDef[] = [
   { id: 'tree.broadleaf.canopy', kit: 'nature', node: 'tree_default_canopy',      normalize: { groundOrigin: false, centreXZ: false, scale: 3.2 } },
   { id: 'tree.pine.trunk',       kit: 'nature', node: 'tree_pineDefaultA_trunk',  normalize: { groundOrigin: false, centreXZ: false, scale: 4.1 } },
   { id: 'tree.pine.canopy',      kit: 'nature', node: 'tree_pineDefaultA_canopy', normalize: { groundOrigin: false, centreXZ: false, scale: 4.1 } },
-  { id: 'tree.palm.trunk',       kit: 'nature', node: 'tree_palmShort_trunk',     normalize: { groundOrigin: false, centreXZ: false, scale: 5.7 } },
-  { id: 'tree.palm.canopy',      kit: 'nature', node: 'tree_palmShort_canopy',    normalize: { groundOrigin: false, centreXZ: false, scale: 5.7 } },
+  { id: 'tree.palm.trunk',       kit: 'nature', node: 'tree_palmDetailedTall_trunk',  normalize: { groundOrigin: false, centreXZ: false, scale: 4.2 } },
+  { id: 'tree.palm.canopy',      kit: 'nature', node: 'tree_palmDetailedTall_canopy', normalize: { groundOrigin: false, centreXZ: false, scale: 4.2 } },
   { id: 'tree.fruit.trunk',      kit: 'nature', node: 'tree_oak_trunk',           normalize: { groundOrigin: false, centreXZ: false, scale: 3.9 } },
   { id: 'tree.fruit.canopy',     kit: 'nature', node: 'tree_oak_canopy',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.9 } },
-  { id: 'bush.small',            kit: 'nature', node: 'plant_bush',               normalize: { groundOrigin: false, centreXZ: false, scale: 3.5 } },
+  { id: 'bush.small',            kit: 'nature', node: 'plant_bushDetailed',       normalize: { groundOrigin: false, centreXZ: false, scale: 2.4 } },
   { id: 'bush.large',            kit: 'nature', node: 'plant_bushLarge',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.5 } },
 ];
 
