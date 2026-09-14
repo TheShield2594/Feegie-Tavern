@@ -1,4 +1,4 @@
-import { ISLAND_HALF, isWalkable, sampleWalkSurface } from '@/world/heightfield';
+import { ISLAND_HALF, isNavigable, sampleWalkSurface } from '@/world/heightfield';
 
 export interface NavPoint {
   x: number;
@@ -40,7 +40,9 @@ export class Navigation {
       for (let gx = 0; gx < this.width; gx++) {
         const x = this.origin + (gx + 0.5) * this.cellSize;
         const z = this.origin + (gz + 0.5) * this.cellSize;
-        if (!isWalkable(x, z)) {
+        // `isNavigable`, not `isWalkable`: the player may wade the creek, but a
+        // villager should take the bridge or the ford like everybody else.
+        if (!isNavigable(x, z)) {
           this.cost[gz * this.width + gx] = 0;
           continue;
         }

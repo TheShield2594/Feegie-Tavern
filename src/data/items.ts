@@ -38,6 +38,49 @@ export const MATERIALS: ItemDef[] = [
   },
 ];
 
+/**
+ * Forage: one thing worth stooping for in each of the outer regions.
+ *
+ * They are a separate category from `material` on purpose — materials go into
+ * tools and public works, forage goes into the pot, and the recipes below take
+ * a `forage` slot the way they already take a `fish` one.
+ */
+export const FORAGE: ItemDef[] = [
+  {
+    id: 'forage.ridgeHerb',
+    name: 'Ridge Herb',
+    category: 'forage',
+    rarity: 'common',
+    value: 40,
+    description: 'Grows in the thin soil up on the High Meadow and smells of the whole ridge.',
+    visual: { shape: 'leaf', primary: '#8fae72', secondary: '#d6e4bc', accent: '#4f6b3f' },
+    stackable: true,
+    maxStack: 30,
+  },
+  {
+    id: 'forage.groveMushroom',
+    name: 'Grove Mushroom',
+    category: 'forage',
+    rarity: 'common',
+    value: 48,
+    description: 'Comes up overnight in the West Grove, always on the north side of a pine.',
+    visual: { shape: 'mushroom', primary: '#c96f55', secondary: '#f2e2c8', accent: '#6b4030' },
+    stackable: true,
+    maxStack: 30,
+  },
+  {
+    id: 'forage.creekCress',
+    name: 'Creek Cress',
+    category: 'forage',
+    rarity: 'common',
+    value: 44,
+    description: 'Peppery stuff that only grows where the water actually moves.',
+    visual: { shape: 'leaf', primary: '#5f9e6a', secondary: '#bfe3c0', accent: '#2f5c38' },
+    stackable: true,
+    maxStack: 30,
+  },
+];
+
 export const PRODUCE: ItemDef[] = [
   {
     id: 'crop.turnip',
@@ -127,9 +170,27 @@ export const MEALS: ItemDef[] = [
     description: 'The catch of the day next to whatever the tide offered.',
     visual: { shape: 'dish', primary: '#7fb8c6', secondary: '#d6eef3', accent: '#e0885f' },
   },
+  {
+    id: 'meal.ridgeTea',
+    name: 'Ridge Tea',
+    category: 'meal',
+    rarity: 'crafted',
+    value: 260,
+    description: 'Two handfuls of whatever the high ground offered, steeped far too long.',
+    visual: { shape: 'dish', primary: '#a8c48a', secondary: '#e4f0cf', accent: '#6b8a52' },
+  },
+  {
+    id: 'meal.creekSupper',
+    name: 'Creek Supper',
+    category: 'meal',
+    rarity: 'crafted',
+    value: 480,
+    description: 'Something out of the stream, something off its bank. They belong together.',
+    visual: { shape: 'dish', primary: '#8fae72', secondary: '#e0ecc8', accent: '#c96f55' },
+  },
 ];
 
-export const ALL_ITEMS: ItemDef[] = [...ALL_SPECIES, ...MATERIALS, ...PRODUCE, ...SEEDS, ...MEALS];
+export const ALL_ITEMS: ItemDef[] = [...ALL_SPECIES, ...MATERIALS, ...FORAGE, ...PRODUCE, ...SEEDS, ...MEALS];
 
 export const ITEMS_BY_ID = new Map(ALL_ITEMS.map((i) => [i.id, i]));
 export const ITEMS_BY_NAME = new Map(ALL_ITEMS.map((i) => [i.name.toLowerCase(), i]));

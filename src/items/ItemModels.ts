@@ -295,6 +295,20 @@ function buildVisual(group: Group, visual: ItemVisual): void {
       break;
     }
 
+    case 'mushroom': {
+      const stalk = new Mesh(new CylinderGeometry(0.045, 0.065, 0.2, 8), secondary);
+      stalk.position.y = -0.04;
+      group.add(stalk);
+      const cap = new Mesh(new SphereGeometry(0.13, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), primary);
+      cap.scale.y = 0.72;
+      cap.position.y = 0.06;
+      group.add(cap);
+      const gills = new Mesh(new CylinderGeometry(0.125, 0.125, 0.02, 12), accent);
+      gills.position.y = 0.05;
+      group.add(gills);
+      break;
+    }
+
     case 'fiber': {
       for (let i = -1; i <= 1; i++) {
         const strand = new Mesh(new CylinderGeometry(0.014, 0.008, 0.3, 5), primary);

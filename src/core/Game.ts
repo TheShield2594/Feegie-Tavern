@@ -31,6 +31,8 @@ import {
   type InteriorScene,
 } from '@/world/Interiors';
 import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, walkHeight, waterDepth } from '@/world/heightfield';
+import { CreekWater } from '@/world/CreekWater';
+import { isInRegion, regionAt, regionLabel, speciesBelongsIn, REGIONS_BY_ID, type RegionId } from '@/world/regions';
 import { drawIslandMap } from '@/world/Minimap';
 import { Player } from '@/player/Player';
 import { TOOLS, type ToolId } from '@/player/Tools';
@@ -48,7 +50,7 @@ import { Relationships } from '@/relationships/Relationships';
 import { ShopSystem } from '@/shops/ShopSystem';
 import { HomeFurnishing } from '@/housing/HomeFurnishing';
 import { SaveSystem, createNewSave } from '@/save/SaveSystem';
-import type { SaveDataV5 } from '@/save/schema';
+import { SAVE_VERSION, type SaveDataV6 } from '@/save/schema';
 import { DEFAULT_LOOK, type CharacterLook } from '@/data/clothing';
 import { FURNITURE_BY_ID, HOUSE_STYLES_BY_ID } from '@/data/furniture';
 import { CRAFTING, RECIPES } from '@/data/recipes';
@@ -86,6 +88,13 @@ const INTERIOR_ORIGIN = new Vector3(1000, 0, 0);
 
 type Mode = 'title' | 'exterior' | 'interior' | 'decorating';
 
+/**
+ * Regions that announce themselves. The town, the beach and the open sea are
+ * where the player already spends their time; a title card for walking onto
+ * the sand would be noise rather than arrival.
+ */
+const ANNOUNCED_REGIONS = new Set<RegionId>(['meadow', 'grove', 'orchard', 'garden', 'point', 'creek']);
+
 export class Game {
   readonly bus = new EventBus();
   readonly renderer: Renderer;
@@ -106,6 +115,7 @@ export class Game {
   private interiorRoot = new Group();
   private terrain!: Terrain;
   private water!: Water;
+  private creek!: CreekWater;
   private foliage!: Foliage;
   private props!: Props;
   private scatter!: Scatter;
@@ -218,6 +228,7 @@ export class Game {
     // waterline stepping across the beach where the flat sea meets the mesh.
     this.terrain = new Terrain({ resolution: 380 });
     this.water = new Water();
+    this.creek = new CreekWater();
     this.foliage = new Foliage(this.renderer.profile.foliageDensity, this.assets);
     this.props = new Props();
     this.scatter = new Scatter(this.foliage.trees, this.renderer.profile.foliageDensity);
@@ -230,6 +241,7 @@ export class Game {
     this.exteriorRoot.add(
       this.terrain.mesh,
       this.water.mesh,
+      this.creek.mesh,
       this.foliage.group,
       this.props.group,
       this.scatter.group,
@@ -398,7 +410,7 @@ export class Game {
 
   // --- Save ----------------------------------------------------------------
 
-  private applySave(data: SaveDataV5): void {
+  private applySave(data: SaveDataV6): void {
     this.time.load(data.clock.day, data.clock.minutes);
     // The elapsed-minute counter is absolute (day * 1440 + minutes); seeding it
     // with the time of day alone made the first frame after a load advance the
@@ -445,6 +457,7 @@ export class Game {
     this.props.refreshNodes(this.time.day);
     this.foliage.refreshFruit(this.time.day);
     this.townWorks = { ...data.world.townWorks };
+    this.props.setOrchardOpen(data.world.orchardOpen, true);
     this.gardens = data.world.gardens.map((g) => ({ ...g }));
 
     Object.assign(this.settings, {
@@ -479,11 +492,16 @@ export class Game {
   }
 
   private townWorks = { bridge: false, stairs: false, lighthouse: false };
+  /** Where the player is standing, for the region banner. */
+  private currentRegion: RegionId = 'town';
+  private regionSettleTimer = 0;
+  /** The day each region was last announced, so arriving is once a day rather than once ever. */
+  private announcedOnDay = new Map<RegionId, number>();
   private gardens: { x: number; z: number; color: string }[] = [];
 
-  snapshot(): SaveDataV5 {
+  snapshot(): SaveDataV6 {
     return {
-      version: 5,
+      version: SAVE_VERSION,
       slot: this.slot,
       savedAt: Date.now(),
       playtimeSeconds: Math.round(this.playtime),
@@ -522,6 +540,7 @@ export class Game {
           .filter((n) => n.harvestedOnDay > 0)
           .map((n) => ({ id: n.id, harvestedOnDay: n.harvestedOnDay })),
         townWorks: { ...this.townWorks },
+        orchardOpen: this.props.orchardGate.isOpen,
       },
       quests: this.quests.serialize(),
       relationships: this.relationships.serialize(),
@@ -572,12 +591,39 @@ export class Game {
     if (!paused && !this.dialogue.isOpen) this.handleGameplayInput(dt);
 
     this.updatePlayer(dt, paused);
+    if (this.mode === 'exterior') this.updateRegionBanner(dt);
     this.updateWorld(dt, !paused);
     this.updateInteractions(dt, paused);
     this.updateAudioMix();
     this.updateHud();
 
     this.save.tick(dt, () => this.snapshot());
+  }
+
+  /**
+   * Announces a region the first time the player walks into it.
+   *
+   * A hysteresis band rather than a bare comparison: the boundaries are circles
+   * and the creek is a few metres wide, so a player walking a boundary would
+   * otherwise be shouted at once a second.
+   */
+  private updateRegionBanner(dt: number): void {
+    const here = regionAt(this.player.position.x, this.player.position.z);
+    if (here === this.currentRegion) {
+      this.regionSettleTimer = 0;
+      return;
+    }
+    this.regionSettleTimer += dt;
+    if (this.regionSettleTimer < 1.1) return;
+
+    this.regionSettleTimer = 0;
+    this.currentRegion = here;
+    // Only the places worth naming: crossing from the square onto the sand is
+    // not an arrival, and the title card would wear out fast if it were.
+    if (!ANNOUNCED_REGIONS.has(here)) return;
+    if (this.announcedOnDay.get(here) === this.time.day) return;
+    this.announcedOnDay.set(here, this.time.day);
+    this.uiRoot.showLocation(regionLabel(here), REGIONS_BY_ID.get(here)?.blurb ?? '');
   }
 
   private updatePlayer(dt: number, paused: boolean): void {
@@ -677,6 +723,12 @@ export class Game {
         new Color(this.sky.uniforms.uBottomColor.value as Color),
         weather.wind,
         0.3 + weather.wind * 0.7,
+      );
+      this.creek.update(
+        this.elapsed,
+        this.lighting.sun.position.clone().sub(this.player.position).normalize(),
+        this.lighting.sun.color,
+        new Color(this.sky.uniforms.uBottomColor.value as Color),
       );
       this.foliage.update(dt, this.player.position.x, this.player.position.z);
       this.updateAmbientEffects(dt, lightingOutput.darkness, weather.precipitation);
@@ -971,19 +1023,39 @@ export class Game {
 
   private resolveNetSwing(): void {
     const target = this.player.forwardPoint(1.6);
-    // Bug catching is a soft-target action: anything nearby in season counts.
+    // Bug catching is a soft-target action, but not a soft-*place* one: what is
+    // flying here depends on where here is. A net swung in the square will
+    // never turn up a Grove Stag Beetle.
     const hour = this.time.hour;
+    if (this.isSealed(target.x, target.z)) {
+      this.particles.burst('leaves', target, 0.4);
+      this.uiRoot.toast('The hedge is in the way.', 'neutral');
+      return;
+    }
+    const region = regionAt(target.x, target.z);
     const candidates = BUGS.filter((bug) => {
+      if (!speciesBelongsIn(bug, region)) return false;
+      if (bug.id === 'bug.beaconMoth' && !this.townWorks.lighthouse) return false;
       if (!bug.activeHours) return true;
       const [from, to] = bug.activeHours;
       return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
     });
     if (candidates.length === 0 || Math.random() > 0.5) {
       this.particles.burst('leaves', target, 0.4);
-      this.uiRoot.toast('Nothing in the net this time.', 'neutral');
+      this.uiRoot.toast(
+        candidates.length === 0
+          ? `Nothing is flying in ${regionLabel(region)} right now.`
+          : 'Nothing in the net this time.',
+        'neutral',
+      );
       return;
     }
-    const weights = candidates.map((c) => (c.rarity === 'common' ? 100 : c.rarity === 'uncommon' ? 34 : 9));
+    const weights = candidates.map((c) => (
+      c.rarity === 'common' ? 100
+        : c.rarity === 'uncommon' ? 34
+          : c.rarity === 'rare' ? 9
+            : 3
+    ));
     const bug = weightedPick(candidates, weights);
     this.particles.burst('sparkle', target, 0.8);
     this.onCatch(bug.id, undefined, 'Netted');
@@ -1338,7 +1410,7 @@ export class Game {
 
     this.interactions.register('trees', () => {
       const tree = this.foliage.treeNear(this.player.position.x, this.player.position.z, 2.6);
-      if (!tree) return null;
+      if (!tree || this.isSealed(tree.x, tree.z)) return null;
       const fruitReady = tree.hasFruit && this.time.day - tree.harvestedOnDay >= 3;
       return {
         id: `tree.${tree.id}`,
@@ -1355,18 +1427,68 @@ export class Game {
 
     this.interactions.register('nodes', () => {
       const node = this.props.nodeNear(this.player.position.x, this.player.position.z, 2.2, this.time.day);
-      if (!node) return null;
-      const labels = { rock: 'Mine', digSpot: 'Dig', shell: 'Pick up', stick: 'Pick up' } as const;
+      if (!node || this.isSealed(node.x, node.z)) return null;
+      const labels = {
+        rock: 'Mine',
+        digSpot: 'Dig',
+        shell: 'Pick up',
+        stick: 'Pick up',
+        forage: 'Gather',
+      } as const;
       return {
         id: `node.${node.id}`,
         kind: node.kind === 'rock' ? 'mine' : node.kind === 'digSpot' ? 'dig' : 'gather',
-        label: labels[node.kind],
+        label: node.kind === 'forage' && node.defId
+          ? `Pick ${getItemDef(node.defId)?.name ?? 'it'}`
+          : labels[node.kind],
         action: 'interact',
         priority: 50,
         worldX: node.x,
         worldY: node.y + 1.2,
         worldZ: node.z,
         perform: () => this.useNode(node.id),
+      } satisfies InteractionOption;
+    });
+
+    this.interactions.register('orchardGate', () => {
+      const gate = this.props.orchardGate;
+      if (gate.isOpen) return null;
+      const distance = Math.hypot(this.player.position.x - gate.x, this.player.position.z - gate.z);
+      if (distance > 3.4) return null;
+      // The brass key is the first thing the story hands over; until Juniper
+      // works out what it opens, the padlock is all there is to read.
+      const hasKey = this.quests.storyStage >= 1;
+      return {
+        id: 'orchard.gate',
+        kind: 'custom',
+        label: hasKey ? 'Unlock the gate' : 'Padlocked',
+        detail: 'Secret Orchard',
+        action: 'interact',
+        priority: 70,
+        worldX: gate.x,
+        worldY: gate.y + 2.6,
+        worldZ: gate.z,
+        ...(hasKey ? {} : { disabledReason: 'The keyhole is shaped like a leaf' }),
+        perform: () => this.openOrchardGate(),
+      } satisfies InteractionOption;
+    });
+
+    this.interactions.register('spyglass', () => {
+      const point = LANDMARKS['lighthouse.point'];
+      const x = point.x - 3.4;
+      const z = point.z + 7.2;
+      if (Math.hypot(this.player.position.x - x, this.player.position.z - z) > 2.4) return null;
+      return {
+        id: 'point.spyglass',
+        kind: 'read',
+        label: 'Look through',
+        detail: 'Keeper\u2019s spyglass',
+        action: 'interact',
+        priority: 55,
+        worldX: x,
+        worldY: terrainHeight(x, z) + 2.2,
+        worldZ: z,
+        perform: () => this.useSpyglass(),
       } satisfies InteractionOption;
     });
 
@@ -1633,9 +1755,16 @@ export class Game {
           return true;
         });
       } else if (Math.random() < 0.25 && this.time.hour >= 6 && this.time.hour < 20) {
-        // A bug sometimes falls out — the reason to shake trees you have already stripped.
-        const bug = BUGS[Math.floor(Math.random() * BUGS.length)];
-        this.onCatch(bug.id, undefined, 'Fell out of the tree');
+        // A bug sometimes falls out — the reason to shake trees you have already
+        // stripped. It has to be one that lives in this tree's region, or the
+        // net's whole geography could be shortcut by shaking a town broadleaf.
+        const local = BUGS.filter((b) => speciesBelongsIn(b, regionAt(tree.x, tree.z)));
+        if (local.length > 0) {
+          const bug = local[Math.floor(Math.random() * local.length)];
+          this.onCatch(bug.id, undefined, 'Fell out of the tree');
+        } else {
+          this.uiRoot.toast('Just leaves this time.', 'neutral');
+        }
       } else {
         this.uiRoot.toast('Just leaves this time.', 'neutral');
       }
@@ -1646,6 +1775,24 @@ export class Game {
   private useNode(nodeId: string): void {
     const node = this.props.gatherNodes.find((n) => n.id === nodeId);
     if (!node) return;
+
+    if (node.kind === 'forage' && node.defId) {
+      const defId = node.defId;
+      node.harvestedOnDay = this.time.day;
+      this.props.refreshNodes(this.time.day);
+      this.player.performAction('pick', 1.0, false);
+      this.particles.burst('leaves', new Vector3(node.x, node.y + 0.4, node.z), 0.5);
+      this.bus.emit('audio:sfx', { id: 'item.harvest' });
+      // Two at a time: one clump is a trip, and the recipes take pairs.
+      const amount = 1 + (Math.random() < 0.45 ? 1 : 0);
+      for (let i = 0; i < amount; i++) {
+        this.drops.spawn(defId, new Vector3(node.x, node.y + 0.5, node.z), () =>
+          !!this.inventory.addById(defId, { day: this.time.day }),
+        );
+      }
+      this.save.markDirty();
+      return;
+    }
 
     if (node.kind === 'shell') {
       node.harvestedOnDay = this.time.day;
@@ -1663,6 +1810,53 @@ export class Game {
     // Rock and dig spots reuse the tool swings so the animation always matches.
     this.player.setTool(node.kind === 'rock' ? 'axe' : 'shovel', false);
     this.tryUseTool();
+  }
+
+  /**
+   * True for anything the shut orchard gate is supposed to be keeping from the
+   * player.
+   *
+   * The hedge stops them walking in, but reach does not stop at the hedge: a
+   * pear tree planted against it is within the shake prompt's radius from
+   * outside, and a net swung over the gate would land on a Blossom Moth. The
+   * gate is the region's whole premise, so it gates what is in the region,
+   * not just the way in.
+   */
+  private isSealed(x: number, z: number): boolean {
+    return !this.props.orchardGate.isOpen && isInRegion('orchard', x, z);
+  }
+
+  /** Unlocks the orchard for good. */
+  private openOrchardGate(): void {
+    if (this.props.orchardGate.isOpen) return;
+    if (this.quests.storyStage < 1) return;
+    this.props.setOrchardOpen(true);
+    this.player.performAction('pick', 1.0, false);
+    this.bus.emit('audio:sfx', { id: 'ui.open' });
+    this.uiRoot.showLocation('Secret Orchard', 'The gate gives, and stays given');
+    this.uiRoot.toast('The brass key turns. The orchard is open.', 'rare');
+    this.save.markDirty();
+  }
+
+  /**
+   * The spyglass on the point. It reports what is out there right now rather
+   * than reciting a fixed line, so it stays worth a look.
+   */
+  private useSpyglass(): void {
+    this.player.performAction('pick', 0.9, false);
+    this.bus.emit('audio:sfx', { id: 'ui.select' });
+    const lines: string[] = [];
+    if (this.townWorks.lighthouse) {
+      lines.push(this.time.hour >= 19 || this.time.hour < 5
+        ? 'The beam is turning. Something pale is circling it.'
+        : 'The lamp room is dark, but the glass is clean.');
+    } else {
+      lines.push('The lamp room above you is still dark.');
+    }
+    lines.push(this.weather.current.precipitation > 0.2
+      ? 'Rain on the water all the way out to the shelf.'
+      : 'You can see the whole south beach, and somebody on the pier.');
+    this.uiRoot.toast(lines[Math.floor(Math.random() * lines.length)], 'neutral');
   }
 
   private plantSeed(plotId: string): void {
@@ -2266,6 +2460,7 @@ export class Game {
     this.input.dispose();
     this.terrain.dispose();
     this.water.dispose();
+    this.creek.dispose();
     this.foliage.dispose();
     this.props.dispose();
     this.scatter.dispose();

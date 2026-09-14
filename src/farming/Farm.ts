@@ -16,6 +16,7 @@ import { PRODUCE } from '@/data/items';
 import { clamp01 } from '@/util/math';
 import { roundedBoxGeometry } from '@/world/BuildingKit';
 import { sampleSurface, terrainHeight } from '@/world/heightfield';
+import { isInRegion } from '@/world/regions';
 import type { CropPlotData } from '@/save/schema';
 
 export type GrowthStage = 'tilled' | 'seed' | 'sprout' | 'growing' | 'mature';
@@ -221,12 +222,30 @@ export class Farm {
     if (changed) this.dirty = true;
   }
 
-  /** Soil dries out overnight. */
+  /**
+   * Soil dries out overnight — except on the Garden Terrace, which the creek
+   * runs straight through.
+   *
+   * This is what makes the terrace worth walking to. Crops grow anywhere on
+   * the island, and they always will; what they cannot do anywhere else is
+   * water themselves. A row up on the meadow is a row you have to come back to
+   * with a can every single morning.
+   */
   newDay(day: number): void {
     for (const plot of this.plots) {
+      if (this.isIrrigated(plot)) {
+        plot.watered = true;
+        plot.wateredOnDay = day;
+        continue;
+      }
       if (plot.wateredOnDay < day) plot.watered = false;
     }
     this.dirty = true;
+  }
+
+  /** True for plots the creek keeps wet by itself. */
+  isIrrigated(plot: { x: number; z: number }): boolean {
+    return isInRegion('garden', plot.x, plot.z);
   }
 
   update(dt: number): void {

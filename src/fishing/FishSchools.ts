@@ -1,7 +1,15 @@
 import { Color, Group, InstancedMesh, Object3D, SphereGeometry, Vector3 } from 'three';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { Rng } from '@/util/rng';
-import { SEA_LEVEL, waterDepth } from '@/world/heightfield';
+import {
+  CREEK,
+  SEA_LEVEL,
+  creekDepth,
+  creekSurfaceHeight,
+  distanceToCreek,
+  terrainHeight,
+  waterDepth,
+} from '@/world/heightfield';
 
 interface Swimmer {
   x: number;
@@ -11,12 +19,30 @@ interface Swimmer {
   speed: number;
   size: number;
   wobble: number;
+  /** Creek fish, rather than sea fish. They obey a different water surface. */
+  fresh: boolean;
   /** Set while this fish has been recruited by a cast lure. */
   lured: Vector3 | null;
   luredTimer: number;
 }
 
 const COUNT = 46;
+/** Creek fish. Fewer, smaller, and confined to the channel. */
+const CREEK_COUNT = 18;
+
+/**
+ * The water a swimmer is in: its surface level and how deep it is there.
+ *
+ * Both come back together because working them out separately means sampling
+ * the heightfield twice as often, and this runs for every fish every frame.
+ */
+function waterAt(fresh: boolean, x: number, z: number): { surface: number; depth: number } {
+  if (!fresh) return { surface: SEA_LEVEL, depth: waterDepth(x, z) };
+  // Outside the channel there is no creek surface worth computing.
+  if (distanceToCreek(x, z) > CREEK.width * 2) return { surface: SEA_LEVEL, depth: 0 };
+  const surface = creekSurfaceHeight(x, z);
+  return { surface, depth: Math.max(0, surface - terrainHeight(x, z)) };
+}
 
 /**
  * The fish you can see in the water before you ever cast.
@@ -48,8 +74,9 @@ export class FishSchools {
     const tailGeometry = new SphereGeometry(0.32, 6, 5);
     tailGeometry.scale(0.08, 0.5, 0.55);
 
-    this.bodies = new InstancedMesh(bodyGeometry, material, COUNT);
-    this.tails = new InstancedMesh(tailGeometry, material, COUNT);
+    const total = COUNT + CREEK_COUNT;
+    this.bodies = new InstancedMesh(bodyGeometry, material, total);
+    this.tails = new InstancedMesh(tailGeometry, material, total);
     this.bodies.frustumCulled = false;
     this.tails.frustumCulled = false;
     this.group.add(this.bodies, this.tails);
@@ -71,6 +98,7 @@ export class FishSchools {
         speed: rng.range(0.55, 1.5),
         size: rng.range(0.55, 1.9),
         wobble: rng.range(0, 6.28),
+        fresh: false,
         lured: null,
         luredTimer: 0,
       });
@@ -79,17 +107,59 @@ export class FishSchools {
       this.tails.setColorAt(placed, tint);
       placed++;
     }
-    this.bodies.count = placed;
-    this.tails.count = placed;
+
+    // Creek fish, spread down the length of the channel so every stretch of
+    // the stream shows something moving. Without them the creek would read as
+    // scenery, and a cast into it would have nothing to attract.
+    const segments = CREEK.points.length - 1;
+    let creekPlaced = 0;
+    attempts = 0;
+    while (creekPlaced < CREEK_COUNT && attempts < 3000) {
+      attempts++;
+      const along = rng.range(0.04, 0.96) * segments;
+      const index = Math.min(segments - 1, Math.floor(along));
+      const t = along - index;
+      const a = CREEK.points[index];
+      const b = CREEK.points[index + 1];
+      const x = a.x + (b.x - a.x) * t + rng.range(-2.2, 2.2);
+      const z = a.z + (b.z - a.z) * t + rng.range(-2.2, 2.2);
+      const depth = creekDepth(x, z);
+      if (depth < 0.45) continue;
+      this.swimmers.push({
+        x, z,
+        y: creekSurfaceHeight(x, z) - Math.min(depth * 0.55, 0.5),
+        angle: rng.range(0, Math.PI * 2),
+        speed: rng.range(0.4, 0.95),
+        size: rng.range(0.35, 0.85),
+        wobble: rng.range(0, 6.28),
+        fresh: true,
+        lured: null,
+        luredTimer: 0,
+      });
+      // Greener and paler than the sea fish, so the two read apart.
+      tint.setHSL(0.28 + rng.range(-0.04, 0.05), 0.3, 0.26 + rng.range(0, 0.12));
+      this.bodies.setColorAt(placed + creekPlaced, tint);
+      this.tails.setColorAt(placed + creekPlaced, tint);
+      creekPlaced++;
+    }
+
+    this.bodies.count = placed + creekPlaced;
+    this.tails.count = placed + creekPlaced;
     if (this.bodies.instanceColor) this.bodies.instanceColor.needsUpdate = true;
     if (this.tails.instanceColor) this.tails.instanceColor.needsUpdate = true;
   }
 
-  /** Sends the nearest few fish to investigate a lure. Returns the closest one. */
-  attractTo(point: Vector3, radius = 9): Vector3 | null {
+  /**
+   * Sends the nearest fish to investigate a lure. Returns the closest one.
+   *
+   * `fresh` matters at the creek mouth, where sea fish and creek fish are a few
+   * metres apart: a lure in the stream should never pull one in off the shelf.
+   */
+  attractTo(point: Vector3, radius = 9, fresh = false): Vector3 | null {
     let nearest: Swimmer | null = null;
     let nearestDist = radius * radius;
     for (const fish of this.swimmers) {
+      if (fish.fresh !== fresh) continue;
       const d = (fish.x - point.x) ** 2 + (fish.z - point.z) ** 2;
       if (d < nearestDist) {
         nearestDist = d;
@@ -143,16 +213,20 @@ export class FishSchools {
       let nx = fish.x + Math.sin(fish.angle) * speed * dt;
       let nz = fish.z + Math.cos(fish.angle) * speed * dt;
 
-      // Turn away from the shore rather than beaching.
-      const depth = waterDepth(nx, nz);
-      if (depth < 0.7 || Math.hypot(nx, nz) > 150) {
+      // Turn away from the shore — or the bank — rather than beaching.
+      const water = waterAt(fish.fresh, nx, nz);
+      const minDepth = fish.fresh ? 0.35 : 0.7;
+      if (water.depth < minDepth || Math.hypot(nx, nz) > 150) {
         fish.angle += Math.PI * 0.6;
         nx = fish.x;
         nz = fish.z;
       }
       fish.x = nx;
       fish.z = nz;
-      fish.y = SEA_LEVEL - Math.min(Math.max(depth, 0.6) * 0.5, 1.7) + Math.sin(time * 1.6 + fish.wobble) * 0.08;
+      const settled = Math.max(water.depth, minDepth * 0.85);
+      fish.y = fish.fresh
+        ? water.surface - Math.min(settled * 0.5, 0.45) + Math.sin(time * 2.1 + fish.wobble) * 0.03
+        : SEA_LEVEL - Math.min(settled * 0.5, 1.7) + Math.sin(time * 1.6 + fish.wobble) * 0.08;
 
       // Cull far fish rather than paying for their transforms every frame.
       const distanceSq = (fish.x - cameraX) ** 2 + (fish.z - cameraZ) ** 2;

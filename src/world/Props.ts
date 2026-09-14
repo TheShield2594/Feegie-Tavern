@@ -1,5 +1,6 @@
 import {
   BoxGeometry,
+  BufferGeometry,
   ConeGeometry,
   CylinderGeometry,
   DoubleSide,
@@ -22,11 +23,27 @@ import { Rng } from '@/util/rng';
 import { smoothstep } from '@/util/math';
 import { makeSign, makeStreetLamp, roundedBoxGeometry, surfaces } from './BuildingKit';
 import { flagstoneTexture } from '@/rendering/textures';
-import { BRIDGES, ISLAND_HALF, LANDMARKS, PIER_DECK_HEIGHT, PIER_START, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
+import { mergeGeometries } from '@/util/three';
+import {
+  BRIDGES,
+  CREEK,
+  ISLAND_HALF,
+  LANDMARKS,
+  PIER_DECK_HEIGHT,
+  PIER_START,
+  SEA_LEVEL,
+  creekDepth,
+  distanceToCreek,
+  isWalkable,
+  sampleSurface,
+  terrainHeight,
+} from './heightfield';
+import { buildRegionLandmarks, type OrchardGate } from './Landmarks';
+import { isInRegion } from './regions';
 
 export interface GatherNode {
   id: string;
-  kind: 'rock' | 'digSpot' | 'shell' | 'stick';
+  kind: 'rock' | 'digSpot' | 'shell' | 'stick' | 'forage';
   x: number;
   z: number;
   y: number;
@@ -48,6 +65,12 @@ export interface GatherNode {
    * each its own mesh, so the kind alone no longer identifies the batch.
    */
   mesh?: InstancedMesh;
+  /**
+   * What picking this yields. Only forage carries one: a rock always gives
+   * stone, but a forage node is ridge herb or grove mushroom or creek cress
+   * depending entirely on which region it grew in.
+   */
+  defId?: string;
 }
 
 /**
@@ -68,6 +91,8 @@ export class Props {
   private dummy = new Object3D();
   private waterTrough: Mesh | null = null;
   private campfire: { light: PointLight; glow: MeshStandardMaterial; position: Vector3 } | null = null;
+  /** The Secret Orchard's gate, and the collider that keeps it secret. */
+  readonly orchardGate: OrchardGate;
   /** Signposts with their label, so the map and the world agree. */
   readonly signposts: { x: number; z: number; label: string }[] = [];
 
@@ -84,9 +109,38 @@ export class Props {
     this.buildMeadowStairs();
     this.buildFences();
     this.buildBeachDressing(rng);
+
+    // The six outer regions. Their dressing lives in its own module — it is as
+    // much geometry again as everything above — but its colliders, signposts
+    // and lamps join the island's, so nothing downstream has to know.
+    const regions = buildRegionLandmarks();
+    this.group.add(regions.group);
+    this.colliders.push(...regions.colliders);
+    this.signposts.push(...regions.signposts);
+    for (const lamp of regions.lamps) {
+      this.lampLights.push(lamp.light);
+      this.lampGlass.push(lamp.glass);
+    }
+    this.orchardGate = regions.gate;
+    this.colliders.push(this.orchardGate.collider);
+
     this.buildRocks(rng);
     this.buildDigSpots(rng);
     this.buildShells(rng);
+    this.buildForage(rng);
+  }
+
+  /**
+   * Opens or shuts the orchard gate, dropping the collider that bars the way.
+   *
+   * Player movement reads `colliders` fresh every frame, so removing the entry
+   * is all it takes for the gateway to become passable.
+   */
+  setOrchardOpen(open: boolean, instant = false): void {
+    this.orchardGate.setOpen(open, instant);
+    const index = this.colliders.indexOf(this.orchardGate.collider);
+    if (open && index >= 0) this.colliders.splice(index, 1);
+    else if (!open && index < 0) this.colliders.push(this.orchardGate.collider);
   }
 
   // --- Town square ---------------------------------------------------------
@@ -493,7 +547,9 @@ export class Props {
     group.name = 'Fences';
     this.group.add(group);
 
-    // A picket run around the farm terrace.
+    // A picket run around the farm terrace. The creek runs straight through the
+    // middle of it, so the run breaks at both banks rather than marching a
+    // fence post into the water.
     const centre = LANDMARKS['farm.terrace'];
     const radius = 11;
     const fenceGeometry = kitGeometry('yard.fence');
@@ -508,6 +564,8 @@ export class Props {
       if (a > 4.4 && a < 5.2) continue;
       const x = centre.x + Math.cos(a) * radius;
       const z = centre.z + Math.sin(a) * radius;
+      // ...and wherever the creek crosses the line.
+      if (creekDepth(x, z) > 0.02 || distanceToCreek(x, z) < CREEK.width * 1.3) continue;
       const y = terrainHeight(x, z);
 
       if (fenceGeometry) {
@@ -540,6 +598,9 @@ export class Props {
       { x: -8.6, z: -13.2, r: -0.9, label: 'Museum' },
       { x: 13.8, z: 6.2, r: 0.9, label: 'East Shore' },
       { x: -26.4, z: 8.4, r: -0.5, label: 'Garden' },
+      { x: -30.0, z: -23.0, r: -2.2, label: 'High Meadow' },
+      { x: -47.0, z: -5.5, r: -1.4, label: 'West Grove' },
+      { x: 42.4, z: 2.0, r: 0.3, label: 'East Ridge' },
     ];
     for (const spot of posts) {
       const y = terrainHeight(spot.x, spot.z);
@@ -654,16 +715,41 @@ export class Props {
 
   private buildRocks(rng: Rng): void {
     const placements: { x: number; y: number; z: number; s: number; r: number }[] = [];
+    const usable = (x: number, z: number) => {
+      const sample = sampleSurface(x, z);
+      if (sample.height < 1.6 || sample.slope > 0.55) return null;
+      if (sample.surface === 'path' || sample.surface === 'plaza') return null;
+      return sample;
+    };
+
     let attempts = 0;
     while (placements.length < 26 && attempts < 900) {
       attempts++;
       const x = rng.spread(ISLAND_HALF - 12);
       const z = rng.spread(ISLAND_HALF - 12);
-      const sample = sampleSurface(x, z);
-      if (sample.height < 1.6 || sample.slope > 0.55) continue;
-      if (sample.surface === 'path' || sample.surface === 'plaza') continue;
+      const sample = usable(x, z);
+      if (!sample) continue;
       if (Math.hypot(x, z) < 20) continue;
       placements.push({ x, y: sample.height, z, s: rng.range(0.8, 1.6), r: rng.range(0, 6.28) });
+    }
+
+    // A boulder field on Lighthouse Point. Cove Stone's own description says it
+    // is chipped from the headland, and until now it came from everywhere but:
+    // this is what makes the walk out to the point worth making with an axe.
+    const point = LANDMARKS['lighthouse.point'];
+    attempts = 0;
+    let onPoint = 0;
+    while (onPoint < 9 && attempts < 500) {
+      attempts++;
+      const angle = rng.range(0, Math.PI * 2);
+      const radius = 5 + Math.sqrt(rng.range(0, 1)) * 11;
+      const x = point.x + Math.cos(angle) * radius;
+      const z = point.z + Math.sin(angle) * radius;
+      const sample = usable(x, z);
+      if (!sample) continue;
+      if (placements.some((p) => Math.hypot(p.x - x, p.z - z) < 3)) continue;
+      placements.push({ x, y: sample.height, z, s: rng.range(1.0, 1.8), r: rng.range(0, 6.28) });
+      onPoint++;
     }
 
     // Three kit boulders, each its own instanced batch, so a field of rocks
@@ -795,13 +881,115 @@ export class Props {
     this.group.add(mesh);
   }
 
+  /**
+   * Forage: the thing worth stooping for in each outer region.
+   *
+   * One instanced batch per kind, each placed by the rule that makes it belong
+   * where it grows — herb in the meadow's thin soil, mushrooms in the grove's
+   * shade, cress on the creek bank where the water actually moves. Every node
+   * carries the item it yields, so harvesting does not have to guess from the
+   * player's position what they just picked.
+   */
+  private buildForage(rng: Rng): void {
+    interface ForagePlan {
+      defId: string;
+      name: string;
+      count: number;
+      color: string;
+      geometry: () => BufferGeometry;
+      /** Where this kind is allowed to grow. */
+      suits: (x: number, z: number, sample: ReturnType<typeof sampleSurface>) => boolean;
+      /** Sampling window, so a plan does not throw darts at the whole island. */
+      area: { x: number; z: number; radius: number };
+    }
+
+    const plans: ForagePlan[] = [
+      {
+        defId: 'forage.ridgeHerb',
+        name: 'RidgeHerb',
+        count: 12,
+        color: '#8fae72',
+        geometry: herbTuftGeometry,
+        suits: (x, z, sample) => isInRegion('meadow', x, z) && sample.surface === 'grass' && sample.slope < 0.4,
+        area: { x: -42, z: -40, radius: 18 },
+      },
+      {
+        defId: 'forage.groveMushroom',
+        name: 'GroveMushroom',
+        count: 12,
+        color: '#c96f55',
+        geometry: mushroomClumpGeometry,
+        suits: (x, z, sample) => isInRegion('grove', x, z) && sample.surface === 'grass' && sample.slope < 0.45,
+        area: { x: -56, z: 4, radius: 14 },
+      },
+      {
+        defId: 'forage.creekCress',
+        name: 'CreekCress',
+        count: 14,
+        color: '#5f9e6a',
+        geometry: cressTuftGeometry,
+        // On the bank, not in the channel: close enough to the water to be
+        // cress, far enough out to be standing on something.
+        suits: (x, z) => {
+          const distance = distanceToCreek(x, z);
+          return distance > 2.6 && distance < 6.2 && creekDepth(x, z) < 0.05 && isWalkable(x, z);
+        },
+        area: { x: -35, z: 4, radius: 42 },
+      },
+    ];
+
+    for (const plan of plans) {
+      const material = createStylizedMaterial({ color: plan.color, roughness: 0.92, flatShading: true });
+      const mesh = new InstancedMesh(plan.geometry(), material, plan.count);
+      mesh.name = `Forage_${plan.name}`;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+
+      let placed = 0;
+      let attempts = 0;
+      while (placed < plan.count && attempts < plan.count * 120) {
+        attempts++;
+        const angle = rng.range(0, Math.PI * 2);
+        const radius = Math.sqrt(rng.range(0, 1)) * plan.area.radius;
+        const x = plan.area.x + Math.cos(angle) * radius;
+        const z = plan.area.z + Math.sin(angle) * radius;
+        const sample = sampleSurface(x, z);
+        if (sample.surface === 'path' || sample.surface === 'plaza' || sample.surface === 'water') continue;
+        if (!plan.suits(x, z, sample)) continue;
+        // Never right on top of another clump, or a "region" is one dense patch.
+        if (this.gatherNodes.some((n) => n.kind === 'forage' && Math.hypot(n.x - x, n.z - z) < 3.2)) continue;
+
+        this.dummy.position.set(x, sample.height, z);
+        this.dummy.rotation.set(0, rng.range(0, Math.PI * 2), 0);
+        this.dummy.scale.setScalar(rng.range(0.85, 1.25));
+        this.dummy.updateMatrix();
+        mesh.setMatrixAt(placed, this.dummy.matrix);
+        this.gatherNodes.push({
+          matrix: this.dummy.matrix.clone(),
+          mesh,
+          defId: plan.defId,
+          id: `forage_${plan.name}_${placed}`,
+          kind: 'forage',
+          x, y: sample.height, z,
+          harvestedOnDay: -99,
+          index: placed,
+          hitTimer: 0,
+        });
+        placed++;
+      }
+
+      mesh.count = placed;
+      mesh.instanceMatrix.needsUpdate = true;
+      this.group.add(mesh);
+    }
+  }
+
   /** Hides a harvested node and shows it again once it has regrown. */
   refreshNodes(day: number): void {
     const hidden = new Vector3(0, -1000, 0);
-    const cooldowns: Record<GatherNode['kind'], number> = { rock: 1, digSpot: 1, shell: 1, stick: 1 };
 
     for (const node of this.gatherNodes) {
-      const available = day - node.harvestedOnDay >= cooldowns[node.kind];
+      const available = day - node.harvestedOnDay >= NODE_COOLDOWNS[node.kind];
       const mesh = node.mesh ?? (node.kind === 'rock' ? this.rockMesh : node.kind === 'digSpot' ? this.digMesh : this.shellMesh);
       if (!mesh) continue;
 
@@ -839,7 +1027,9 @@ export class Props {
     let bestDist = radius * radius;
     for (const node of this.gatherNodes) {
       if (kinds && !kinds.includes(node.kind)) continue;
-      if (day - node.harvestedOnDay < 1) continue;
+      // Same cooldown table `refreshNodes` hides them by, or the prompt would
+      // offer a node whose mesh is parked under the map.
+      if (day - node.harvestedOnDay < NODE_COOLDOWNS[node.kind]) continue;
       const d = (node.x - x) ** 2 + (node.z - z) ** 2;
       if (d < bestDist) {
         bestDist = d;
@@ -860,13 +1050,13 @@ export class Props {
     if (this.waterTrough) {
       this.waterTrough.position.y = 0.62 + Math.sin(time * 1.4) * 0.012;
     }
+    this.orchardGate.update(dt);
     if (this.campfire) {
       const lit = smoothstep(0.3, 0.7, darkness);
       const flicker = 1 + Math.sin(time * 11.3) * 0.12 + Math.sin(time * 4.1) * 0.08;
       this.campfire.light.intensity = lit * 9 * flicker;
       this.campfire.glow.emissiveIntensity = lit * 2.6 * flicker;
     }
-    void dt;
   }
 
   /** Where the beach fire burns and how strongly, for particles and audio. */
@@ -885,4 +1075,75 @@ export class Props {
       if (mesh.isMesh) mesh.geometry.dispose();
     });
   }
+}
+
+/** In-game days before a harvested node comes back. */
+const NODE_COOLDOWNS: Record<GatherNode['kind'], number> = {
+  rock: 1,
+  digSpot: 1,
+  shell: 1,
+  stick: 1,
+  // Forage has to actually grow again, and a two-day cycle is what stops one
+  // region becoming a daily vending machine.
+  forage: 2,
+};
+
+/** A fan of blades with seed heads: the High Meadow's herb. */
+function herbTuftGeometry(): BufferGeometry {
+  const parts: BufferGeometry[] = [];
+  for (let i = 0; i < 7; i++) {
+    const angle = (i / 7) * Math.PI * 2;
+    const lean = 0.26 + (i % 3) * 0.08;
+    const blade = new CylinderGeometry(0.012, 0.03, 0.52, 4);
+    blade.translate(0, 0.26, 0);
+    blade.rotateX(Math.sin(angle) * lean);
+    blade.rotateZ(-Math.cos(angle) * lean);
+    blade.translate(Math.cos(angle) * 0.07, 0, Math.sin(angle) * 0.07);
+    parts.push(blade);
+  }
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 + 0.5;
+    const head = new SphereGeometry(0.055, 6, 5);
+    head.scale(0.7, 1.5, 0.7);
+    head.translate(Math.cos(angle) * 0.14, 0.52, Math.sin(angle) * 0.14);
+    parts.push(head);
+  }
+  return mergeGeometries(parts);
+}
+
+/** Three caps at the foot of a pine: the West Grove's mushroom. */
+function mushroomClumpGeometry(): BufferGeometry {
+  const parts: BufferGeometry[] = [];
+  const sizes = [1, 0.72, 0.5];
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 + 0.8;
+    const scale = sizes[i];
+    const dx = Math.cos(angle) * 0.17 * (i === 0 ? 0 : 1);
+    const dz = Math.sin(angle) * 0.17 * (i === 0 ? 0 : 1);
+
+    const stem = new CylinderGeometry(0.035 * scale, 0.05 * scale, 0.26 * scale, 6);
+    stem.translate(dx, 0.13 * scale, dz);
+    parts.push(stem);
+
+    const cap = new SphereGeometry(0.16 * scale, 9, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    cap.scale(1, 0.66, 1);
+    cap.translate(dx, 0.25 * scale, dz);
+    parts.push(cap);
+  }
+  return mergeGeometries(parts);
+}
+
+/** A low rosette of round leaves on the bank: creek cress. */
+function cressTuftGeometry(): BufferGeometry {
+  const parts: BufferGeometry[] = [];
+  for (let i = 0; i < 9; i++) {
+    const angle = (i / 9) * Math.PI * 2;
+    const ring = i < 5 ? 0.16 : 0.27;
+    const leaf = new SphereGeometry(0.1, 7, 5);
+    leaf.scale(1, 0.28, 1.25);
+    leaf.rotateY(angle);
+    leaf.translate(Math.cos(angle) * ring, 0.08 + (i < 5 ? 0.05 : 0), Math.sin(angle) * ring);
+    parts.push(leaf);
+  }
+  return mergeGeometries(parts);
 }

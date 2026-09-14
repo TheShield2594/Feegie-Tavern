@@ -37,6 +37,22 @@ export const RECIPES: RecipeDef[] = [
     unlockAfterCooked: 2,
     description: 'The catch of the day, plus whatever the tide offered.',
   },
+  {
+    id: 'recipe.ridgeTea',
+    name: 'Ridge Tea',
+    resultItemId: 'meal.ridgeTea',
+    needs: ['forage', 'forage'],
+    unlockAfterCooked: 1,
+    description: 'Anything gathered off the meadow, the grove or the creek bank.',
+  },
+  {
+    id: 'recipe.creekSupper',
+    name: 'Creek Supper',
+    resultItemId: 'meal.creekSupper',
+    needs: ['fish', 'forage'],
+    unlockAfterCooked: 3,
+    description: 'A freshwater fish and a handful of cress from the same bend.',
+  },
 ];
 
 export interface CraftRecipeDef {

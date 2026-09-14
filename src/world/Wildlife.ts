@@ -96,10 +96,24 @@ export class Wildlife {
     const color = new Color();
     let placed = 0;
     let attempts = 0;
+    // Half the population is seeded around the regions worth walking to, so
+    // arriving somewhere new always has something moving in it, and half is
+    // scattered so the rest of the island is not sterile by comparison.
+    const haunts = ['meadow.high', 'grove.west', 'orchard.secret', 'farm.terrace', 'creek.stones']
+      .map((key) => LANDMARKS[key])
+      .filter(Boolean);
     while (placed < BUTTERFLY_COUNT && attempts < 3000) {
       attempts++;
-      const x = rng.spread(ISLAND_HALF - 14);
-      const z = rng.spread(ISLAND_HALF - 14);
+      let x: number;
+      let z: number;
+      if (placed < BUTTERFLY_COUNT / 2 && haunts.length > 0) {
+        const haunt = haunts[placed % haunts.length];
+        x = haunt.x + rng.spread(11);
+        z = haunt.z + rng.spread(11);
+      } else {
+        x = rng.spread(ISLAND_HALF - 14);
+        z = rng.spread(ISLAND_HALF - 14);
+      }
       const sample = sampleSurface(x, z);
       if (sample.surface !== 'grass' || sample.height < 2.2 || sample.slope > 0.4) continue;
       this.butterflies.push({

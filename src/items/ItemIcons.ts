@@ -508,6 +508,31 @@ function drawShape(ctx: CanvasRenderingContext2D, visual: ItemVisual): void {
       break;
     }
 
+    case 'mushroom': {
+      ctx.fillStyle = secondary;
+      ctx.beginPath();
+      ctx.moveTo(-10, -2);
+      ctx.quadraticCurveTo(-13, 26, -8, 36);
+      ctx.lineTo(8, 36);
+      ctx.quadraticCurveTo(13, 26, 10, -2);
+      ctx.fill();
+      ctx.fillStyle = primary;
+      ctx.beginPath();
+      ctx.moveTo(-36, 0);
+      ctx.quadraticCurveTo(-32, -38, 0, -38);
+      ctx.quadraticCurveTo(32, -38, 36, 0);
+      ctx.quadraticCurveTo(0, 10, -36, 0);
+      ctx.fill();
+      // A few pale flecks so the cap does not read as a flat dome.
+      ctx.fillStyle = secondary;
+      for (const [fx, fy, r] of [[-18, -10, 5], [4, -20, 6], [20, -8, 4]] as const) {
+        ctx.beginPath();
+        ctx.ellipse(fx, fy, r, r * 0.8, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+
     case 'fiber': {
       ctx.strokeStyle = primary;
       ctx.lineWidth = 6;

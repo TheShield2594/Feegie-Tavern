@@ -3,9 +3,15 @@ import { FURNITURE_BY_NAME } from '@/data/furniture';
 import { ITEMS_BY_NAME } from '@/data/items';
 import { SPECIES_BY_NAME } from '@/data/species';
 import type { InventoryItem, ItemCategory, Rarity } from '@/items/types';
-import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV5 } from './schema';
+import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV6 } from './schema';
 
 type Migration = (data: Record<string, unknown>) => Record<string, unknown>;
+
+/** The v5 shape: v6 minus the fields added since. */
+type LegacyV5 = Omit<SaveDataV6, 'version' | 'world'> & {
+  version: 5;
+  world: Omit<SaveDataV6['world'], 'orchardOpen'>;
+};
 
 let uidCounter = 0;
 function uid(prefix = 'i'): string {
@@ -161,7 +167,7 @@ const migrate4to5: Migration = (data) => {
         .filter(Boolean)
     : [];
 
-  const relationships: SaveDataV5['relationships'] = {};
+  const relationships: SaveDataV6['relationships'] = {};
   const legacyFriendship = (data.friendship ?? {}) as Record<string, unknown>;
   const legacyRequests = (data.requests ?? {}) as Record<string, unknown>;
   for (const [name, value] of Object.entries(legacyFriendship)) {
@@ -226,7 +232,10 @@ const migrate4to5: Migration = (data) => {
         ? 'style.grovePine'
         : 'style.harbourBlue';
 
-  const migrated: SaveDataV5 = {
+  // Deliberately still a v5 blob: `migrate` runs the chain, and v5→v6 is the
+  // next link. Writing v6 here would mean maintaining two copies of every
+  // future field addition.
+  const migrated: LegacyV5 = {
     version: 5,
     slot: num(data.slot, 1),
     savedAt: Date.now(),
@@ -236,7 +245,7 @@ const migrate4to5: Migration = (data) => {
       minutes: Math.max(0, Math.min(1439, Math.round(num(data.time, 480)))),
     },
     weather: {
-      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV5['weather']['kind']) ?? 'clear',
+      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV6['weather']['kind']) ?? 'clear',
       remaining: 240,
     },
     player: {
@@ -277,7 +286,7 @@ const migrate4to5: Migration = (data) => {
       // wearing is the one style the player carries over as owned.
       ownedStyles: [styleId],
       ownedFurniture,
-      placed: placed as SaveDataV5['home']['placed'],
+      placed: placed as SaveDataV6['home']['placed'],
     },
     farm: { plots },
     world: {
@@ -304,15 +313,32 @@ const migrate4to5: Migration = (data) => {
 };
 
 /**
+ * v5 → v6: the Secret Orchard's gate.
+ *
+ * Shut for everyone, including islands that have already finished the story —
+ * the gate is a place to walk to and a thing to open, and handing it over
+ * already open would take that away from a returning player.
+ */
+const migrate5to6: Migration = (data) => {
+  const world = (data.world ?? {}) as Record<string, unknown>;
+  return {
+    ...data,
+    version: 6,
+    world: { ...world, orchardOpen: bool(world.orchardOpen, false) },
+  };
+};
+
+/**
  * Migrations keyed by the version they upgrade *from*. Running them in sequence
  * takes any historical save up to SAVE_VERSION.
  */
 export const MIGRATIONS: Record<number, Migration> = {
   4: migrate4to5,
+  5: migrate5to6,
 };
 
 export interface MigrationResult {
-  data: SaveDataV5;
+  data: SaveDataV6;
   migratedFrom: number | null;
 }
 
@@ -334,7 +360,7 @@ export function detectVersion(data: AnySaveData): number {
  * that out of `applySave`, where the first `data.clock.day` would throw from
  * inside the frame loop instead of from a read the caller already guards.
  */
-function assertV5(data: AnySaveData): asserts data is SaveDataV5 {
+function assertCurrent(data: AnySaveData): asserts data is SaveDataV6 {
   const d = data as Record<string, unknown>;
   const required = ['clock', 'player', 'museum', 'home', 'farm', 'world', 'quests', 'relationships', 'settings'];
   const missing = required.filter((key) => typeof d[key] !== 'object' || d[key] === null);
@@ -351,7 +377,7 @@ export function migrate(raw: AnySaveData): MigrationResult {
     throw new Error(`Save version ${from} is newer than this build supports (${SAVE_VERSION})`);
   }
   if (from === SAVE_VERSION) {
-    assertV5(raw);
+    assertCurrent(raw);
     return { data: raw, migratedFrom: null };
   }
 
@@ -371,6 +397,6 @@ export function migrate(raw: AnySaveData): MigrationResult {
   }
 
   const migrated = data as AnySaveData;
-  assertV5(migrated);
+  assertCurrent(migrated);
   return { data: migrated, migratedFrom: from };
 }

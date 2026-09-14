@@ -3,7 +3,6 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
-  Float32BufferAttribute,
   Group,
   IcosahedronGeometry,
   InstancedMesh,
@@ -15,6 +14,7 @@ import {
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
+import { mergeGeometries } from '@/util/three';
 import { clamp01 } from '@/util/math';
 import { ISLAND_HALF, PATHS, SEA_LEVEL, distanceToCreek, sampleSurface } from './heightfield';
 import type { TreeRecord } from './Foliage';
@@ -64,7 +64,7 @@ export class Scatter {
     const cap = new SphereGeometry(0.11, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2);
     cap.scale(1, 0.7, 1);
     cap.translate(0, 0.15, 0);
-    const geometry = merge([stem, cap]);
+    const geometry = mergeGeometries([stem, cap]);
     const material = createStylizedMaterial({ color: '#ffffff', roughness: 0.85 });
     const count = Math.round(70 * density);
     const mesh = new InstancedMesh(geometry, material, count);
@@ -158,7 +158,7 @@ export class Scatter {
       g.translate(Math.cos(a) * 0.09, 0.12 + (i % 2) * 0.03, Math.sin(a) * 0.09);
       parts.push(g);
     }
-    const geometry = merge(parts);
+    const geometry = mergeGeometries(parts);
     const material = createStylizedMaterial({ color: '#6fa262', roughness: 0.95, wind: 'foliage', windScale: 1.4 });
     const count = Math.round(360 * density);
     const mesh = new InstancedMesh(geometry, material, count);
@@ -202,7 +202,7 @@ export class Scatter {
       g.translate(Math.cos(a) * 0.08, 0, Math.sin(a) * 0.08);
       parts.push(g);
     }
-    const geometry = merge(parts);
+    const geometry = mergeGeometries(parts);
     const material = createStylizedMaterial({ color: '#7f9a55', roughness: 0.95, wind: 'foliage', windScale: 2.2 });
     const count = Math.round(110 * density);
     const mesh = new InstancedMesh(geometry, material, count);
@@ -291,32 +291,3 @@ export class Scatter {
   }
 }
 
-/** Merges position/normal/uv/index buffers; enough for the small parts above. */
-function merge(geometries: BufferGeometry[]): BufferGeometry {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  let offset = 0;
-  for (const geometry of geometries) {
-    const pos = geometry.getAttribute('position');
-    const nor = geometry.getAttribute('normal');
-    const uv = geometry.getAttribute('uv');
-    for (let i = 0; i < pos.count; i++) {
-      positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-      normals.push(nor.getX(i), nor.getY(i), nor.getZ(i));
-      if (uv) uvs.push(uv.getX(i), uv.getY(i));
-      else uvs.push(0, 0);
-    }
-    const index = geometry.getIndex();
-    if (index) for (let i = 0; i < index.count; i++) indices.push(index.getX(i) + offset);
-    else for (let i = 0; i < pos.count; i++) indices.push(i + offset);
-    offset += pos.count;
-  }
-  const merged = new BufferGeometry();
-  merged.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  merged.setAttribute('normal', new Float32BufferAttribute(normals, 3));
-  merged.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
-  merged.setIndex(indices);
-  return merged;
-}

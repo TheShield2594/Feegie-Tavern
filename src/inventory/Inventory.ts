@@ -161,7 +161,7 @@ export class Inventory {
       }
     }
 
-    const order: ItemCategory[] = ['fish', 'sea', 'bug', 'fossil', 'crop', 'fruit', 'meal', 'material', 'seed', 'furniture', 'tool', 'clothing'];
+    const order: ItemCategory[] = ['fish', 'sea', 'bug', 'fossil', 'crop', 'fruit', 'forage', 'meal', 'material', 'seed', 'furniture', 'tool', 'clothing'];
     const stacks = [...map.values()];
     switch (sort) {
       case 'value':

@@ -19,6 +19,7 @@ import type { AssetManager } from '@/assets/AssetManager';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE, SEASON_TINT } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
+import { mergeGeometries } from '@/util/three';
 import { clamp01, lerp, smoothstep } from '@/util/math';
 import { ISLAND_HALF, PATHS, sampleSurface } from './heightfield';
 
@@ -52,6 +53,19 @@ interface ScatterRule {
   maxSlope: number;
   /** Keep this far from paths and building pads. */
   clearance: number;
+  /**
+   * Sample inside these circles rather than across the whole island.
+   *
+   * A stand that belongs somewhere specific — the orchard inside its hedge, the
+   * pines that make the grove a grove — cannot be rejection-sampled out of a
+   * 164 m square: the orchard is a third of a percent of the island's area, and
+   * a budget of darts thrown at the whole map landed five trees in it.
+   */
+  areas?: { x: number; z: number; radius: number; innerRadius?: number }[];
+  /** Minimum spacing between this plan's own trees, for the dense stands. */
+  spacing?: number;
+  /** Skip the building keep-out rule: an enclosed stand provides its own. */
+  ignoreStructures?: boolean;
 }
 
 interface CanopyOffset {
@@ -87,6 +101,12 @@ const KEEP_OUT: { x: number; z: number; r: number }[] = [
   { x: 42, z: -46, r: 13 },    // lighthouse
   { x: -34, z: 20, r: 13 },    // farm
   { x: 12, z: 52, r: 11 },     // harbour
+  // The clearings the region landmarks stand in. Without these the elder tree
+  // is one trunk among thirty and the standing stones are in a thicket.
+  { x: -56, z: 4, r: 5.5 },    // west grove clearing
+  { x: -57, z: 1, r: 5 },      // the elder tree
+  { x: -41, z: -43, r: 9 },    // the standing stones
+  { x: 35, z: -43, r: 6 },     // keeper's camp
 ];
 
 function distanceToPaths(x: number, z: number): number {
@@ -243,32 +263,79 @@ export class Foliage {
   // --- Trees ---------------------------------------------------------------
 
   private buildTrees(rng: Rng, density: number): void {
+    const ORCHARD = { x: 46, z: -16, radius: 7.4, innerRadius: 3.0 };
+    const GROVE = { x: -56, z: 4, radius: 16 };
+
     const plans: { kind: TreeKind; rule: ScatterRule }[] = [
       { kind: 'broadleaf', rule: { count: Math.round(120 * density), minHeight: 2.2, maxHeight: 16, maxSlope: 0.45, clearance: 2 } },
       { kind: 'pine', rule: { count: Math.round(70 * density), minHeight: 6.5, maxHeight: 26, maxSlope: 0.58, clearance: 2 } },
+      // The stand that makes the West Grove a grove. Sampled inside it, because
+      // the grove sits too low for the ridge rule to ever put a pine there.
+      {
+        kind: 'pine',
+        rule: {
+          count: Math.round(30 * density), minHeight: 2.4, maxHeight: 26, maxSlope: 0.6,
+          clearance: 2, areas: [GROVE], spacing: 2.4,
+        },
+      },
       { kind: 'palm', rule: { count: Math.round(34 * density), minHeight: 0.9, maxHeight: 3.0, maxSlope: 0.34, clearance: 3 } },
-      { kind: 'fruit', rule: { count: Math.round(26 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.3, clearance: 4 } },
+      // The orchard proper, inside its hedge...
+      {
+        kind: 'fruit',
+        rule: {
+          count: Math.round(12 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.4,
+          clearance: 1.6, areas: [ORCHARD], spacing: 3.4, ignoreStructures: true,
+        },
+      },
+      // ...and the strays around the farm terrace.
+      {
+        kind: 'fruit',
+        rule: {
+          count: Math.round(9 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.3,
+          clearance: 2.2, areas: [{ x: -34, z: 20, radius: 18 }], spacing: 4,
+        },
+      },
     ];
 
     const records: TreeRecord[] = [];
     for (const plan of plans) {
+      const planStart = records.length;
       let placed = 0;
       let attempts = 0;
-      while (placed < plan.rule.count && attempts < plan.rule.count * 40) {
+      while (placed < plan.rule.count && attempts < plan.rule.count * 60) {
         attempts++;
-        const x = rng.spread(ISLAND_HALF - 8);
-        const z = rng.spread(ISLAND_HALF - 8);
+        let x: number;
+        let z: number;
+        if (plan.rule.areas) {
+          const area = plan.rule.areas[Math.min(plan.rule.areas.length - 1, Math.floor(rng.range(0, plan.rule.areas.length)))];
+          const angle = rng.range(0, Math.PI * 2);
+          // sqrt keeps the sample uniform over the disc instead of piling up
+          // every tree around the centre.
+          // An inner radius leaves a glade at the centre. Without one the
+          // orchard closes over its own middle and there is nowhere to stand.
+          const inner = area.innerRadius ?? 0;
+          const radius = Math.sqrt(rng.range((inner / area.radius) ** 2, 1)) * area.radius;
+          x = area.x + Math.cos(angle) * radius;
+          z = area.z + Math.sin(angle) * radius;
+        } else {
+          x = rng.spread(ISLAND_HALF - 8);
+          z = rng.spread(ISLAND_HALF - 8);
+        }
         const sample = sampleSurface(x, z);
         if (sample.height < plan.rule.minHeight || sample.height > plan.rule.maxHeight) continue;
         if (sample.slope > plan.rule.maxSlope) continue;
         if (sample.surface === 'path' || sample.surface === 'plaza' || sample.surface === 'water') continue;
         if (distanceToPaths(x, z) < plan.rule.clearance) continue;
-        if (blockedByStructure(x, z, plan.rule.clearance)) continue;
-        // Fruit trees belong in the orchard and around the farm.
-        if (plan.kind === 'fruit') {
-          const nearOrchard = Math.hypot(x - 50, z - 22) < 22 || Math.hypot(x + 34, z - 20) < 18;
-          if (!nearOrchard) continue;
+        if (!plan.rule.ignoreStructures && blockedByStructure(x, z, plan.rule.clearance)) continue;
+        if (plan.rule.spacing !== undefined) {
+          const spacing = plan.rule.spacing;
+          let crowded = false;
+          for (let i = planStart; i < records.length; i++) {
+            if (Math.hypot(records[i].x - x, records[i].z - z) < spacing) { crowded = true; break; }
+          }
+          if (crowded) continue;
         }
+
         if (plan.kind === 'palm') {
           // Palms belong on the shoreline, not scattered across the meadows.
           const coastal = [[9, 0], [-9, 0], [0, 9], [0, -9]].some(
@@ -615,7 +682,7 @@ export class Foliage {
       g.translate(Math.cos(a) * 0.42, 0, Math.sin(a) * 0.42);
       petals.push(g);
     }
-    const merged = mergeSimple(petals);
+    const merged = mergeGeometries(petals);
     merged.scale(0.24, 0.24, 0.24);
     merged.translate(0, 0.26, 0);
 
@@ -676,7 +743,7 @@ export class Foliage {
   private buildGrass(rng: Rng, density: number): void {
     // A tuft of three crossed blades. uv.y drives the wind stiffness.
     const blade = makeBladeGeometry();
-    const tuft = mergeSimple([
+    const tuft = mergeGeometries([
       blade.clone().rotateY(0),
       blade.clone().rotateY(1.1).translate(0.06, 0, 0.04),
       blade.clone().rotateY(2.3).translate(-0.05, 0, -0.05),
@@ -823,44 +890,3 @@ function makeBladeGeometry(): BufferGeometry {
   return geometry;
 }
 
-/**
- * Minimal geometry merge for non-indexed/indexed position+uv+normal buffers.
- * Avoids pulling in BufferGeometryUtils for the handful of merges we need.
- */
-function mergeSimple(geometries: BufferGeometry[]): BufferGeometry {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  let offset = 0;
-
-  for (const geometry of geometries) {
-    const pos = geometry.getAttribute('position');
-    const nor = geometry.getAttribute('normal');
-    const uv = geometry.getAttribute('uv');
-    for (let i = 0; i < pos.count; i++) {
-      positions.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-      if (nor) normals.push(nor.getX(i), nor.getY(i), nor.getZ(i));
-      if (uv) uvs.push(uv.getX(i), uv.getY(i));
-      else uvs.push(0, 0);
-    }
-    const index = geometry.getIndex();
-    if (index) {
-      for (let i = 0; i < index.count; i++) indices.push(index.getX(i) + offset);
-    } else {
-      for (let i = 0; i < pos.count; i++) indices.push(i + offset);
-    }
-    offset += pos.count;
-  }
-
-  const merged = new BufferGeometry();
-  merged.setAttribute('position', new Float32BufferAttribute(positions, 3));
-  merged.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
-  merged.setIndex(indices);
-  if (normals.length === positions.length) {
-    merged.setAttribute('normal', new Float32BufferAttribute(normals, 3));
-  } else {
-    merged.computeVertexNormals();
-  }
-  return merged;
-}

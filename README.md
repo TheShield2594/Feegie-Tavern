@@ -59,9 +59,10 @@ is wired into a world system — and a tree whose canopy has come unstuck from
 its trunk is obvious in a picture and subtle in a bounding box.
 
 `assets:map` draws the whole island the same way: terrain and surfaces from
-`world/heightfield.ts` itself, building footprints from the `BUILDINGS` table,
-foliage from a replay of `Foliage`'s scatter at the same seed, and the shipped
-kit art. **It is not a screenshot of the game** — no water shader, sky, lighting,
+`world/heightfield.ts` itself — including the creek, at the level the stream
+actually stands rather than the level of its bed — building footprints from the
+`BUILDINGS` table, foliage from a replay of `Foliage`'s scatter at the same
+seed, and the shipped kit art. **It is not a screenshot of the game** — no water shader, sky, lighting,
 shadows, wind, season tint, post-processing or characters — and should never be
 presented as one. It answers "is the art in the right places", which is useful
 when the game itself cannot be built (see issue #21).
@@ -99,7 +100,8 @@ src/
   core/        Game orchestrator, typed event bus
   rendering/   renderer + post chain, sky, lighting rig, camera, particles, weather FX,
                procedural surface textures, world-space labels and emote bubbles
-  world/       heightfield, terrain, water, foliage, scatter, wildlife, props, buildings, interiors, minimap
+  world/       heightfield, terrain, ocean + creek water, regions, foliage, scatter, wildlife,
+               props, region landmarks, buildings, interiors, minimap
   assets/      kit manifest, GLB loader, and the registry world systems pull kit geometry from
   player/      character rig, procedural animator, tools, movement controller
   npc/         navigation grid, villagers, schedules
@@ -126,12 +128,58 @@ ground is. Coastal landmarks (the pier, the dunes, the driftwood log) are
 *measured* from the generated shoreline rather than hard-coded, so reshaping the
 island moves them with it.
 
+### The island is divided into regions
+
+`src/world/regions.ts` is the other table everything reads. It names nine
+places — the town, the beach, the cove, the creek, the High Meadow, the West
+Grove, the Secret Orchard, the Garden Terrace and Lighthouse Point — and says
+which habitats each one holds. One lookup, `regionAt(x, z)`, decides what the
+bug net catches, what the creek's fish pool contains, where forage grows, what
+the banner says when you walk in and which pins the map draws.
+
+That gives each region something only it has:
+
+| Region | Why you walk there |
+| --- | --- |
+| **The Creek** | The only fresh water. Seven species live in it and in nothing else; nothing from the cove bites there. Creek cress grows on the banks. |
+| **High Meadow** | Standing stones on the skyline, the pool the creek rises from, the Spring Goldfin that never leaves it, the Ridge Skipper, and ridge herb. |
+| **West Grove** | The elder tree and its lanterns, the Grove Stag Beetle after dark, and grove mushrooms under the pines. |
+| **Secret Orchard** | Behind a hedge with one locked gate. The island's pear trees, and the Blossom Moth. |
+| **Garden Terrace** | The creek runs through it, so plots inside it never dry out overnight. Crops grow anywhere; only here do they water themselves. |
+| **Lighthouse Point** | The headland the island's stone comes from, a keeper's camp, a spyglass, and the Beacon Moth — which only appears once the light is working. |
+
+Two independent gates decide what turns up. `habitat` is the loose rule (a
+meadow butterfly is happy anywhere grassy, never in the pines); `region` pins a
+species to exactly one place. Adding a region is an entry in `REGIONS` plus
+whatever dressing `world/Landmarks.ts` gives it — no new conditions threaded
+through fishing, the net and the scatter rules separately.
+
+### Fresh water is not salt water
+
+The creek is real water, not a ditch. `creekSurfaceHeight` stands the stream a
+fixed depth above the channel the heightfield carves, so it follows the island
+downhill in one run — pooling where the meadow and the terrace flatten it,
+quickening where the ridge drops away, and settling onto sea level at the mouth
+rather than meeting it at a step. `world/CreekWater.ts` meshes that surface into
+its own ribbon, because the ocean is one plane at y = 0 that discards itself
+wherever the seabed is above sea level.
+
+Casting into it draws from a separate pool. The split is made once, at module
+load in `fishing/FishingSystem.ts`, rather than by weighting a single list: a
+Bluegill cannot be pulled out of the cove at any odds, and a Velvet Ray cannot
+be pulled out of the creek.
+
+The stream is bridged at two points and forded at a third — the bridge and the
+ford are `PLATFORM` entries, so the player walks over them, and villager
+navigation refuses the water everywhere else.
+
 ### Everything is data-driven
 
 Species, items, furniture, clothing, villagers, dialogue, recipes, quests and
 public works are typed tables under `src/data/`. Adding a fish is one entry; it
 immediately appears in the fishing tables, the bag, the museum's aquarium wing,
-the collection screen and the map of what is left to find.
+the collection screen and the map of what is left to find. Give it a `region`
+and it appears in exactly one place on the island and nowhere else.
 
 ---
 
@@ -205,7 +253,9 @@ buffer instead of rebuilding geometry.
 
 The vertical slice — **Town Square → Beach → Player House**, plus the museum,
 the store, the town hall and the lighthouse point — is built to the intended
-visual bar: sculpted terrain with a real beach shelf, depth-aware ocean with
+visual bar, and the six regions beyond it (the creek, the High Meadow, the West
+Grove, the Secret Orchard, the Garden Terrace and Lighthouse Point) now each
+have a landmark, a reason to walk there and something that lives only there: sculpted terrain with a real beach shelf, depth-aware ocean with
 shoreline foam, instanced foliage that moves in the wind, procedural buildings
 with doors, windows, signs, lamps and landscaping, a full day cycle with five
 weather states, animated characters, walkable interiors, and the complete
@@ -217,8 +267,7 @@ in these groups:
 
 - **Gameplay not yet built** — diving (#1), insects as world entities (#2),
   outdoor landscaping (#4), multi-room housing (#5), tabletop placement (#6),
-  festivals (#7), the regions outside the slice (#8), deeper quests and a
-  second story chapter (#19)
+  festivals (#7), deeper quests and a second story chapter (#19)
 - **Known bugs** — villagers never appear indoors (#3), unwired interaction
   hooks including doors and sleeping (#17), grass popping (#16), the rowboat
   hull (#15)
@@ -229,6 +278,8 @@ in these groups:
 - **Engineering** — no automated tests (#12), LOD and lazy loading (#13), and
   a real device pass for tablets and phones (#14)
 
-The architecture leaves space for each: regions are driven by the heightfield,
-decorations by the same instancing used for foliage, and new species, recipes or
-villagers are one typed entry apiece.
+The architecture leaves space for each: a new region is an entry in `REGIONS`
+plus its dressing, decorations use the same instancing as foliage, and new
+species, recipes or villagers are one typed entry apiece. Extending the
+coastline or adding a second island is a data change plus scatter rules —
+everything reads the heightfield.
