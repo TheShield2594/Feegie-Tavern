@@ -529,6 +529,47 @@ would have kept doing so. It now derives that table from `SOUNDS`, listing only
 packs the game actually plays a file from, and **exits non-zero if a shipped
 sound has no pack entry**, so an uncreditable, untraceable sound cannot slip in.
 
+### 9.5b Mono fold-down for positional SFX (added after the first commit)
+
+Context that arrived after the assets landed: **this is headed for a self-hosted
+multiplayer build**, browser-only testing first. That does not change a single
+licence — CC0 covers a server redistributing assets to clients with no
+obligation, which is §8 decision 4 earning its keep — but it does promote one
+item in §5 from nice-to-have to required.
+
+A `PannerNode` spatialises a **mono** source. The shipped effects measure:
+
+| File | Channels | |
+| --- | --- | --- |
+| `footstep_grass/wood/concrete/carpet_000.ogg`, `cloth3.ogg`, `chop.ogg` | 2 | positional — must fold down |
+| `click_001.ogg`, `back_001.ogg` | 1 | UI, non-positional — already mono |
+
+Exactly the six that will be positioned are stereo. Fed to a panner as-is, their
+own stereo image fights the panner's placement and a footstep meant to come from
+a point on the island smears across both ears. There is no spatial audio in the
+codebase yet (no `PannerNode` anywhere; `playBuffer` connects straight to the
+channel gain), so this is preparation — but the files are on disk now and doing
+it later means revisiting every one.
+
+**The transcode blocker in §9.5 does not apply here.** That blocker is real for
+re-encoding files on disk (no ffmpeg, no `oggenc`). The fold-down instead happens
+once at load, in `loadBuffer`, after `decodeAudioData` — so it needs no tooling
+at all, and it halves the decoded footprint of every positional effect today.
+
+Which sounds fold down is data, not a heuristic: `SoundDef.mono` in `sounds.ts`,
+set on those six. Non-positional sounds (UI, music, ambience, and `thunder`,
+which is on the `sfx` channel but is not a point source) keep the width they
+were recorded with.
+
+`mixToMono` lives in its own module taking `Float32Array`s rather than an
+`AudioBuffer`, specifically so it can be tested without a browser —
+`npm run audio:verify`, and it **was run**: 10 checks, all passing. They cover
+the quiet failures (a fold-down that halves amplitude on correlated material,
+or overruns a shorter destination) plus NaN safety, since one NaN sample
+poisons the graph and silences the whole mixer rather than one sound. Two of
+the ten check the data instead of the maths: no sound is flagged `mono` without
+a `src`, and nothing off the `sfx` channel is flagged.
+
 ### 9.6 Asset payload measured
 
 | Group | Bytes |
@@ -586,3 +627,29 @@ addition is built, and the JS bundle is otherwise untouched by this commit; the
 3. **A decision on Tallbeard (#15):** either permission for itch.io's
    "name your own price" download flow, or a different CC0 music source, which
    would be a change to §3 and so is the owner's call.
+
+### 9.9 Open for the self-hosted multiplayer build
+
+Neither of these is asset work, and neither is done. Recorded here because both
+were found while checking what the multiplayer target changes, and both get more
+expensive the later they are picked up.
+
+- **Assets in `public/` carry no cache-busting.** Vite content-hashes the bundle
+  chunks but copies `public/` verbatim, so `nature.glb` and the eight OGGs are
+  served on unhashed URLs. Self-hosting means you own the headers, so the choice
+  is long `Cache-Control` plus a versioned filename, or moving kits into
+  `src/assets/` and importing them so Vite hashes them. **Left undecided on
+  purpose** — it depends on how the server deploys and patches art, and picking
+  wrong means rewriting every manifest path. Cheapest to settle now, while there
+  is exactly one kit.
+- **`Math.random()` in gameplay will diverge across clients.** The world itself
+  is already safe: `world/heightfield.ts` is pure and deterministic and imports
+  no `three`, so an authoritative headless server can share it directly, and
+  `Foliage` scatters from a fixed seed (`new Rng(90210)`), so trees land
+  identically everywhere with nothing synced — and the asset swap cannot break
+  that, since placement depends on the Rng and the heightfield, never on
+  geometry. What does diverge: `fishing/FishingSystem.ts` (bite timing, struggle,
+  and the loot roll at line 470 — what you catch has to become server
+  authoritative) and `npc/Villager.ts` (wander timers and direction, so NPCs walk
+  different paths per client). `Foliage.ts:448` (shake phase) and
+  `player/CharacterRig.ts` (blink timers) are cosmetic and can stay as they are.

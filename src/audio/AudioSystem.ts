@@ -1,4 +1,5 @@
 import { clamp01, damp } from '@/util/math';
+import { mixToMono } from './downmix';
 import {
   AMBIENCE_BY_ID,
   MUSIC_BY_ID,
@@ -129,10 +130,29 @@ export class AudioSystem {
     try {
       const res = await fetch(url);
       const raw = await res.arrayBuffer();
-      this.buffers.set(id, await this.ctx.decodeAudioData(raw));
+      const decoded = await this.ctx.decodeAudioData(raw);
+      this.buffers.set(id, SOUNDS_BY_ID.get(id)?.mono ? this.toMono(decoded) : decoded);
     } catch (err) {
       console.warn(`[audio] Failed to load ${url}; keeping placeholder`, err);
     }
+  }
+
+  /**
+   * Collapses a decoded buffer to one channel, for sounds flagged `mono` in
+   * `sounds.ts` because they will be positioned in the world.
+   *
+   * Already-mono input is returned untouched rather than copied.
+   */
+  private toMono(buffer: AudioBuffer): AudioBuffer {
+    const ctx = this.ctx!;
+    if (buffer.numberOfChannels <= 1) return buffer;
+
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+
+    const mono = ctx.createBuffer(1, buffer.length, buffer.sampleRate);
+    mixToMono(channels, mono.getChannelData(0));
+    return mono;
   }
 
   playSound(id: string, options: { volume?: number; rate?: number } = {}): void {
