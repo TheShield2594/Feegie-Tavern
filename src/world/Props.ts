@@ -93,6 +93,31 @@ export class Props {
   private campfire: { light: PointLight; glow: MeshStandardMaterial; position: Vector3 } | null = null;
   /** The Secret Orchard's gate, and the collider that keeps it secret. */
   readonly orchardGate: OrchardGate;
+  /** The moored rowboat, kept so `update` can ride it on the swell. */
+  private rowboat: { group: Group; x: number; z: number; heading: number } | null = null;
+
+  // Rowboat dimensions, in metres, measured from the waterline. The hull is
+  // built around these so the freeboard is stated once rather than implied by
+  // a stack of offsets.
+  /** Half-beam where the topside meets the rounded bottom. */
+  private static readonly BOAT_CHINE_RADIUS = 1.16;
+  /** Half-beam at the gunwale — the topside flares out to here. */
+  private static readonly BOAT_BEAM_RADIUS = 1.3;
+  /** The hull is a body of revolution stretched this much along its length. */
+  private static readonly BOAT_LENGTH_SCALE = 2.3;
+  /** How far the chine sits below the surface. */
+  private static readonly BOAT_CHINE_Y = -0.26;
+  /** Chine to gunwale: the visible side of the hull. */
+  private static readonly BOAT_FREEBOARD = 0.86;
+  private static readonly BOAT_GUNWALE_Y = Props.BOAT_CHINE_Y + Props.BOAT_FREEBOARD;
+  /**
+   * The sole, above the surface. The ocean is one unbroken plane that passes
+   * straight through the hull, so anything inside the boat below the waterline
+   * is drawn under water and the boat reads as swamped. Decking over at this
+   * height hides the flooded bilge and leaves the interior dry, with enough
+   * margin for the fine ripple the CPU swell does not model.
+   */
+  private static readonly BOAT_SOLE_Y = 0.18;
   /** Signposts with their label, so the map and the world agree. */
   readonly signposts: { x: number; z: number; label: string }[] = [];
 
@@ -438,41 +463,84 @@ export class Props {
     this.lampGlass.push(lamp.glass);
   }
 
+  /**
+   * The rowboat moored off the pier head.
+   *
+   * Local Y is the waterline: the group rides the swell in `update`, so every
+   * offset below is freeboard or draught and stays true whatever the weather
+   * is doing. The hull is a rounded forefoot capped with a flared topside
+   * band, rather than a bare hemisphere — the band is what gives the boat a
+   * visible side above the water instead of a blue ring floating on the sea.
+   */
   private makeRowboat(x: number, z: number, rotation: number): Group {
     const boat = new Group();
-    // Floats on the waterline rather than sitting on the terrain.
-    boat.position.set(x, SEA_LEVEL + 0.52, z);
+    boat.position.set(x, SEA_LEVEL, z);
+    // Heading first, then pitch and roll about the boat's own axes.
+    boat.rotation.order = 'YXZ';
     boat.rotation.y = rotation;
 
     const hullMaterial = createStylizedMaterial({ color: '#d8e0e4', roughness: 0.8 });
     const trimMaterial = createStylizedMaterial({ color: '#4a7fa8', roughness: 0.8 });
+    const plankMaterial = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.9 });
 
-    // The hull is seen from above, so it needs both faces.
+    // Open at the top, so both faces are seen: the far topside from inside.
     hullMaterial.side = DoubleSide;
-    const hull = new Mesh(new SphereGeometry(1.3, 16, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), hullMaterial);
-    hull.scale.set(1.0, 0.62, 2.3);
-    hull.castShadow = true;
-    hull.receiveShadow = true;
-    boat.add(hull);
 
-    const floorBoard = new Mesh(
-      roundedBoxGeometry(1.9, 0.06, 4.4, 0.3),
-      createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.9 }),
+    // Rounded bottom, from the chine down. Half of it sits under the surface.
+    const bottom = new Mesh(
+      new SphereGeometry(Props.BOAT_CHINE_RADIUS, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+      hullMaterial,
     );
-    floorBoard.position.y = -0.34;
-    boat.add(floorBoard);
+    bottom.position.y = Props.BOAT_CHINE_Y;
+    bottom.scale.set(1.0, 0.62, Props.BOAT_LENGTH_SCALE);
+    bottom.castShadow = true;
+    bottom.receiveShadow = true;
+    boat.add(bottom);
 
-    const rim = new Mesh(new TorusGeometry(1.28, 0.09, 6, 20), trimMaterial);
+    // Topside: chine to gunwale, flaring outwards the way a dinghy's does.
+    const topside = new Mesh(
+      new CylinderGeometry(Props.BOAT_BEAM_RADIUS, Props.BOAT_CHINE_RADIUS, Props.BOAT_FREEBOARD, 16, 1, true),
+      hullMaterial,
+    );
+    topside.position.y = Props.BOAT_CHINE_Y + Props.BOAT_FREEBOARD / 2;
+    topside.scale.set(1.0, 1.0, Props.BOAT_LENGTH_SCALE);
+    topside.castShadow = true;
+    topside.receiveShadow = true;
+    boat.add(topside);
+
+    // The sole. Cut from the same 16-gon as the topside and a shade narrower,
+    // so its edge tucks behind the planking instead of poking through it.
+    const sole = new Mesh(new CylinderGeometry(Props.boatHalfBeamAt(Props.BOAT_SOLE_Y) - 0.02, Props.boatHalfBeamAt(Props.BOAT_SOLE_Y) - 0.02, 0.06, 16), plankMaterial);
+    sole.position.y = Props.BOAT_SOLE_Y;
+    sole.scale.set(1.0, 1.0, Props.BOAT_LENGTH_SCALE);
+    sole.receiveShadow = true;
+    boat.add(sole);
+
+    const rim = new Mesh(new TorusGeometry(Props.BOAT_BEAM_RADIUS, 0.09, 6, 20), trimMaterial);
     rim.rotation.x = Math.PI / 2;
-    rim.scale.set(1.0, 2.3, 1);
+    rim.scale.set(1.0, Props.BOAT_LENGTH_SCALE, 1);
+    rim.position.y = Props.BOAT_GUNWALE_Y;
     boat.add(rim);
 
+    // Thwarts, set a little below the gunwale and wide enough to reach it.
+    const thwartY = Props.BOAT_GUNWALE_Y - 0.16;
+    // The flats of the 16-gon sit inside its vertices, so span the inradius.
+    const thwartWidth = Props.boatHalfBeamAt(thwartY) * 2 * Math.cos(Math.PI / 16);
     for (const dz of [-0.7, 0.5]) {
-      const seat = new Mesh(new BoxGeometry(2.0, 0.1, 0.34), createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.9 }));
-      seat.position.set(0, 0.05, dz);
+      const seat = new Mesh(new BoxGeometry(thwartWidth, 0.1, 0.34), plankMaterial);
+      seat.position.set(0, thwartY, dz);
+      seat.castShadow = true;
       boat.add(seat);
     }
+
+    this.rowboat = { group: boat, x, z, heading: rotation };
     return boat;
+  }
+
+  /** Half-beam of the rowboat's flaring topside at a height above the water. */
+  private static boatHalfBeamAt(y: number): number {
+    const t = (y - Props.BOAT_CHINE_Y) / Props.BOAT_FREEBOARD;
+    return Props.BOAT_CHINE_RADIUS + (Props.BOAT_BEAM_RADIUS - Props.BOAT_CHINE_RADIUS) * t;
   }
 
   // --- Bridge and stairs ---------------------------------------------------
@@ -1039,7 +1107,7 @@ export class Props {
     return best;
   }
 
-  update(dt: number, darkness: number, time: number): void {
+  update(dt: number, darkness: number, time: number, waterHeight: (x: number, z: number) => number): void {
     const glow = smoothstep(0.22, 0.55, darkness);
     for (let i = 0; i < this.lampLights.length; i++) {
       // A touch of flicker keeps the lamps from looking like flat emissives.
@@ -1057,6 +1125,37 @@ export class Props {
       this.campfire.light.intensity = lit * 9 * flicker;
       this.campfire.glow.emissiveIntensity = lit * 2.6 * flicker;
     }
+    this.floatRowboat(waterHeight);
+  }
+
+  /**
+   * Rides the moored rowboat on the swell.
+   *
+   * Sampling the surface at four points around the hull rather than one keeps
+   * the freeboard constant in any weather and lets the boat heel into the
+   * trough, which is what sells it as floating rather than pinned. The
+   * gradients are gentle — the swell is tens of metres long — so the heel is a
+   * degree or two, and the roll is deliberately not damped or given momentum:
+   * a boat on a mooring follows the water it sits in.
+   */
+  private floatRowboat(waterHeight: (x: number, z: number) => number): void {
+    if (!this.rowboat) return;
+    const { group, x, z, heading } = this.rowboat;
+    // Unit vectors for the boat's own axes, projected onto the water.
+    const fwdX = Math.sin(heading);
+    const fwdZ = Math.cos(heading);
+    const halfLength = Props.BOAT_LENGTH_SCALE * Props.BOAT_BEAM_RADIUS;
+    const halfBeam = Props.BOAT_BEAM_RADIUS;
+
+    const bow = waterHeight(x + fwdX * halfLength, z + fwdZ * halfLength);
+    const stern = waterHeight(x - fwdX * halfLength, z - fwdZ * halfLength);
+    const starboard = waterHeight(x + fwdZ * halfBeam, z - fwdX * halfBeam);
+    const port = waterHeight(x - fwdZ * halfBeam, z + fwdX * halfBeam);
+
+    group.position.y = (bow + stern + starboard + port) * 0.25;
+    // Positive rotation.x dips the bow, so the slope is negated.
+    group.rotation.x = -(bow - stern) / (2 * halfLength);
+    group.rotation.z = (starboard - port) / (2 * halfBeam);
   }
 
   /** Where the beach fire burns and how strongly, for particles and audio. */

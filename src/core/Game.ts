@@ -752,7 +752,7 @@ export class Game {
       this.foliage.update(dt, this.player.position.x, this.player.position.z);
       this.updateAmbientEffects(dt, lightingOutput.darkness, weather.precipitation);
       this.foliage.setGrassDistance(this.renderer.profile.grassDistance);
-      this.props.update(dt, lightingOutput.darkness, this.elapsed);
+      this.props.update(dt, lightingOutput.darkness, this.elapsed, (x, z) => this.water.surfaceHeight(x, z));
       this.wildlife.update(dt, 1 - lightingOutput.darkness, weather.precipitation, time.season, weather.wind, camera.position.x, camera.position.z);
       this.buildings.update(dt, lightingOutput.darkness, this.townWorks.lighthouse, this.time.hour);
       this.fishSchools.update(dt, this.elapsed, camera.position.x, camera.position.z);

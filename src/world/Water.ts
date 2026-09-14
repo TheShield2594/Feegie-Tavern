@@ -13,7 +13,8 @@ import {
   Vector3,
 } from 'three';
 import { PALETTE } from '@/rendering/palette';
-import { ISLAND_HALF, SEA_LEVEL, terrainHeight } from './heightfield';
+import { smoothstep } from '@/util/math';
+import { ISLAND_HALF, SEA_LEVEL, terrainHeight, waterDepth } from './heightfield';
 
 /**
  * Ocean and creek surface.
@@ -254,11 +255,24 @@ export class Water {
     this.mesh.position.z = z;
   }
 
-  /** Surface height at a point, matching the vertex shader closely enough for gameplay. */
-  surfaceHeight(x: number, z: number, time: number): number {
+  /**
+   * Surface height at a point, on the CPU, for anything that has to float.
+   *
+   * Mirrors the vertex shader's two long swells, including the shallow-water
+   * damping — a boat moored in two metres of water rises half as far as one in
+   * open sea. The fine ripple is left out: whatever is asking is riding the
+   * swell, not chasing centimetre chop. Amplitude is read from the live
+   * uniforms rather than passed in, so it tracks the weather exactly as the
+   * shader does; `update` runs first each frame, so the values are current.
+   */
+  surfaceHeight(x: number, z: number): number {
+    const u = this.material.uniforms;
+    const time = u.uTime.value as number;
+    const shore = smoothstep(0, 3.2, waterDepth(x, z));
+    const amp = shore * 0.42 * (0.55 + (u.uWind.value as number) * 0.9) * (u.uChoppiness.value as number) * 3.0;
     const a = Math.sin(x * 0.085 + time * 0.85) * Math.cos(z * 0.062 - time * 0.6);
     const b = Math.sin(x * 0.041 - z * 0.052 + time * 1.25);
-    return SEA_LEVEL + (a * 0.55 + b * 0.32) * 0.3;
+    return SEA_LEVEL + (a * 0.55 + b * 0.32) * amp;
   }
 
   dispose(): void {
