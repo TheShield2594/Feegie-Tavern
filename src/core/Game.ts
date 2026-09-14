@@ -110,6 +110,20 @@ const INSECT_WORD: Record<string, string> = {
   dragonfly: 'Dragonfly',
 };
 
+/**
+ * An interior's anchors in world space. Rooms are modelled around their own
+ * origin and the root that holds them is offset, so anything outside the room
+ * — the interaction prompts, the villagers standing in it — has to add that
+ * offset back to compare against the player.
+ */
+function worldAnchors(interior: InteriorScene): Record<string, Vector3> {
+  const out: Record<string, Vector3> = {};
+  for (const [key, local] of Object.entries(interior.anchors)) {
+    out[key] = new Vector3(local.x + INTERIOR_ORIGIN.x, local.y + INTERIOR_ORIGIN.y, local.z + INTERIOR_ORIGIN.z);
+  }
+  return out;
+}
+
 type Mode = 'title' | 'exterior' | 'interior' | 'decorating' | 'building';
 
 export class Game {
@@ -296,11 +310,18 @@ export class Game {
       ...this.buildings.colliders.map((c) => ({ x: c.x, z: c.z, radius: Math.max(c.halfW, c.halfD) + 0.8 })),
       ...this.props.colliders,
     ];
-    this.villagers = new VillagerManager(this.bus, obstacles);
+    const doors = new Map<BuildingId, { doorway: Vector3; facing: number }>();
+    for (const [id, building] of this.buildings.instances) {
+      doors.set(id, { doorway: building.doorway, facing: building.doorFacing });
+    }
+    this.villagers = new VillagerManager(this.bus, obstacles, doors);
     // The same list keeps a bench off somebody's doorstep. Landscaping is built
     // with the rest of the game systems, before there is a world to consult.
     this.landscaping.obstacles = obstacles;
-    this.exteriorRoot.add(this.villagers.group);
+    // Villagers sit outside both roots: a villager can be in the room the
+    // player is standing in, and `exteriorRoot` is hidden wholesale indoors.
+    // Each one's own visibility says which world they are currently in.
+    scene.add(this.villagers.group);
 
     this.player = new Player(this.bus, this.look);
     scene.add(this.player.group);
@@ -863,7 +884,7 @@ export class Game {
       this.foliage.update(dt, this.player.position.x, this.player.position.z);
       this.updateAmbientEffects(dt, lightingOutput.darkness, weather.precipitation);
       this.foliage.setGrassDistance(this.renderer.profile.grassDistance);
-      this.props.update(dt, lightingOutput.darkness, this.elapsed);
+      this.props.update(dt, lightingOutput.darkness, this.elapsed, (x, z) => this.water.surfaceHeight(x, z));
       this.wildlife.update(dt, 1 - lightingOutput.darkness, weather.precipitation, time.season, weather.wind, camera.position.x, camera.position.z);
       this.buildings.update(dt, lightingOutput.darkness, this.townWorks.lighthouse, this.time.hour);
       this.fishSchools.update(dt, this.elapsed, camera.position.x, camera.position.z);
@@ -876,7 +897,6 @@ export class Game {
       });
       this.landscaping.setLightLevel(lightingOutput.darkness);
       this.farm.update(dt);
-      if (advance) this.villagers.update(dt, this.time.hour, this.player.position);
       this.drops.update(dt, this.player.position, (x, z) => walkHeight(x, z));
     } else {
       this.updateInteriorWalls(camera.position);
@@ -884,6 +904,11 @@ export class Game {
       this.furnishing.setLightLevel(clamp01(lightingOutput.darkness * 1.6 + 0.35));
       this.drops.update(dt, this.player.position, () => 0);
     }
+
+    // Villagers run in both modes: the island keeps its day while the player
+    // is indoors, and whoever is in the room with them has to be animated.
+    if (advance) this.villagers.update(dt, this.time.hour, this.player.position);
+    else this.villagers.refreshPresence();
 
     this.weatherFX.update(dt, weather, camera.position, lightingOutput.darkness, indoors, time.season);
     this.underwaterFX.setStrength(indoors ? 0 : this.underwater);
@@ -1434,6 +1459,7 @@ export class Game {
       this.interiorRoot.visible = true;
       this.exteriorRoot.visible = false;
       this.weatherFX.group.visible = false;
+      this.villagers.setActiveInterior({ building: id, anchors: worldAnchors(interior) });
 
       this.mode = 'interior';
       this.player.teleport(
@@ -1491,6 +1517,8 @@ export class Game {
 
   private disposeInterior(): void {
     if (!this.activeInterior) return;
+    // The anchors go with the room, so nobody may keep pointing at them.
+    this.villagers.setActiveInterior(null);
     // Keep the furnishing group alive; it belongs to the game, not the room.
     if (this.furnishing.group.parent === this.activeInterior.group) {
       this.interiorRoot.add(this.furnishing.group);
@@ -1786,9 +1814,13 @@ export class Game {
 
   // --- Interactions --------------------------------------------------------
 
-  private registerExteriorInteractions(): void {
-    this.interactions.clear();
-
+  /**
+   * Talking to whoever is standing nearby. Registered in interiors as well as
+   * outdoors: the shopkeeper behind the counter and the curator at her desk
+   * are ordinary neighbours who happen to be indoors, and the manager only
+   * offers up the ones in the same room as the player.
+   */
+  private registerVillagerInteraction(): void {
     this.interactions.register('villagers', () => {
       const villager = this.villagers.nearest(this.player.position, 3.2);
       if (!villager) return null;
@@ -1807,6 +1839,12 @@ export class Game {
         perform: () => this.talkTo(villager.def.id),
       } satisfies InteractionOption;
     });
+  }
+
+  private registerExteriorInteractions(): void {
+    this.interactions.clear();
+
+    this.registerVillagerInteraction();
 
     this.interactions.register('doors', () => {
       const options: InteractionOption[] = [];
@@ -2091,6 +2129,8 @@ export class Game {
     this.interactions.clear();
     const world = (v: Vector3) => new Vector3(v.x + INTERIOR_ORIGIN.x, v.y, v.z + INTERIOR_ORIGIN.z);
 
+    this.registerVillagerInteraction();
+
     this.interactions.register('exit', () => {
       const exit = world(interior.anchors.exit);
       if (exit.distanceTo(this.player.position) > 2.4) return null;
@@ -2166,7 +2206,8 @@ export class Game {
     }
 
     if (interior.id === 'museum') {
-      anchorPrompt('curator', 'Talk to Juniper', 82, () => this.talkTo('juniper'), 3.0);
+      // No standing "Talk to Juniper" at the desk: she is a villager in the
+      // room now, so the prompt follows her, and is absent when she is out.
       this.interactions.register('donate', () => {
         const curator = world(interior.anchors.curator);
         if (curator.distanceTo(this.player.position) > 3.0) return null;

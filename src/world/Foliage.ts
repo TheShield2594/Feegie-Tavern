@@ -16,11 +16,11 @@ import {
   Vector3,
 } from 'three';
 import type { AssetManager } from '@/assets/AssetManager';
-import { createStylizedMaterial } from '@/rendering/materials';
+import { createStylizedMaterial, type DistanceFadeUniforms } from '@/rendering/materials';
 import { PALETTE, SEASON_TINT } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
 import { mergeGeometries } from '@/util/three';
-import { clamp01, lerp, smoothstep } from '@/util/math';
+import { clamp, clamp01, lerp, smoothstep } from '@/util/math';
 import { ISLAND_HALF, PATHS, sampleSurface } from './heightfield';
 
 export type TreeKind = 'broadleaf' | 'pine' | 'palm' | 'fruit';
@@ -182,8 +182,15 @@ export class Foliage {
   private flowers: InstancedMesh | null = null;
   private flowerCenters: InstancedMesh | null = null;
 
-  /** Grass is chunked so distant chunks can be hidden wholesale. */
-  private grassChunks: { mesh: InstancedMesh; cx: number; cz: number }[] = [];
+  /**
+   * Grass chunks, each with the bounding box of the tufts actually placed in
+   * it — not of the 20 m square it was drawn from. Most chunks are part water,
+   * path or hillside, so the real extent is usually a good deal smaller. A box
+   * rather than a circle because the chunks are axis-aligned: measuring to the
+   * near edge costs a chunk's half-diagonal less slack than measuring to the
+   * centre, which is most of what the old fixed 15 m allowance was paying for.
+   */
+  private grassChunks: { mesh: InstancedMesh; minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
   private grassDistance = 58;
 
   private dummy = new Object3D();
@@ -234,7 +241,11 @@ export class Foliage {
     side: DoubleSide,
     transparent: true,
     alphaTest: 0.32,
+    distanceFade: true,
   });
+
+  /** The grass material's fade controls, driven from `update`. */
+  private grassFade = this.grassMaterial.userData.distanceFade as DistanceFadeUniforms;
 
   private flowerMaterial = createStylizedMaterial({
     color: '#ffffff',
@@ -785,7 +796,21 @@ export class Foliage {
         });
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        this.grassChunks.push({ mesh, cx: originX + chunkSize / 2, cz: originZ + chunkSize / 2 });
+
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const g of placed) {
+          minX = Math.min(minX, g.x);
+          maxX = Math.max(maxX, g.x);
+          minZ = Math.min(minZ, g.z);
+          maxZ = Math.max(maxZ, g.z);
+        }
+        // Tufts are up to 1.15 across and lean downwind; pad the box so a
+        // blade on the rim is never the thing that decides the cull.
+        const pad = 1.5;
+        this.grassChunks.push({ mesh, minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad });
         this.group.add(mesh);
       }
     }
@@ -826,13 +851,26 @@ export class Foliage {
       }
     }
 
-    // Chunks are 20 m square, so allow for their half-diagonal before hiding
-    // one; otherwise a chunk the player is standing at the edge of vanishes.
-    const cull = this.grassDistance + 15;
-    const cullSq = cull * cull;
+    // Grass reaches full size out to `grassDistance` and shrinks away over the
+    // band beyond it. The band is a share of the radius, so the tightest
+    // quality profile — where the pop was worst — still gets several metres of
+    // walking to fade over rather than a fixed slab of its shorter draw
+    // distance.
+    const band = clamp(this.grassDistance * 0.14, 4, 9);
+    const fadeEnd = this.grassDistance + band;
+    this.grassFade.origin.value.set(cameraX, 0, cameraZ);
+    this.grassFade.distance.value = fadeEnd;
+    this.grassFade.band.value = band;
+
+    // Hiding a chunk is now only a draw-call saving: the test is against the
+    // nearest tuft in it, not the centre, so by the time a chunk switches off
+    // every blade in it has already shrunk to nothing and the toggle itself
+    // can never be seen.
+    const fadeEndSq = fadeEnd * fadeEnd;
     for (const chunk of this.grassChunks) {
-      const d = (chunk.cx - cameraX) ** 2 + (chunk.cz - cameraZ) ** 2;
-      chunk.mesh.visible = d < cullSq;
+      const dx = Math.max(chunk.minX - cameraX, 0, cameraX - chunk.maxX);
+      const dz = Math.max(chunk.minZ - cameraZ, 0, cameraZ - chunk.maxZ);
+      chunk.mesh.visible = dx * dx + dz * dz < fadeEndSq;
     }
   }
 
