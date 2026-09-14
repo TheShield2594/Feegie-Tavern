@@ -73,24 +73,33 @@ search results, not from my own inspection of the download pages.** Every such
 figure is marked *(unverified)* and must be confirmed against the official page
 at download time. Licenses are stated from well-established, consistent public
 information, but the authoritative check is the `License.txt` inside each
-archive — which is exactly what step §7.1 does before anything is committed.
+archive — which is exactly what step 1 of §7 does before anything is committed.
 
-### Options to unblock (your call)
+### Decision: option A — allowlist the official hosts
 
-- **A — Allowlist the hosts.** Add `kenney.nl`, `quaternius.com`,
-  `kaylousberg.com`, `*.itch.io`, `freesound.org`, `polyhaven.com` to the
-  environment's egress policy. Cleanest; I fetch from official sources and
-  verify licenses first-hand.
-- **B — You download, I integrate.** You drop the zips somewhere I can read
-  (commit to a branch, or attach). Slowest for you, zero policy change.
-- **C — GitHub-only mirrors.** Some CC0 packs are mirrored on GitHub
-  (e.g. `shorepine/kenney` reports a full glTF model tree; `ETdoFresh/kenney.nl`
-  mirrors the zips). CC0 is irrevocable and permits redistribution, so this is
-  *legally* fine, but provenance is third-party — I would have to diff contents
-  against the official listing to be confident. Requires `add_repo` for each.
-  **Recommended only as a fallback.**
+Approved 2026-09-14. The following need to be added to the environment's egress
+policy so assets can be fetched from their **official** sources:
 
-I recommend **A**, falling back to **B**.
+```
+kenney.nl
+quaternius.com
+kaylousberg.com
+*.itch.io
+freesound.org
+polyhaven.com
+ambientcg.com
+fonts.google.com
+fonts.gstatic.com
+```
+
+**Status: not yet in effect.** Re-checked `kenney.nl` and `quaternius.com` on
+2026-09-14 — both still return EGRESS_BLOCKED. This is an environment
+configuration change that has to be made outside this session; I cannot make it
+myself, and per the proxy's documentation I will not attempt to route around it.
+
+Because option A was chosen, the third-party GitHub mirrors are **off the
+table** — everything comes from the creator's own download page, so the
+`License.txt` in each archive is authoritative.
 
 ---
 
@@ -208,36 +217,80 @@ are the next payload concern. Per asset:
 
 ---
 
-## 7. Execution order, once approved
+## 7. Execution order, once unblocked
 
-1. **Verify before committing anything.** Download → open each `License.txt` →
-   confirm CC0/permissive → only then commit. Anything whose licence does not
-   match this plan gets dropped and reported, not quietly included.
+1. **Verify before committing anything.** Download from the official page →
+   open each `License.txt` → confirm CC0 → only then commit. Anything whose
+   licence does not match this plan gets dropped and reported, not quietly
+   included.
 2. Land `licenses/` + `ASSET_CREDITS.md` in the same commit as the assets.
-3. **Representative slice first** (deliberately small, to prove the pipeline):
-   - **Audio (highest value, zero code risk):** wire ~8 real SFX into the
-     existing `src` field — 4 footsteps, `tool.cast`, `tool.splash`, 2 UI —
-     plus one cozy music loop. No gameplay code changes at all.
-   - **Models:** one optimised `nature.glb` (≈10 trees/rocks/bushes) behind a
-     new `AssetManager`, swapped into `world/Foliage.ts`, palette-tinted.
+3. **Build the loading layer that does not exist yet.** `AssetManager` wrapping
+   `GLTFLoader` + Draco/KTX2 decoders, with a loading-screen hook. This is
+   genuinely new code — the project has never loaded a file.
+4. **Representative slice first**, to prove the pipeline before the wholesale
+   swap:
+   - **Audio (highest value, zero code risk):** fill in the existing `src`
+     field for ~8 SFX — 4 footsteps, `tool.cast`, `tool.splash`, 2 UI — plus
+     one cozy music loop. No gameplay code changes at all.
+   - **Models:** one optimised `nature.glb` (≈10 trees/rocks/bushes) driving
+     `world/Foliage.ts`, palette-tinted.
    - **One fish** through `FishSchools` → `CatchCard` to prove the fishing path.
-4. Measure bundle + frame time before/after, report the numbers.
-5. Expand category by category only after the slice is reviewed.
+5. Measure bundle size + frame time before/after; report the numbers.
+6. **Then replace, category by category** (see §7.1), each behind its own
+   commit and review.
 
----
+### 7.1 Replacement strategy (decision 3: replace, not augment)
 
-## 8. Open questions for you
+The procedural generators are being retired, not kept alongside. Two properties
+of the current code must survive the swap, or the world will visibly regress:
 
-1. **Unblock method** — §2 option A (allowlist), B (you download), or C
-   (GitHub mirrors)?
-2. **Branching** — my branch `claude/cozy-life-sim-assets-uayi3l` is currently
-   based on the *empty* `main`. The game only exists in unmerged PR #20.
-   I recommend **rebasing onto PR #20's head** so integration is possible;
-   otherwise there is nothing to integrate into. Confirm?
-3. **Replace or augment?** Should production models *replace* the procedural
-   generators (`Foliage`, `BuildingKit`, `FurnitureModels`), or sit alongside
-   them behind a flag? The procedural work is high quality and currently
-   season-reactive — I lean toward **augment first, replace per-category once
-   each proves out**.
-4. **Attribution appetite** — stay strictly CC0 (simplest, no obligations), or
-   allow CC-BY where it's clearly better, with credits recorded?
+| Property to preserve | Where it lives now | How it survives |
+| --- | --- | --- |
+| **Season reactivity** — `SEASON_TINT` desaturates and recolours foliage per season (Winter → 0.78 saturation) | `rendering/palette.ts`, `materials.ts` shared uniforms | Imported meshes must use `createStylizedMaterial`, **not** the GLTF's own materials. Strip incoming materials at load and re-bind to the shared uniform set. |
+| **Wind displacement** — two-frequency sway driven by `uTime`/`uWind`, with per-vertex stiffness | `materials.ts` `applyWind` | Needs a stiffness attribute. Kenney/Quaternius meshes have no such channel, so generate it at import time from normalised local Y (0 at base, 1 at tip). |
+| **Wetness response** | `materials.ts` `uWetness` | Comes free once materials are re-bound. |
+| **Instancing** — foliage is drawn instanced | `world/Foliage.ts` | Keep the instancing path; swap only the source geometry. |
+| **Palette cohesion** | `rendering/palette.ts` | Re-tint imported albedo toward the palette rather than shipping pack colours, so the kits still read as one set. |
+
+Order of replacement, easiest and most reversible first:
+`Foliage` → `Props` → `BuildingKit`/`Buildings` → `InteriorKit`/`FurnitureModels`
+→ `ItemModels` → `CharacterRig` (last, and the riskiest: the animator drives
+named joints, so KayKit rigs must be retargeted to the existing `JointName` set
+rather than the reverse).
+
+`src/ui/icons.ts` and `src/ui/portraits.ts` are **not** in scope for replacement
+— they stay hand-drawn (see §6).
+
+## 8. Decisions (locked 2026-09-14)
+
+1. **Unblock method — A.** Allowlist the official hosts. Blocked on the
+   environment change; GitHub mirrors are consequently out of scope.
+2. **Branching — wait for PR #20 to merge.** No integration work starts, and
+   this branch is not rebased, until `claude/cozy-cove-graphics-overhaul-391lkk`
+   lands on `main`. Until then this repo has no game to integrate into.
+3. **Replace**, not augment. See §7.1 for what must be preserved through the
+   swap.
+4. **Licensing — strict CC0 for all shipped art and audio.** My call, given the
+   brief said "prefer CC0 or similarly unrestricted". Rationale: every pack in
+   §3.1–§3.3 is already CC0, so accepting CC-BY would buy nothing while adding
+   a permanent, per-asset obligation that has to survive every future refactor.
+   Concretely:
+   - Models, textures, SFX, music: **CC0 only.** No exceptions.
+   - Freesound ambience (#16): filter to **CC0 only**; drop the CC-BY
+     candidates rather than carry attribution for ambience that a CC0
+     recording can supply just as well.
+   - **One deliberate exception:** the UI font under **SIL OFL 1.1** (#19).
+     OFL is not CC0 but is unrestricted for this use; it requires shipping
+     `OFL.txt` alongside the font, which costs nothing and is standard practice.
+   - `ASSET_CREDITS.md` is still produced in full — crediting creators is right
+     even where no licence compels it. It will simply record
+     "attribution: not required" for everything except the font.
+
+## 9. Current blockers
+
+| Blocker | Owner | Needed for |
+| --- | --- | --- |
+| Egress allowlist not yet in effect (§2) | You / environment config | Any download at all |
+| PR #20 not yet merged | You | Any integration work (decision 2) |
+
+Nothing further can proceed in this session until at least the first clears.
