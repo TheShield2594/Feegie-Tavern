@@ -20,6 +20,7 @@ import type { AssetManager } from './AssetManager';
 let manager: AssetManager | null = null;
 const materialCache = new Map<string, MeshStandardMaterial>();
 
+/** Points the registry at the loaded kits. Called once by `Game` before the world is built. */
 export function setAssets(assets: AssetManager | undefined): void {
   manager = assets ?? null;
 }
@@ -29,6 +30,7 @@ export function kitGeometry(id: string): BufferGeometry | null {
   return manager?.geometry(id) ?? null;
 }
 
+/** Whether a manifest id resolved to real geometry. */
 export function hasKit(id: string): boolean {
   return !!manager?.has(id);
 }

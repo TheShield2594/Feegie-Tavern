@@ -145,6 +145,7 @@ export class Renderer {
     u.uFlash.value = params.flash;
   }
 
+  /** Bloom parameters, driven by the lighting rig each frame. */
   setBloom(strength: number, radius = 0.6, threshold = 0.9): void {
     if (!this.bloomPass) return;
     this.bloomPass.strength = strength;

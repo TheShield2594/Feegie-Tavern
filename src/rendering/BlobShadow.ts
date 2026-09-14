@@ -3,6 +3,7 @@ import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, SRGBColorSpace }
 let sharedTexture: CanvasTexture | null = null;
 let sharedGeometry: PlaneGeometry | null = null;
 
+/** One radial-gradient disc shared by every blob shadow. */
 function shadowTexture(): CanvasTexture {
   if (sharedTexture) return sharedTexture;
   const canvas = document.createElement('canvas');

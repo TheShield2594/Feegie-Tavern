@@ -33,6 +33,7 @@ export class Scatter {
   private leaves: InstancedMesh | null = null;
   private dummy = new Object3D();
 
+  /** Places every family once; `density` scales the counts with the quality tier. */
   constructor(trees: readonly TreeRecord[], density = 1) {
     this.group.name = 'Scatter';
     const rng = new Rng(777);
@@ -43,6 +44,7 @@ export class Scatter {
     this.buildLeaves(rng, trees, density);
   }
 
+  /** Signed distance to the nearest path edge; negative inside a path. */
   private nearPath(x: number, z: number): number {
     let best = Infinity;
     for (const p of PATHS) {
@@ -55,6 +57,7 @@ export class Scatter {
     return best;
   }
 
+  /** Mushrooms cluster in the shade of broadleaf and pine trunks. */
   private buildMushrooms(rng: Rng, trees: readonly TreeRecord[], density: number): void {
     const stem = new CylinderGeometry(0.035, 0.05, 0.16, 6);
     stem.translate(0, 0.08, 0);
@@ -98,6 +101,7 @@ export class Scatter {
     this.group.add(mesh);
   }
 
+  /** Pebbles gather at path edges, the tideline and the creek banks. */
   private buildPebbles(rng: Rng, density: number): void {
     const geometry = new IcosahedronGeometry(0.12, 0);
     geometry.scale(1.2, 0.6, 1);
@@ -142,6 +146,7 @@ export class Scatter {
     this.group.add(mesh);
   }
 
+  /** Clover clumps break up open grass; they take the foliage wind. */
   private buildClover(rng: Rng, density: number): void {
     // Three rounded leaves on short stalks: reads as a weed clump at distance.
     const leaf = new SphereGeometry(0.09, 6, 4);
@@ -184,6 +189,7 @@ export class Scatter {
     this.group.add(mesh);
   }
 
+  /** Reeds stand where the ground is wet: creek banks and the sea's edge. */
   private buildReeds(rng: Rng, density: number): void {
     const blade = new ConeGeometry(0.035, 1.1, 4);
     blade.translate(0, 0.55, 0);
@@ -227,6 +233,7 @@ export class Scatter {
     this.group.add(mesh);
   }
 
+  /** Fallen leaves under broadleaf trees, hidden outside autumn. */
   private buildLeaves(rng: Rng, trees: readonly TreeRecord[], density: number): void {
     const geometry = new PlaneGeometry(0.22, 0.16);
     geometry.rotateX(-Math.PI / 2);
@@ -268,10 +275,18 @@ export class Scatter {
     if (this.leaves) this.leaves.visible = season === 'Autumn';
   }
 
+  /** Releases every instanced family, geometry and material included. */
   dispose(): void {
+    // Every family owns its geometry and material outright, so they go too;
+    // `InstancedMesh.dispose` only releases the instance buffers.
     this.group.traverse((child) => {
       const mesh = child as InstancedMesh;
-      if (mesh.isInstancedMesh) mesh.dispose();
+      if (!mesh.isInstancedMesh) return;
+      mesh.dispose();
+      mesh.geometry.dispose();
+      const material = mesh.material;
+      if (Array.isArray(material)) for (const m of material) m.dispose();
+      else material.dispose();
     });
   }
 }

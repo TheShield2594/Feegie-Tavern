@@ -122,6 +122,34 @@ export class Villager {
     this.repathTimer = 0;
   }
 
+  /**
+   * Places the villager at a point with no walk: anchor, position, ground
+   * height and transform all move together, and any route in progress is
+   * dropped so the next frame does not march them back along it.
+   */
+  snapTo(x: number, z: number, activity: VillagerActivity): void {
+    this.activity = activity;
+    this.anchor.set(x, terrainHeight(x, z), z);
+    this.position.set(x, walkHeight(x, z), z);
+    this.group.position.copy(this.position);
+    this.path = [];
+    this.pathIndex = 0;
+    this.repathTimer = 0;
+    this.activityTimer = 0;
+  }
+
+  /** Starts a conversation with a neighbour, from the first beat. */
+  beginChat(partner: Villager): void {
+    this.chattingWith = partner;
+    this.chatTimer = 0;
+  }
+
+  /** Ends a conversation and forgets its beat, so the next one starts fresh. */
+  endChat(): void {
+    this.chattingWith = null;
+    this.chatTimer = 0;
+  }
+
   /** Sends the villager to an arbitrary point — festivals, reactions, events. */
   goTo(x: number, z: number, activity: VillagerActivity = 'idle'): void {
     this.anchor.set(x, terrainHeight(x, z), z);
@@ -163,6 +191,7 @@ export class Villager {
     this.greetCooldown = 6;
   }
 
+  /** Per-frame: reactions, movement or activity, grounding, presence labels. */
   update(dt: number, hour: number, playerPosition: Vector3): void {
     this.repathTimer -= dt;
     this.greetCooldown = Math.max(0, this.greetCooldown - dt);
@@ -353,6 +382,7 @@ export class Villager {
     return this.path.length > 0;
   }
 
+  /** Releases the rig, nameplate and bubble. */
   dispose(): void {
     this.rig.dispose();
     this.nameplate.dispose();

@@ -24,6 +24,7 @@ interface PainterOptions {
   draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
 }
 
+/** Draws a canvas with `draw` and wraps it as a linearly filtered sRGB texture. */
 function paint({ width, height, draw }: PainterOptions): CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -38,6 +39,7 @@ function paint({ width, height, draw }: PainterOptions): CanvasTexture {
   return texture;
 }
 
+/** Traces a rounded rectangle path; the caller fills or strokes it. */
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -83,6 +85,7 @@ export class Nameplate {
   farDistance = 16;
   visibleOverride: boolean | null = null;
 
+  /** Renders the plate once now and again when the UI font finishes loading. */
   constructor(private options: NameplateOptions) {
     this.material = new SpriteMaterial({
       map: this.render(),
@@ -103,6 +106,7 @@ export class Nameplate {
 
   private lastSize = { w: 1, h: 1 };
 
+  /** Paints the pill, accent dot, name and optional subtitle onto a fresh texture. */
   private render(): CanvasTexture {
     const { text, accent, subtitle } = this.options;
     const scratch = document.createElement('canvas').getContext('2d')!;
@@ -156,6 +160,7 @@ export class Nameplate {
     });
   }
 
+  /** Sizes the sprite so canvas pixels map to a fixed world size. */
   private fit(): void {
     // One canvas pixel ≈ 5 mm in the world, which puts a name at roughly the
     // height of the character's head from the default camera.
@@ -163,6 +168,7 @@ export class Nameplate {
     this.sprite.scale.set(this.lastSize.w * scale, this.lastSize.h * scale, 1);
   }
 
+  /** Repaints with a new name or subtitle; a no-op when nothing changed. */
   setText(text: string, subtitle?: string): void {
     if (text === this.options.text && subtitle === this.options.subtitle) return;
     this.options = { ...this.options, text, subtitle };
@@ -180,6 +186,7 @@ export class Nameplate {
     this.sprite.visible = this.opacity > 0.01;
   }
 
+  /** Releases the plate texture and material. */
   dispose(): void {
     this.material.map?.dispose();
     this.material.dispose();
@@ -190,6 +197,7 @@ export type EmoteKind = 'exclaim' | 'question' | 'heart' | 'note' | 'dots' | 'sl
 
 const EMOTE_CACHE = new Map<EmoteKind, CanvasTexture>();
 
+/** The bubble texture for an emote kind, painted once and cached for every character. */
 function emoteTexture(kind: EmoteKind): CanvasTexture {
   let texture = EMOTE_CACHE.get(kind);
   if (texture) return texture;
@@ -295,6 +303,7 @@ function emoteTexture(kind: EmoteKind): CanvasTexture {
   return texture;
 }
 
+/** Fills a heart centred on `cx, cy`. */
 function drawHeart(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
   ctx.beginPath();
   ctx.moveTo(cx, cy + size * 0.8);
@@ -304,6 +313,7 @@ function drawHeart(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: 
   ctx.fill();
 }
 
+/** Fills an eight-point sparkle centred on `cx, cy`. */
 function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, outer: number, inner: number): void {
   ctx.beginPath();
   for (let i = 0; i < 8; i++) {
@@ -331,6 +341,7 @@ export class EmoteBubble {
   private sticky = false;
   private kind: EmoteKind | null = null;
 
+  /** Creates the sprite hidden; `show` gives it a texture. */
   constructor() {
     // Tone-mapped like the rest of the scene: an unmapped near-white sprite
     // sails past the bloom threshold and turns into a glowing blob at night.
@@ -358,6 +369,7 @@ export class EmoteBubble {
     this.sprite.visible = true;
   }
 
+  /** Lets a sticky bubble pop out instead of vanishing. */
   hide(): void {
     if (!this.sprite.visible) return;
     // Let the pop-out play from wherever the hold is.
@@ -365,10 +377,12 @@ export class EmoteBubble {
     this.duration = Math.min(this.duration, this.age + 0.2);
   }
 
+  /** The emote on screen, or null while hidden. */
   get current(): EmoteKind | null {
     return this.sprite.visible ? this.kind : null;
   }
 
+  /** Advances the pop-in, hold, bob and pop-out. */
   update(dt: number): void {
     if (!this.sprite.visible) return;
     this.age += dt;
@@ -389,6 +403,7 @@ export class EmoteBubble {
   /** Height above the character's origin. */
   baseY = 2.2;
 
+  /** Releases the sprite material; emote textures are shared and stay cached. */
   dispose(): void {
     this.material.dispose();
   }

@@ -244,6 +244,7 @@ export class Props {
     }
   }
 
+  /** A slatted wooden bench on iron legs, the square's standard seat. */
   private makeBench(): Group {
     const bench = new Group();
     const wood = surfaces.plank(PALETTE.wood.plank, 1.2);
@@ -422,6 +423,7 @@ export class Props {
 
   // --- Bridge and stairs ---------------------------------------------------
 
+  /** The cambered plank bridge over the creek, with rails. */
   private buildBridge(): void {
     const plank = surfaces.plank(PALETTE.wood.plank, 1.4);
     const beam = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.94 });

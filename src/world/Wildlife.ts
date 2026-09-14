@@ -66,6 +66,7 @@ export class Wildlife {
   private butterflyLevel = 0;
   private gullLevel = 0;
 
+  /** Builds both populations and picks their anchors from the heightfield. */
   constructor() {
     this.group.name = 'Wildlife';
     const rng = new Rng(4242);
@@ -163,6 +164,7 @@ export class Wildlife {
     this.updateGulls(dt, cameraX, cameraZ);
   }
 
+  /** Moves each butterfly on its figure-of-eight and writes both wings. */
   private updateButterflies(dt: number, cameraX: number, cameraZ: number, wind: number): void {
     const level = this.butterflyLevel;
     const flap = this.time * 14;
@@ -203,6 +205,7 @@ export class Wildlife {
     this.wingR.instanceMatrix.needsUpdate = true;
   }
 
+  /** Moves each gull round its circuit with a slow glide-and-beat wing cycle. */
   private updateGulls(dt: number, cameraX: number, cameraZ: number): void {
     void dt;
     const level = this.gullLevel;
@@ -233,6 +236,7 @@ export class Wildlife {
     this.gullWingR.instanceMatrix.needsUpdate = true;
   }
 
+  /** Writes one wing's instance matrix: faced along `heading`, hinged up by `flap`. */
   private writeWing(mesh: InstancedMesh, index: number, at: Vector3, heading: number, flap: number, scale: number, side: 1 | -1): void {
     this.dummy.position.copy(at);
     // Face the heading, lie flat, then hinge each wing up by the flap angle.
@@ -246,15 +250,20 @@ export class Wildlife {
     mesh.setMatrixAt(index, this.dummy.matrix);
   }
 
+  /** Collapses an instance to zero scale, which is cheaper than toggling counts. */
   private hide(mesh: InstancedMesh, index: number): void {
     this.matrix.makeScale(0, 0, 0);
     mesh.setMatrixAt(index, this.matrix);
   }
 
+  /** Releases the wing meshes and the geometry and material each pair shares. */
   dispose(): void {
-    this.wingL.dispose();
-    this.wingR.dispose();
-    this.gullWingL.dispose();
-    this.gullWingR.dispose();
+    // Each pair of wings shares one geometry and one material, so those are
+    // released once per species rather than once per wing.
+    for (const mesh of [this.wingL, this.wingR, this.gullWingL, this.gullWingR]) mesh.dispose();
+    this.wingL.geometry.dispose();
+    (this.wingL.material as { dispose(): void }).dispose();
+    this.gullWingL.geometry.dispose();
+    (this.gullWingL.material as { dispose(): void }).dispose();
   }
 }

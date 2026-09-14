@@ -207,6 +207,7 @@ export class Player {
     this.rig.setExpression('sleepy');
   }
 
+  /** Moves the player instantly, grounding them on the deck or terrain unless a height is given. */
   teleport(x: number, z: number, facing = this.facing, height?: number): void {
     this.position.set(x, height ?? walkHeight(x, z), z);
     this.velocity.set(0, 0, 0);

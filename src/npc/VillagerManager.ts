@@ -47,13 +47,10 @@ export class VillagerManager {
         villager.def.schedule[0],
       );
       const target = LANDMARKS[entry.at];
-      if (target) villager.goTo(target.x + villager.anchorOffset.x, target.z + villager.anchorOffset.z, entry.activity);
+      if (!target) continue;
       // Anchors can sit inside an obstacle (the fountain); stand beside it.
-      const spot = target
-        ? this.navigation.snapToOpen(target.x + villager.anchorOffset.x, target.z + villager.anchorOffset.z)
-        : null;
-      villager.position.x = spot?.x ?? villager.position.x;
-      villager.position.z = spot?.z ?? villager.position.z;
+      const spot = this.navigation.snapToOpen(target.x + villager.anchorOffset.x, target.z + villager.anchorOffset.z);
+      villager.snapTo(spot.x, spot.z, entry.activity);
     }
     this.lastHour = hour;
   }
@@ -87,8 +84,8 @@ export class VillagerManager {
       const still = v.activity === 'idle' && partner.activity === 'idle' && !v.talking && !partner.talking
         && !v.isMoving && !partner.isMoving && v.position.distanceToSquared(partner.position) < 5.5 * 5.5;
       if (!still) {
-        v.chattingWith = null;
-        partner.chattingWith = null;
+        v.endChat();
+        partner.endChat();
       }
     }
     for (let i = 0; i < all.length; i++) {
@@ -98,8 +95,8 @@ export class VillagerManager {
         const b = all[j];
         if (b.chattingWith || b.activity !== 'idle' || b.talking || b.isMoving) continue;
         if (a.position.distanceToSquared(b.position) > 4.5 * 4.5) continue;
-        a.chattingWith = b;
-        b.chattingWith = a;
+        a.beginChat(b);
+        b.beginChat(a);
         break;
       }
     }

@@ -15,6 +15,7 @@ import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture } from 'thr
 
 const cache = new Map<string, CanvasTexture>();
 
+/** Bakes a texture once per key and caches it; every generator below goes through here. */
 function make(key: string, size: number, draw: (ctx: CanvasRenderingContext2D, size: number) => void): CanvasTexture {
   const cached = cache.get(key);
   if (cached) return cached;
@@ -38,6 +39,7 @@ function hash(x: number, y: number, seed = 0): number {
   return s - Math.floor(s);
 }
 
+/** A neutral CSS grey for a 0–1 luminance. */
 function grey(v: number): string {
   const c = Math.round(Math.max(0, Math.min(1, v)) * 255);
   return `rgb(${c},${c},${c})`;

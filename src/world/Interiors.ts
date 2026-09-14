@@ -259,12 +259,14 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
     runner.scale.set(1.3, 1, 2.1);
     group.add(runner);
   }
+  const lobbyColliders: { x: number; z: number; radius: number }[] = [];
   for (const side of [-1, 1]) {
     const bench = makeKitMesh('furniture.sofa', { scale: 1.05, tint: '#cdb79a' });
     if (bench) {
       bench.position.set(side * 5.2, 0, 9.8);
       bench.rotation.y = -side * Math.PI / 2;
       group.add(bench);
+      lobbyColliders.push({ x: side * 5.2, z: 9.8, radius: 1.1 });
     }
     const planter = makeKitMesh('furniture.plant', { scale: 1.1 });
     if (planter) {
@@ -273,10 +275,7 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
     }
   }
 
-  const colliders: { x: number; z: number; radius: number }[] = [
-    { x: -5.2, z: 9.8, radius: 1.1 },
-    { x: 5.2, z: 9.8, radius: 1.1 },
-  ];
+  const colliders: { x: number; z: number; radius: number }[] = [...lobbyColliders];
   const exhibits: ExhibitSlot[] = [];
   const wingLights: SpotLight[] = [];
 

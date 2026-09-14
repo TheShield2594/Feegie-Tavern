@@ -70,6 +70,7 @@ export class InteractionSystem {
 
   private enabled = true;
 
+  /** Polls every provider at a fixed rate and publishes the best prompts when they change. */
   update(dt: number, context: Omit<InteractionContext, 'distanceSq'>): void {
     if (!this.enabled) return;
     this.pollTimer -= dt;

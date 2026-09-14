@@ -2268,6 +2268,8 @@ export class Game {
     this.water.dispose();
     this.foliage.dispose();
     this.props.dispose();
+    this.scatter.dispose();
+    this.wildlife.dispose();
     this.buildings.dispose();
     this.fishSchools.dispose();
     this.farm.dispose();
