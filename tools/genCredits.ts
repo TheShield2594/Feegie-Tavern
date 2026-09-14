@@ -7,6 +7,49 @@
  */
 import { writeFileSync } from 'node:fs';
 import { KITS, MODELS } from '../src/assets/manifest';
+import { SOUNDS } from '../src/audio/sounds';
+
+/**
+ * Audio packs, with the exact files taken from each.
+ *
+ * Listed per file rather than per pack so the credits can only name a pack the
+ * game actually plays. An earlier version hardcoded the pack list, which meant
+ * the table credited packs that had been planned but never shipped.
+ */
+const AUDIO_PACKS: { pack: string; url: string; licence: string; files: string[] }[] = [
+  {
+    pack: 'Kenney — Impact Sounds',
+    url: 'https://kenney.nl/assets/impact-sounds',
+    licence: 'CC0 1.0',
+    files: ['footstep_grass_000.ogg', 'footstep_carpet_000.ogg', 'footstep_wood_000.ogg', 'footstep_concrete_000.ogg'],
+  },
+  {
+    pack: 'Kenney — RPG Audio',
+    url: 'https://kenney.nl/assets/rpg-audio',
+    licence: 'CC0 1.0',
+    files: ['cloth3.ogg', 'chop.ogg'],
+  },
+  {
+    pack: 'Kenney — Interface Sounds',
+    url: 'https://kenney.nl/assets/interface-sounds',
+    licence: 'CC0 1.0',
+    files: ['click_001.ogg', 'back_001.ogg'],
+  },
+];
+
+const shippedAudio = SOUNDS.flatMap((sound) => (sound.src ? [sound.src] : []));
+const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+// A shipped sound with no pack entry would appear in the game uncredited and,
+// worse, untraceable back to a licence file. Fail the build rather than emit
+// credits that are quietly incomplete.
+const unattributed = shippedAudio.filter(
+  (src) => !AUDIO_PACKS.some((entry) => entry.files.includes(basename(src))),
+);
+if (unattributed.length > 0) {
+  console.error(`Unattributed audio (add it to AUDIO_PACKS in tools/genCredits.ts):\n  ${unattributed.join('\n  ')}`);
+  process.exit(1);
+}
 
 const LICENCE_TEXT: Record<string, { name: string; url: string; attribution: string }> = {
   'CC0-1.0': {
@@ -63,15 +106,20 @@ lines.push(
   '## Audio',
   '',
   'Sound effects and music are declared in `src/audio/sounds.ts`. Entries still',
-  'using the built-in synthesiser have no external source to credit; entries with',
-  'a `src` path are listed here once they land.',
+  'using the built-in synthesiser have no external source to credit; only packs',
+  'the game actually plays a file from appear below.',
   '',
-  '| Pack | Source | Licence | Attribution |',
-  '| --- | --- | --- | --- |',
-  '| Kenney — RPG Audio | https://kenney.nl/assets/rpg-audio | CC0 1.0 | not required |',
-  '| Kenney — Interface Sounds | https://kenney.nl/assets/interface-sounds | CC0 1.0 | not required |',
-  '| Kenney — Impact Sounds | https://kenney.nl/assets/impact-sounds | CC0 1.0 | not required |',
-  '| Tallbeard Studios — Music Loop Bundle | https://tallbeard.itch.io/music-loop-bundle | CC0 | not required |',
+  '| Pack | Source | Licence | Attribution | Sounds in use |',
+  '| --- | --- | --- | --- | --- |',
+);
+
+for (const entry of AUDIO_PACKS) {
+  const used = shippedAudio.filter((src) => entry.files.includes(basename(src))).length;
+  if (used === 0) continue;
+  lines.push(`| ${entry.pack} | ${entry.url} | ${entry.licence} | not required | ${used} |`);
+}
+
+lines.push(
   '',
   '## Licence files',
   '',

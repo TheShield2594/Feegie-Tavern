@@ -72,12 +72,37 @@ export interface ModelDef {
 /**
  * Model table.
  *
- * Empty until the packs are downloaded and their real mesh names are read out
- * of the GLB — inventing node names before seeing the file would only produce
- * entries that silently miss. `npm run assets:inspect <file.glb>` prints the
- * node names to paste here.
+ * Ids are the game's own vocabulary (`TreeKind` in `world/Foliage.ts`), not the
+ * pack's filenames, so swapping Kenney for another CC0 kit is an edit to `node`
+ * and nothing else.
+ *
+ * `node` names are read out of the built `nature.glb`, never invented. Each
+ * Kenney tree ships as one mesh with two primitives sharing a vertex buffer —
+ * bark and leaves — and `tools/buildNatureKit.mjs` splits them into separate
+ * single-primitive nodes so `Foliage` can bind its existing bark and canopy
+ * materials to them independently.
+ *
+ * **Why every entry sets `groundOrigin: false` and `centreXZ: false`:** the
+ * build script already grounded and centred each model *as a whole*, moving
+ * trunk and canopy together. Letting `normalizeGeometry` redo it per node would
+ * drop each canopy to y = 0 independently and take the trees apart.
+ *
+ * `scale` brings the kit (authored ~1–1.7 units tall) up to the dimensions of
+ * the procedural geometry it replaces, so the existing placement, keep-out and
+ * per-instance scale ranges in `Foliage` keep working unchanged.
  */
-export const MODELS: ModelDef[] = [];
+export const MODELS: ModelDef[] = [
+  { id: 'tree.broadleaf.trunk',  kit: 'nature', node: 'tree_default_trunk',       normalize: { groundOrigin: false, centreXZ: false, scale: 3.2 } },
+  { id: 'tree.broadleaf.canopy', kit: 'nature', node: 'tree_default_canopy',      normalize: { groundOrigin: false, centreXZ: false, scale: 3.2 } },
+  { id: 'tree.pine.trunk',       kit: 'nature', node: 'tree_pineDefaultA_trunk',  normalize: { groundOrigin: false, centreXZ: false, scale: 4.1 } },
+  { id: 'tree.pine.canopy',      kit: 'nature', node: 'tree_pineDefaultA_canopy', normalize: { groundOrigin: false, centreXZ: false, scale: 4.1 } },
+  { id: 'tree.palm.trunk',       kit: 'nature', node: 'tree_palmShort_trunk',     normalize: { groundOrigin: false, centreXZ: false, scale: 5.7 } },
+  { id: 'tree.palm.canopy',      kit: 'nature', node: 'tree_palmShort_canopy',    normalize: { groundOrigin: false, centreXZ: false, scale: 5.7 } },
+  { id: 'tree.fruit.trunk',      kit: 'nature', node: 'tree_oak_trunk',           normalize: { groundOrigin: false, centreXZ: false, scale: 3.9 } },
+  { id: 'tree.fruit.canopy',     kit: 'nature', node: 'tree_oak_canopy',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.9 } },
+  { id: 'bush.small',            kit: 'nature', node: 'plant_bush',               normalize: { groundOrigin: false, centreXZ: false, scale: 3.5 } },
+  { id: 'bush.large',            kit: 'nature', node: 'plant_bushLarge',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.5 } },
+];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));
 

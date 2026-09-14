@@ -14,13 +14,9 @@ condition — its `OFL.txt` ships in `licenses/`.
 
 ## 3D models
 
-_No models bundled yet._ The kits below are the approved sources from
-`docs/ASSET_PLAN.md`; models are added to `src/assets/manifest.ts` as each
-pack is downloaded, verified and optimised.
-
 | Kit | Source | Licence | Attribution | Models in use |
 | --- | --- | --- | --- | --- |
-| `nature` | Kenney — Nature Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
+| `nature` | Kenney — Nature Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 10 |
 | `buildings` | Kenney — Fantasy Town Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `furniture` | Kenney — Furniture Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `props` | Kenney — Survival Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
@@ -31,15 +27,14 @@ pack is downloaded, verified and optimised.
 ## Audio
 
 Sound effects and music are declared in `src/audio/sounds.ts`. Entries still
-using the built-in synthesiser have no external source to credit; entries with
-a `src` path are listed here once they land.
+using the built-in synthesiser have no external source to credit; only packs
+the game actually plays a file from appear below.
 
-| Pack | Source | Licence | Attribution |
-| --- | --- | --- | --- |
-| Kenney — RPG Audio | https://kenney.nl/assets/rpg-audio | CC0 1.0 | not required |
-| Kenney — Interface Sounds | https://kenney.nl/assets/interface-sounds | CC0 1.0 | not required |
-| Kenney — Impact Sounds | https://kenney.nl/assets/impact-sounds | CC0 1.0 | not required |
-| Tallbeard Studios — Music Loop Bundle | https://tallbeard.itch.io/music-loop-bundle | CC0 | not required |
+| Pack | Source | Licence | Attribution | Sounds in use |
+| --- | --- | --- | --- | --- |
+| Kenney — Impact Sounds | https://kenney.nl/assets/impact-sounds | CC0 1.0 | not required | 4 |
+| Kenney — RPG Audio | https://kenney.nl/assets/rpg-audio | CC0 1.0 | not required | 2 |
+| Kenney — Interface Sounds | https://kenney.nl/assets/interface-sounds | CC0 1.0 | not required | 2 |
 
 ## Licence files
 

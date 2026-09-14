@@ -2,6 +2,7 @@ import { clamp01, damp } from '@/util/math';
 import {
   AMBIENCE_BY_ID,
   MUSIC_BY_ID,
+  SOUNDS,
   SOUNDS_BY_ID,
   type AmbienceDef,
   type AmbienceId,
@@ -68,6 +69,7 @@ export class AudioSystem {
 
       this.noiseBuffer = this.createNoiseBuffer();
       this.started = true;
+      void this.preloadSources();
       if (this.pendingMusic) {
         const id = this.pendingMusic;
         this.pendingMusic = null;
@@ -100,6 +102,25 @@ export class AudioSystem {
   setMuted(muted: boolean): void {
     this.muted = muted;
     if (this.master) this.rampTo(this.master.gain, muted ? 0 : this.volumes.master, 0.25);
+  }
+
+  /**
+   * Fetches every sound that names a real file, so `playSound` finds a buffer
+   * instead of falling through to the synthesiser.
+   *
+   * This is what makes filling in `src` a pure data change: the table in
+   * `sounds.ts` decides what is real, and nothing else in the codebase has to
+   * know which sounds have been recorded yet. Loads run in the background after
+   * the audio context unlocks — a sound that has not arrived yet simply plays
+   * its placeholder, and one that fails to load keeps playing it forever, so a
+   * missing or broken file degrades to the old behaviour rather than silence.
+   */
+  private async preloadSources(): Promise<void> {
+    const base = import.meta.env.BASE_URL ?? '/';
+    const prefix = base.endsWith('/') ? base : `${base}/`;
+    await Promise.all(
+      SOUNDS.flatMap((def) => (def.src ? [this.loadBuffer(def.id, `${prefix}${def.src}`)] : [])),
+    );
   }
 
   /** Registers a decoded file for an id, taking priority over the synth fallback. */

@@ -43,19 +43,19 @@ export interface SoundDef {
 
 export const SOUNDS: SoundDef[] = [
   // --- Footsteps ---------------------------------------------------------
-  { id: 'step.grass', channel: 'sfx', pitchJitter: 220, throttle: 0.12, baseVolume: 0.35,
+  { id: 'step.grass', channel: 'sfx', src: 'assets/audio/sfx/footstep_grass_000.ogg', pitchJitter: 220, throttle: 0.12, baseVolume: 0.35,
     synth: { type: 'triangle', freq: 150, freqTo: 90, duration: 0.13, gain: 0.3, noise: { amount: 0.8, lowpass: 1400 } } },
-  { id: 'step.sand', channel: 'sfx', pitchJitter: 200, throttle: 0.12, baseVolume: 0.32,
+  { id: 'step.sand', channel: 'sfx', src: 'assets/audio/sfx/footstep_carpet_000.ogg', pitchJitter: 200, throttle: 0.12, baseVolume: 0.32,
     synth: { type: 'sine', freq: 110, freqTo: 70, duration: 0.16, gain: 0.26, noise: { amount: 1, lowpass: 900 } } },
-  { id: 'step.wood', channel: 'sfx', pitchJitter: 160, throttle: 0.12, baseVolume: 0.4,
+  { id: 'step.wood', channel: 'sfx', src: 'assets/audio/sfx/footstep_wood_000.ogg', pitchJitter: 160, throttle: 0.12, baseVolume: 0.4,
     synth: { type: 'square', freq: 210, freqTo: 120, duration: 0.1, gain: 0.22, noise: { amount: 0.35, lowpass: 2600 } } },
-  { id: 'step.stone', channel: 'sfx', pitchJitter: 180, throttle: 0.12, baseVolume: 0.36,
+  { id: 'step.stone', channel: 'sfx', src: 'assets/audio/sfx/footstep_concrete_000.ogg', pitchJitter: 180, throttle: 0.12, baseVolume: 0.36,
     synth: { type: 'triangle', freq: 260, freqTo: 150, duration: 0.09, gain: 0.24, noise: { amount: 0.5, lowpass: 3200 } } },
   { id: 'step.water', channel: 'sfx', pitchJitter: 240, throttle: 0.14, baseVolume: 0.4,
     synth: { type: 'sine', freq: 320, freqTo: 160, duration: 0.22, gain: 0.28, noise: { amount: 1, lowpass: 2200, highpass: 400 } } },
 
   // --- Tools -------------------------------------------------------------
-  { id: 'tool.cast', channel: 'sfx', baseVolume: 0.5,
+  { id: 'tool.cast', channel: 'sfx', src: 'assets/audio/sfx/cloth3.ogg', baseVolume: 0.5,
     synth: { type: 'sine', freq: 900, freqTo: 320, duration: 0.35, gain: 0.3, noise: { amount: 0.5, lowpass: 5200, highpass: 900 } } },
   { id: 'tool.splash', channel: 'sfx', baseVolume: 0.55, pitchJitter: 150,
     synth: { type: 'sine', freq: 480, freqTo: 180, duration: 0.4, gain: 0.4, noise: { amount: 1, lowpass: 3400, highpass: 300 } } },
@@ -67,7 +67,7 @@ export const SOUNDS: SoundDef[] = [
     synth: { type: 'sine', freq: 1200, freqTo: 500, duration: 0.24, gain: 0.22, noise: { amount: 0.8, lowpass: 7000, highpass: 1500 } } },
   { id: 'tool.dig', channel: 'sfx', baseVolume: 0.5, pitchJitter: 180,
     synth: { type: 'triangle', freq: 130, freqTo: 80, duration: 0.3, gain: 0.34, noise: { amount: 1, lowpass: 1300 } } },
-  { id: 'tool.axe', channel: 'sfx', baseVolume: 0.55, pitchJitter: 120,
+  { id: 'tool.axe', channel: 'sfx', src: 'assets/audio/sfx/chop.ogg', baseVolume: 0.55, pitchJitter: 120,
     synth: { type: 'square', freq: 190, freqTo: 95, duration: 0.22, gain: 0.34, noise: { amount: 0.7, lowpass: 2400 } } },
   { id: 'tool.shake', channel: 'sfx', baseVolume: 0.42,
     synth: { type: 'sine', freq: 420, freqTo: 260, duration: 0.42, gain: 0.2, noise: { amount: 1, lowpass: 5200, highpass: 1100 } } },
@@ -109,9 +109,9 @@ export const SOUNDS: SoundDef[] = [
   // --- UI ----------------------------------------------------------------
   { id: 'ui.hover', channel: 'ui', throttle: 0.05, baseVolume: 0.22,
     synth: { type: 'sine', freq: 1100, duration: 0.05, gain: 0.1 } },
-  { id: 'ui.select', channel: 'ui', baseVolume: 0.35,
+  { id: 'ui.select', channel: 'ui', src: 'assets/audio/ui/click_001.ogg', baseVolume: 0.35,
     synth: { type: 'triangle', freq: 880, freqTo: 1320, duration: 0.1, gain: 0.16 } },
-  { id: 'ui.back', channel: 'ui', baseVolume: 0.32,
+  { id: 'ui.back', channel: 'ui', src: 'assets/audio/ui/back_001.ogg', baseVolume: 0.32,
     synth: { type: 'triangle', freq: 660, freqTo: 420, duration: 0.11, gain: 0.15 } },
   { id: 'ui.open', channel: 'ui', baseVolume: 0.38,
     synth: { type: 'sine', freq: 520, freqTo: 900, duration: 0.18, gain: 0.16 } },

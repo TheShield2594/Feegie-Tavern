@@ -1,6 +1,10 @@
 # Cozy Cove — Free Asset Plan (for approval)
 
-Status: **proposal only. Nothing has been downloaded.**
+Status: **approved and in progress.** The first CC0 assets have been downloaded,
+licence-checked and committed — see §9 for what landed, what was dropped and
+why, and what is still blocked. §1–§8 are the approved plan and are left as
+written; where §2's egress findings have since been overtaken by events, §9 is
+the current record.
 
 This plan covers sourcing free, redistributable assets for the browser life-sim
 in PR #20 (`claude/cozy-cove-graphics-overhaul-391lkk`, "Scaffold
@@ -46,6 +50,13 @@ already commits to*, which is exactly the Kenney/Quaternius/KayKit house style.
 ---
 
 ## 2. Blocking constraint: this session cannot download any of it
+
+> **Superseded 2026-09-14 — kept as the record of why option A was chosen.** The
+> allowlist below has since been applied and the asset hosts are reachable; the
+> per-host results in this section are no longer current. §9.1 has the live
+> table, and §9.4 records the one source host still denied. The *decisions* in
+> this section stand unchanged: downloads come from the creator's own page, and
+> GitHub mirrors remain out of scope.
 
 Outbound HTTPS goes through a policy-enforcing egress proxy. I verified
 reachability directly:
@@ -289,119 +300,270 @@ rather than the reverse).
 
 ## 9. Status
 
+Rewritten 2026-09-14 after the first session in which assets could actually be
+downloaded. **The egress allowlist is now in effect and the first CC0 assets have
+landed.** Two of the three representative-slice items from §7 step 4 are done;
+the third is blocked on a source host, and the §7 step 5 measurement is blocked
+on the toolchain. Details below, including everything that did *not* work.
+
 | Blocker | State |
 | --- | --- |
-| PR #20 merged to `main` | ✅ **Cleared** 2026-09-14 (`cc5be5d`). This branch is rebased onto it. |
-| Egress allowlist (§2) | ❌ **Still blocking.** Full re-test of every §2 host on 2026-09-14, repeated independently at the start of the integration session the same day (tables below) — all asset hosts denied both times. **No asset has been downloaded.** |
+| PR #20 merged to `main` | ✅ **Cleared** 2026-09-14 (`cc5be5d`). |
+| Egress allowlist (§2) | ✅ **Cleared** for every host §3 depends on except Quaternius'. |
+| npm registry | ❌ **New blocker.** `registry.npmjs.org` is denied, so the project's dependencies cannot be installed and `typecheck`/`build`/`assets:verify` cannot run. |
 
-### Egress re-test, 2026-09-14
+### 9.1 Egress re-test, 2026-09-14 (allowlist environment)
 
-Re-ran the §2 allowlist host by host rather than spot-checking two hosts. Every
-host the plan depends on is refused at the CONNECT stage:
+Re-tested host by host before anything else. Compare with the all-403 table
+earlier in this section — the allowlist has been applied:
 
-| Host | Result |
+| Host | Result | Note |
+| --- | --- | --- |
+| `kenney.nl` | ✅ 200 | Assets #1–#5, #12–#14 |
+| `quaternius.com` | ✅ 200 | Page loads, but see §9.4 — downloads do not |
+| `kaylousberg.com` | ✅ 200 | |
+| `kaylousberg.itch.io` | ✅ reachable (429 rate-limit, not a policy denial) | |
+| `tallbeard.itch.io` | ✅ 200 | |
+| `itch.io` (bare domain) | ❌ 403 | Only the bare domain; the `*.itch.io` subdomains the plan actually needs are open, so this does not block anything |
+| `freesound.org` | ✅ 200 | Site reachable; API needs credentials — see §9.4 |
+| `polyhaven.com` | ✅ 200 | |
+| `ambientcg.com` | ✅ 200 | |
+| `fonts.google.com` | ✅ 200 | |
+| `fonts.gstatic.com` | ✅ reachable (404 on `/`, 200 on a real WOFF2 path) | |
+
+### 9.2 Licences read and confirmed
+
+Every pack below was downloaded from the creator's own page in §3 — no GitHub
+mirror, per §8 decision 1 — and its `License.txt` was opened and read from
+inside the archive before anything was committed. The four files are preserved
+verbatim under `licenses/`, each verified byte-identical (SHA-256) to the copy
+in its archive.
+
+| Pack | Source | Operative line, quoted from the archive's `License.txt` |
+| --- | --- | --- |
+| Nature Kit 2.1 | `kenney.nl/assets/nature-kit` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| RPG Audio | `kenney.nl/assets/rpg-audio` | `License (Creative Commons Zero, CC0)` — "You may use these assets in personal and commercial projects. Credit (Kenney or www.kenney.nl) would be nice but is not mandatory." |
+| Interface Sounds 1.0 | `kenney.nl/assets/interface-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| Impact Sounds 1.0 | `kenney.nl/assets/impact-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+
+All four match §8 decision 4 (strict CC0). Nothing was committed on the strength
+of a download page alone.
+
+Kenney ships a separate `License.txt` per pack, identical in grant but differing
+in pack name, version and date. They are kept as four files rather than one
+`kenney-CC0.txt`, because merging them would mean editing licence text.
+
+### 9.3 What landed
+
+**Audio — 8 CC0 sound effects (§7 step 4, first bullet).** Files under
+`public/assets/audio/{sfx,ui}/`, keeping Kenney's original filenames so any
+sound can be traced back to its pack and licence file. Already OGG Vorbis at
+source, so no transcode was needed.
+
+| `sounds.ts` id | File | Pack | Match |
+| --- | --- | --- | --- |
+| `step.grass` | `footstep_grass_000.ogg` | Impact Sounds | exact |
+| `step.sand` | `footstep_carpet_000.ogg` | Impact Sounds | **approximate** — the pack has no sand recording; carpet is its muffled soft-ground step |
+| `step.wood` | `footstep_wood_000.ogg` | Impact Sounds | exact |
+| `step.stone` | `footstep_concrete_000.ogg` | Impact Sounds | near-exact (concrete for stone) |
+| `tool.cast` | `cloth3.ogg` | RPG Audio | **approximate** — no whoosh in any of the three packs; a cloth swish is the nearest thing to a rod whip |
+| `tool.axe` | `chop.ogg` | RPG Audio | exact |
+| `ui.select` | `click_001.ogg` | Interface Sounds | exact |
+| `ui.back` | `back_001.ogg` | Interface Sounds | exact |
+
+The two approximations are flagged rather than presented as finished: they are
+placeholders of better quality than the synth, not final choices.
+
+**A gap in this plan's own premise, found while doing it.** §7 step 4 says
+filling `src` needs "no gameplay code changes at all". That was not true:
+`AudioSystem.loadBuffer` existed but **nothing in the codebase called it**, so
+`src` was inert and every sound would have kept playing its synth placeholder.
+Fixed by adding `AudioSystem.preloadSources()`, which walks `SOUNDS` for entries
+with a `src` and loads them after the context unlocks. The claim now holds going
+forward — the *next* sound really is a one-line data change — and the failure
+mode is still the documented one: a file that is missing or fails to decode
+leaves the placeholder playing rather than producing silence.
+
+**Models — `nature.glb` (§7 step 4, second bullet, partially).** 10 nodes,
+1,476 vertices, 822 triangles, **47,180 bytes**, built from the Nature Kit by
+`tools/buildNatureKit.mjs`:
+
+| Node | Verts | Tris | | Node | Verts | Tris |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tree_default_trunk` | 116 | 74 | | `tree_palmShort_trunk` | 68 | 34 |
+| `tree_default_canopy` | 76 | 40 | | `tree_palmShort_canopy` | 288 | 156 |
+| `tree_oak_trunk` | 210 | 132 | | `plant_bush` | 80 | 32 |
+| `tree_oak_canopy` | 114 | 64 | | `plant_bushLarge` | 132 | 60 |
+| `tree_pineDefaultA_trunk` | 84 | 50 | | | | |
+| `tree_pineDefaultA_canopy` | 308 | 180 | | | | |
+
+`src/assets/manifest.ts` `MODELS` is filled in from **these exact node names,
+read back out of the built file** — see §9.5 for how, given that
+`npm run assets:inspect` could not run.
+
+Optimisations applied (§5), and what each was worth:
+
+- **Pruned** to 6 source models out of the kit's 329; the rest are never opened.
+- **Split by material name, not primitive index.** A Kenney tree is one mesh of
+  two primitives sharing a vertex buffer — bark and leaves. The kit is *not*
+  consistent about their order (`tree_default` is bark-first, `tree_oak` is
+  leaves-first), so splitting by index would have silently swapped some trunks
+  and canopies. Roles are resolved from the material name instead.
+- **Welded/compacted** per output primitive, so the bark geometry stops carrying
+  the leaf vertices it never indexes.
+- **Stripped** `TEXCOORD_0` and all materials. The kit is untextured (flat
+  `baseColorFactor`), and §7.1 requires re-binding to `createStylizedMaterial`
+  anyway, so the palette supplies colour and the UVs are dead weight. Canopy and
+  foliage wind derive stiffness from `transformed.y`, not `uv`, so dropping UVs
+  costs nothing. (Grass, which *does* use `uv.y`, is not in this kit.)
+- **Narrowed indices** from UINT32 to UINT16.
+- **Grounded once per whole model**, moving trunk and canopy together. This is
+  why every `MODELS` entry sets `groundOrigin: false` and `centreXZ: false`:
+  letting `normalizeGeometry` ground each node independently would drop each
+  canopy to y = 0 and take the trees apart.
+
+`scale` in each entry brings the kit (authored 1–1.7 units tall) up to the
+dimensions of the procedural geometry it replaces, so `Foliage`'s existing
+placement rules and per-instance scale ranges keep working.
+
+### 9.4 Dropped, and why
+
+Nothing below was quietly substituted or padded out with a near-enough asset.
+
+- **Quaternius — Animated Fish (#10), Stylized Nature (#6), Animated Animals
+  (#9): dropped, egress.** `quaternius.com` is reachable, but every pack page
+  routes its download to a `drive.google.com` folder, and
+  `drive.google.com` / `drive.usercontent.google.com` both answer **403 at
+  CONNECT** — the proxy's own log classifies this as an organization policy
+  denial, so per §2 it is reported rather than routed around. Quaternius hosts
+  no file on its own domain. **This is what blocks the third slice item — "one
+  fish through `FishSchools` → `CatchCard`" — entirely:** #10 is the plan's only
+  fish, and no other approved source in §3 has one. Substituting a pack §3 does
+  not list would be a source change, which is not mine to make.
+  *Also worth recording for whenever this unblocks:* the pack page states "FBX,
+  OBJ and Blend formats" only. §3 lists glTF for it — that was an *(unverified)*
+  guess and it is wrong, so this pack will need a conversion step the plan does
+  not currently budget for.
+- **Tallbeard — Music Loop Bundle (#15): dropped, permission.** Its CC0
+  relicensing claim **does check out** on the creator's own page — an explicit
+  waiver, "To the extent possible under law, Abstraction Music and Tallbeard
+  Studios has waived all copyright and related or neighboring rights to the
+  music contained in this asset pack", with commercial use and modification
+  permitted. (The page also asks, explicitly "although permitted within the
+  license terms", that the assets not be used for NFTs, AI/ML or resale of
+  unmodified assets — a request, not a licence condition. Nothing here conflicts
+  with it.) The download itself could not be completed: itch.io serves
+  "name your own price" packs only through its checkout flow, and this session's
+  permission layer blocked that as a real-world transaction. No workaround was
+  attempted. Since §7 step 1 requires reading the licence *inside the archive*
+  and there is no archive, dropping it is doubly correct. **One cozy music loop
+  is therefore missing from the audio slice.**
+- **`tool.splash`: no asset, placeholder kept.** None of the three approved
+  Kenney audio packs contains a water or splash recording — verified by listing
+  every sound family in all three. §3 #12 claims RPG Audio covers `tool.*`;
+  for splash it does not.
+- **Freesound ambience (#16): not started.** `freesound.org` is reachable, but
+  its API answers `Authentication credentials were not provided.` and file
+  downloads redirect to a login page. Fetching anything needs an account and an
+  API key, which this session has neither of and should not create. Nothing was
+  downloaded, so the CC0-only filter in §8 decision 4 has not yet been applied
+  to anything.
+- **UI font (#19), Poly Haven (#17), ambientCG (#18), KayKit (#7, #8, #11): not
+  started.** All reachable now; simply out of scope for the representative
+  slice. Note that `fonts.google.com` being open resolves the licence problem
+  recorded earlier in this section: the `OFL.txt` can now be fetched, so #19 is
+  no longer blocked on licence verification.
+
+### 9.5 Verification — what was checked, and what could not be
+
+**`npm run typecheck`, `npm run build` and `npm run assets:verify` did not run.**
+`registry.npmjs.org` answers **403 to every request**, both directly and forced
+through the agent proxy, which the proxy logs as an organization policy denial.
+`node_modules/` is empty and `npm install` fails on the first tarball;
+`npm install --offline` fails with `ENOTCACHED`. `three`, `@types/three`, `tsx`
+and `vite` are not present anywhere on the machine and cannot be fetched. Per the
+proxy's documentation this was reported rather than routed around — in
+particular, no attempt was made to pull `three` or `vite` from a CDN to sidestep
+the registry block.
+
+Consequences, stated plainly:
+
+- **Bundle size before/after could not be measured.** The §7 step 5 comparison
+  against the baseline below is **not** in this update, because `vite build`
+  cannot run. Nothing was estimated in its place.
+- **Frame time could not be measured**, for the same reason.
+- `npm run assets:inspect` could not run either, so node names were read with a
+  purpose-built plain-Node GLB parser instead of three's `GLTFLoader`. The names
+  in `MODELS` come from the built file, not from guesswork — but they have not
+  been round-tripped through the loader the game will actually use, which is the
+  one residual risk in this commit.
+
+What *was* verified:
+
+- **The GLB, structurally and geometrically.** A plain-Node validator parsed the
+  built file and checked: GLB magic/version, header length against file length,
+  chunk 4-byte alignment, exactly two chunks, buffer-view alignment and bounds,
+  declared accessor `min`/`max` against the actual vertex extents, index range
+  within vertex count, index count divisible by 3, finite normals, UINT16
+  indices, no TEXCOORD, no materials or textures, unique node names, one
+  primitive per mesh, and `mesh.name === node.name` for every node. All 18
+  structural checks pass. Then per model: base at y = 0, centred on XZ, and
+  canopy above trunk — 15 further checks, all passing, on all 6 models.
+- **Every `src` path resolves** to a real file under `public/`. All 8.
+- **Licence files are byte-identical** to the copies inside the archives
+  (SHA-256, all 4).
+- **Types, partially.** `src/audio/AudioSystem.ts`, `src/audio/sounds.ts`,
+  `src/assets/manifest.ts` and `tools/genCredits.ts` typecheck clean. This is a
+  genuine check — none of those four files imports `three` — but it is **not**
+  equivalent to `npm run typecheck`: it ran under the machine's global
+  TypeScript **6.0.2** rather than the pinned ^5.6.3, with `vite/client` and
+  `@types/node` stubbed, and it covers only those four files. The rest of `src/`
+  was not typechecked.
+- **`ASSET_CREDITS.md` was regenerated by the project's own
+  `tools/genCredits.ts`**, not hand-edited (run under `node
+  --experimental-strip-types` with a small resolve hook standing in for `tsx`).
+
+While regenerating it, the generator was found to **hardcode its audio table**,
+so it credited Tallbeard's music bundle — a pack that has never shipped — and
+would have kept doing so. It now derives that table from `SOUNDS`, listing only
+packs the game actually plays a file from, and **exits non-zero if a shipped
+sound has no pack entry**, so an uncreditable, untraceable sound cannot slip in.
+
+### 9.6 Asset payload measured
+
+| Group | Bytes |
 | --- | --- |
-| `kenney.nl` | ❌ 403 |
-| `quaternius.com` | ❌ 403 |
-| `kaylousberg.com` | ❌ 403 |
-| `kaylousberg.itch.io` | ❌ 403 |
-| `tallbeard.itch.io` | ❌ 403 |
-| `freesound.org` | ❌ 403 |
-| `polyhaven.com` | ❌ 403 |
-| `ambientcg.com` | ❌ 403 |
-| `fonts.google.com` | ❌ 403 |
-| `fonts.gstatic.com` | ✅ reachable |
-| `github.com` | ✅ reachable |
+| `nature.glb` | 47,180 |
+| 8 OGG sound effects | 60,075 |
+| **Total** | **107,255 (104.7 KB)** |
 
-The proxy's own failure log classifies each one as
-`connect_rejected — gateway answered 403 to CONNECT (policy denial)`, which its
-documentation defines as an **organization policy denial that must be reported,
-not routed around**. So the allowlist approved in §8 decision 1 has not been
-applied to this environment; it is a network-policy change on the environment
-itself, made outside the session.
+Against the ≤ 8 MB first-load budget in §5 that is **1.3%**. Neither group is in
+the JS bundle: the OGGs are fetched after the audio context unlocks, and
+`nature.glb` is not fetched at all yet (see below).
 
-Two results are worth separating out:
+### 9.7 Deliberately not done
 
-- `fonts.gstatic.com` is reachable while `fonts.google.com` is not. That is
-  enough to fetch the WOFF2 payload for asset #19 but **not** the `OFL.txt`
-  licence file, and §7 step 1 forbids committing anything whose licence has not
-  been read. So the font is blocked too — on licence verification, not bytes.
-- `github.com` is reachable. That does **not** unblock the plan as written:
-  §2 rules third-party GitHub mirrors out of scope precisely because option A
-  makes the creator's own `License.txt` authoritative. Switching to mirrors
-  would reverse a locked decision and weaken the licence chain, so it is left
-  for the owner to decide rather than taken unilaterally.
-
-### Re-test repeated at the start of the integration session, 2026-09-14
-
-Before beginning the download/verify/optimise work, the allowlist was re-tested
-independently rather than trusted from the record above. **Result: unchanged —
-the allowlist is still not in effect and no asset has been downloaded.**
-
-All ten asset hosts still answer 403 at CONNECT, with the same
-`connect_rejected — gateway answered 403 to CONNECT (policy denial)`
-classification in the proxy's own `recentRelayFailures` log. Two hosts were
-added to the sweep this time:
-
-| Host | Result |
-| --- | --- |
-| `itch.io` (bare domain, for the `*.itch.io` rule) | ❌ 403 |
-| `raw.githubusercontent.com` | ✅ reachable |
-
-Neither changes the conclusion: the bare `itch.io` denial confirms the
-`*.itch.io` entry is not applied at any level, and `raw.githubusercontent.com`
-is a mirror path that §2 and §8 decision 1 rule out for the same licence-chain
-reason as `github.com`.
-
-Consequently §7 steps 1–2 and 4–6 remain unstartable: each one needs the asset
-bytes, and step 1 forbids committing anything whose `License.txt` has not been
-read. The toolchain was re-verified green on this branch regardless — typecheck
-clean, all ten `assets:verify` checks passing, `npm run build` reproducing the
-bundle baseline below exactly, and `assets:credits` regenerating with no diff —
-so the loading layer is confirmed ready for the first kit that lands.
-
-### Verified again on the rebased branch
-
-Re-ran the full toolchain after the rebase onto `cc5be5d`, to confirm the
-loading layer did not regress against the merged game code:
-
-- `npm run typecheck` — clean.
-- `npm run assets:verify` — all ten import checks pass.
-- `npm run build` — succeeds; chunk sizes reproduce the baseline below exactly.
-- `npm run assets:credits` — regenerates `ASSET_CREDITS.md` with no diff, so the
-  credits file is in sync with the manifest.
-
-### Done while blocked
-
-The loading layer (§7 step 3) needs no asset files to build or to test, so it is
-finished and verified:
-
-- `src/assets/manifest.ts` — kits and models as a data table, matching the
-  `sounds.ts` pattern. `MODELS` is intentionally **empty**: node names get
-  filled in from the real GLBs via `npm run assets:inspect`, not invented ahead
-  of seeing the files.
-- `src/assets/gltfImport.ts` — bakes node world matrices, strips attributes the
-  renderer never reads, moves the origin to the base.
-- `src/assets/AssetManager.ts` — loads kits in parallel, keeps only the geometry
-  the manifest claims, disposes the rest. **A missing kit is not an error:** it
-  leaves the procedural path untouched, which is what makes replacing one
-  category at a time possible, and means a bad asset deploy degrades to the old
-  look rather than a black screen.
-- `tools/` + `npm run assets:{inspect,verify,credits}`.
-- `licenses/` and `ASSET_CREDITS.md` (generated from the manifest, so the
-  credits cannot drift from what actually ships).
-
-**Verified, not assumed:** `npm run assets:verify` builds a glTF-binary fixture
-by hand, parses it through three's real `GLTFLoader`, and asserts parent
-transform baking, ground origin, XZ centring and attribute stripping. All ten
-checks pass.
-
-**Not yet wired into `Game.ts`.** `AssetManager` is deliberately not imported by
-the game loop: with `MODELS` empty it would load nothing while pulling the
-GLTFLoader and meshopt decoder into the bundle for no benefit. Wiring it is a
-few lines in `beginGame` once the first kit lands.
+- **`Foliage.ts` is not yet driven by `nature.glb`.** The kit, the manifest
+  entries and the loading layer are all in place, but the code change that binds
+  imported geometry to the instanced bark/canopy materials is held back: with no
+  `three`, no `@types/three` and no `vite`, it could not be typechecked, built or
+  run even once. Pushing an unexercised rendering change is a worse outcome than
+  pushing the asset and the data, so the swap is left as its own commit for when
+  the toolchain is available. The intended shape is already settled by this
+  commit: `nature.glb` splits trunk and canopy into separate nodes precisely so
+  `Foliage`'s existing `barkMaterial` and `canopyMaterial` can each bind one,
+  keeping season tint, wind, wetness and the instancing path (§7.1).
+- **`AssetManager` is still not wired into `Game.ts`.** Wiring it now would pull
+  `GLTFLoader` and the meshopt decoder into the bundle to load geometry that
+  nothing yet consumes — the same reason it was left out before. It should go in
+  together with the `Foliage` swap above.
+- **§7 step 6 (the wholesale category-by-category swap) was not started**, as
+  intended: it is separate commits and separate review.
 
 ### Bundle baseline (pre-asset, `npm run build`)
+
+Unchanged and **not re-measured this session** — `vite` is unavailable, so this
+remains the last known-good measurement, recorded before any asset landed:
 
 | Chunk | Raw | Gzip |
 | --- | --- | --- |
@@ -410,5 +572,17 @@ few lines in `beginGame` once the first kit lands.
 | CSS | 25.80 kB | 6.36 kB |
 | **Total** | **927.51 kB** | **256.71 kB** |
 
-This is what the §7 step 5 before/after comparison measures against; the ≤ 8 MB
-first-load budget in §5 is for assets on top of it.
+The app chunk should be expected to grow slightly once the `preloadSources`
+addition is built, and the JS bundle is otherwise untouched by this commit; the
+≤ 8 MB budget in §5 is for assets on top of this.
+
+### 9.8 What the next session needs
+
+1. **`registry.npmjs.org` on the allowlist** (or a pre-populated `node_modules`).
+   Without it `typecheck`, `build` and `assets:verify` cannot run, the §7 step 5
+   numbers cannot be produced, and no code touching `three` can be verified.
+2. **`drive.google.com` on the allowlist**, for every Quaternius pack — the fish
+   (#10) and therefore the third slice item depend on it.
+3. **A decision on Tallbeard (#15):** either permission for itch.io's
+   "name your own price" download flow, or a different CC0 music source, which
+   would be a change to §3 and so is the owner's call.
