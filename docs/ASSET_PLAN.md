@@ -770,31 +770,31 @@ schema. They are not carried yet because nothing reads them.
 ### 9.5i Furniture — and a colour-space bug in the two kits before it
 
 Kenney Furniture Kit 2.0, CC0 read in-archive and quoted in §9.2. 20 of its 140
-models, **191740 bytes**, 5,498 verts, 3,592 tris — one per kind
- builds (sofa, table, lamp, rug, music, plant,
+models, **191,740 bytes**, 5,498 verts, 3,592 tris — one per kind
+`housing/FurnitureModels.ts` builds (sofa, table, lamp, rug, music, plant,
 shelf, bed, chair), plus a second option where a room wants more than one.
 
-**A third colour mode.** This kit has flat  materials like the
+**A third colour mode.** This kit has flat `baseColorFactor` materials like the
 Nature Kit, but splitting by material is wrong here: a tree wants its trunk and
 canopy tinted independently, whereas a cabinet is one object the player places
 and rotates as a unit — and it is wood + woodDark + metal, which under
-split-by-material would become three nodes to reassemble. So 
+split-by-material would become three nodes to reassemble. So `bake-materials`
 writes each primitive's own colour to its vertices, giving one node per model.
 The pipeline now has three strategies, one per kind of source it has met:
-split-by-material, bake-atlas, bake-materials.
+`split-by-material`, `bake-atlas`, `bake-materials`.
 
 **The bug this turned up, in kits already shipped.** Deciding where the flat
-colours go meant checking what  actually holds, and the glTF spec is
-explicit: ** is linear**, while a  is **sRGB**. The
-atlas bake for  and  copied raw sRGB bytes straight
-into , skipping the sRGB→linear decode the renderer would have done
+colours go meant checking what `COLOR_0` actually holds, and the glTF spec is
+explicit: **`COLOR_0` is linear**, while a `baseColorTexture` is **sRGB**. The
+atlas bake for `buildings.glb` and `props.glb` copied raw sRGB bytes straight
+into `COLOR_0`, skipping the sRGB→linear decode the renderer would have done
 when sampling the texture. Every surface in both kits would have rendered washed
 out and too bright.
 
-Both are rebuilt with the decode applied.  needs no conversion
+Both are rebuilt with the decode applied. `baseColorFactor` needs no conversion
 — it is already linear — so the furniture kit was correct from the start, and
 only the two atlas kits changed. The previews are unchanged, because
- now encodes back to sRGB for display: that round trip landing where
+`renderKit` now encodes back to sRGB for display: that round trip landing where
 it started is the check that both directions agree.
 
 Stated plainly: this is a **spec-correct change that has not been confirmed
@@ -802,7 +802,7 @@ visually in three**. It cannot be, from an environment with no npm. If the
 colours look wrong when someone next runs the game, this is the change to look
 at first.
 
-Colours are stored as normalised , so linear values give up some
+Colours are stored as normalised `UNSIGNED_BYTE`, so linear values give up some
 precision in the darks compared with sRGB encoding. For flat, mid-tone palette
 art that is a fair trade against tripling the attribute to float32; if banding
 ever shows in dark surfaces, that is the knob.
@@ -824,9 +824,9 @@ SHA-256 against the committed file. It is, at every stage and at the end.
 | `nature.glb` | 58,984 |
 | `buildings.glb` | 138,124 |
 | `props.glb` | 153,948 |
-| `furniture.glb` | 191740 |
+| `furniture.glb` | 191,740 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **602871 (588.7 KB)** |
+| **Total** | **602,871 (588.7 KB)** |
 
 Against the ≤ 8 MB first-load budget in §5 that is **7.1%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
