@@ -1645,10 +1645,15 @@ export class Game {
   /** The colourway last used for each piece, so a run of beds matches. */
   private buildTints = new Map<string, string>();
 
+  /** The catalogue entry the build cursor is currently offering. */
   private get buildPiece() {
     return DECOR[this.buildIndex];
   }
 
+  /**
+   * Opens landscaping. Refused from anywhere the cursor could not reach the
+   * ground it is meant to be placing on — indoors, or out of your depth.
+   */
   private enterBuildMode(): void {
     if (this.mode !== 'exterior') {
       this.uiRoot.toast('Step outside to landscape.', 'warn');
@@ -1671,6 +1676,7 @@ export class Game {
     );
   }
 
+  /** Closes landscaping, settling whatever is still in the player's hands. */
   private exitBuildMode(): void {
     // Anything still in hand goes down where it is, or back on the shelf if
     // that spot will not take it.
@@ -1772,6 +1778,7 @@ export class Game {
     this.save.markDirty();
   }
 
+  /** Steps through the outdoor catalogue, wrapping at either end. */
   private cycleBuildPiece(direction: 1 | -1): void {
     this.buildIndex = (this.buildIndex + direction + DECOR.length) % DECOR.length;
     this.bus.emit('audio:sfx', { id: 'ui.hover', volume: 0.5 });

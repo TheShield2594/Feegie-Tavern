@@ -36,6 +36,22 @@ const TEXTURE_SLOTS = [
  * and taking up one bench must not free the plank texture the pier is drawn
  * with. A caller that wants to own its copy clones it.
  */
+/**
+ * A copy of a geometry the caller owns outright, safe to dispose.
+ *
+ * `BufferGeometry.copy` assigns `userData` by reference rather than copying it,
+ * so a plain `clone()` of a shared geometry comes back still marked shared —
+ * and pointing at the original's own `userData`, where clearing the flag in
+ * place would un-share the original too. This hands back a copy with its own
+ * `userData` and the marker dropped, so {@link disposeObject} frees it like
+ * anything else while the registry's instance stays protected.
+ */
+export function cloneOwned(geometry: BufferGeometry): BufferGeometry {
+  const copy = geometry.clone();
+  copy.userData = { ...geometry.userData, shared: false };
+  return copy;
+}
+
 export function disposeObject(root: Object3D): void {
   const materials = new Set<Material>();
 

@@ -124,6 +124,12 @@ export interface InsectContext {
   candidatesAt: (x: number, z: number) => SpeciesDef[];
 }
 
+/**
+ * Which silhouette family a species is drawn from.
+ *
+ * Anything that is not plainly a beetle or a dragonfly gets wings, which is why
+ * the moths ride in the butterfly pool.
+ */
 function shapeOf(species: SpeciesDef): InsectShape {
   const shape = species.visual.shape;
   return shape === 'beetle' || shape === 'dragonfly' ? shape : 'butterfly';
@@ -284,6 +290,10 @@ export class Insects {
     insect.homeZ = insect.z + Math.cos(insect.angle) * 14;
   }
 
+  /**
+   * One frame of the whole population: refill empty slots, step the living,
+   * retire the ones left behind, and write the instance buffers.
+   */
   update(dt: number, time: number, context: InsectContext): void {
     this.retryTimer -= dt;
     const canSpawn = this.retryTimer <= 0;
@@ -518,6 +528,12 @@ export class Insects {
     return candidates[candidates.length - 1];
   }
 
+  /**
+   * Writes every slot's transform, culling the distant and the empty.
+   *
+   * Wings are one mesh scaled on X rather than two hinged ones: the beat is
+   * fast enough to blur, so a scale reads as a flap and costs one instance.
+   */
   private writeMatrices(time: number, playerX: number, playerZ: number): void {
     for (const { bodies, wings, slots } of this.meshes.values()) {
       for (let i = 0; i < slots.length; i++) {
@@ -556,6 +572,7 @@ export class Insects {
     }
   }
 
+  /** Releases every family's two meshes and the material they share. */
   dispose(): void {
     for (const { bodies, wings } of this.meshes.values()) {
       bodies.geometry.dispose();

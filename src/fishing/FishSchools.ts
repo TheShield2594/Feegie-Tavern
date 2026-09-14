@@ -321,6 +321,7 @@ const REEF_SLOTS = 26;
 /** Days before a collected creature's spot is worth visiting again. */
 const REEF_RESPAWN_DAYS = 1;
 
+/** Which of the four instanced silhouettes a sea creature is drawn with. */
 function reefShapeOf(species: SpeciesDef): ReefShape {
   const shape = species.visual.shape;
   return shape === 'jelly' || shape === 'shell' || shape === 'ammonite' ? shape : 'star';
@@ -465,6 +466,7 @@ export class ReefLife {
       .map((c) => ({ id: c.id, takenOnDay: c.takenOnDay }));
   }
 
+  /** Restores which creatures were taken, then lets the day's respawns through. */
   load(data: { id: number; takenOnDay: number }[], day: number): void {
     for (const collectible of this.collectibles) collectible.takenOnDay = -1;
     for (const entry of data) {
@@ -474,6 +476,10 @@ export class ReefLife {
     this.refresh(day);
   }
 
+  /**
+   * Bobs and drifts the creatures, hiding anything out of its hours, already
+   * taken, or too far off to be worth a transform.
+   */
   update(dt: number, time: number, hour: number, day: number, cameraX: number, cameraZ: number): void {
     void dt;
     for (const [shape, slots] of this.bySlot) {
@@ -505,6 +511,7 @@ export class ReefLife {
     }
   }
 
+  /** Releases the per-silhouette instanced meshes. */
   dispose(): void {
     for (const mesh of this.meshes.values()) {
       mesh.geometry.dispose();

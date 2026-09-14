@@ -28,11 +28,14 @@ export const OUTDOOR_GRID = 0.5;
 /**
  * Points around a piece's rim that have to stand on good ground too.
  *
- * Four, at the compass points. This runs every frame while a piece is being
- * carried, and the footprints are round: eight would double the heightfield
- * sampling to catch cases four already refuses a step earlier.
+ * Eight, at the compass points and the diagonals. Four leaves a 1.7 m chord
+ * between neighbouring samples on the widest piece, which is wide enough for an
+ * inlet or the corner of the plaza to pass between them unnoticed. The extra
+ * four are only paid for while a piece is actually in the player's hands, which
+ * is a handful of heightfield samples in one mode rather than a per-frame cost
+ * on the whole island.
  */
-const FOOTPRINT_SAMPLES = 4;
+const FOOTPRINT_SAMPLES = 8;
 
 /**
  * Everything the player has put down outdoors.
@@ -188,6 +191,7 @@ export class Landscaping {
     (this.ghost.material as MeshStandardMaterial).color.set(valid ? 0x7fd6a8 : 0xd97a6a);
   }
 
+  /** Turns the carried piece an eighth of a turn, so a fence can follow a curve. */
   rotateEdit(): void {
     if (!this.editing) return;
     this.editing.rotation = (this.editing.rotation + Math.PI / 4) % (Math.PI * 2);
@@ -354,6 +358,7 @@ export class Landscaping {
     }));
   }
 
+  /** Replaces the island's decoration with a saved one. */
   load(data: PlacedDecorData[]): void {
     for (const piece of [...this.pieces]) this.remove(piece.uid);
     // The surface overlay is module state on the heightfield and this is its
@@ -366,6 +371,7 @@ export class Landscaping {
     }
   }
 
+  /** Clears every piece and releases the placement ghost. */
   dispose(): void {
     for (const piece of [...this.pieces]) this.remove(piece.uid);
     this.ghost.geometry.dispose();

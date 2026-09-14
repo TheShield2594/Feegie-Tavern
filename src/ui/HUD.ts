@@ -295,6 +295,7 @@ export class HUD {
     this.airMeter.classList.toggle('urgent', clamped <= 0.2);
   }
 
+  /** Takes the breath gauge away, on surfacing or on leaving the water. */
   hideAirMeter(): void {
     if (!this.airMeter) return;
     removeAfter(this.airMeter, 'leaving', 200);
@@ -360,6 +361,7 @@ export class HUD {
     this.buildBar.classList.toggle('holding', state.holding);
   }
 
+  /** Takes the landscaping readout away when build mode ends. */
   hideBuildBar(): void {
     if (!this.buildBar) return;
     removeAfter(this.buildBar, 'leaving', 200);

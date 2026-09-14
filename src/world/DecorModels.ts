@@ -13,6 +13,7 @@ import { PALETTE } from '@/rendering/palette';
 import { flagstoneTexture } from '@/rendering/textures';
 import { DECOR_BY_ID, type DecorDef } from '@/data/decor';
 import { makeSign, makeStreetLamp, roundedBoxGeometry, surfaces } from './BuildingKit';
+import { cloneOwned } from '@/util/three';
 
 export interface BuiltDecor {
   group: Group;
@@ -35,8 +36,9 @@ export interface BuiltDecor {
  * game that are built and destroyed one at a time while it runs, and taking one
  * up calls `disposeObject` on it — which would otherwise free the shared kit
  * geometry and the cached kit material that every bush and fence on the island
- * is also drawn from. So kit geometry is cloned and kit materials are built
- * rather than fetched from the registry's cache.
+ * is also drawn from. So kit geometry goes through `cloneOwned` — a plain
+ * `clone()` inherits the registry's shared marker and would never be freed at
+ * all — and kit materials are built rather than fetched from the cache.
  */
 export function makeDecor(defId: string, tint?: string): BuiltDecor | null {
   const def = DECOR_BY_ID.get(defId);
@@ -85,6 +87,7 @@ export function makeDecor(defId: string, tint?: string): BuiltDecor | null {
   return { group, def, light, glass };
 }
 
+/** A tilled bed with a dozen blooms standing in it, in the chosen colourway. */
 function buildFlowerBed(group: Group, tint: string): void {
   const bed = new Mesh(
     roundedBoxGeometry(1.6, 0.24, 1.2, 0.28),
@@ -108,6 +111,7 @@ function buildFlowerBed(group: Group, tint: string): void {
   }
 }
 
+/** A clipped round shrub — the kit's bush where one is loaded, a sphere otherwise. */
 function buildShrub(group: Group, tint: string): void {
   const material = createStylizedMaterial({
     color: tint,
@@ -118,7 +122,7 @@ function buildShrub(group: Group, tint: string): void {
   });
   const kit = kitGeometry('bush.small');
   if (kit) {
-    const bush = new Mesh(kit.clone(), material);
+    const bush = new Mesh(cloneOwned(kit), material);
     bush.scale.setScalar(1.15);
     group.add(bush);
     return;
@@ -129,6 +133,10 @@ function buildShrub(group: Group, tint: string): void {
   group.add(bush);
 }
 
+/**
+ * One panel of picket fence, running along its own local Z so the placement
+ * system's rotation turns it along the run rather than across it.
+ */
 function buildFencePanel(group: Group): void {
   const kit = kitGeometry('yard.fence');
   if (kit) {
@@ -141,7 +149,7 @@ function buildFencePanel(group: Group): void {
       color: '#f0e4d0',
       roughness: 0.92,
     });
-    group.add(new Mesh(kit.clone(), material));
+    group.add(new Mesh(cloneOwned(kit), material));
     return;
   }
   const wood = createStylizedMaterial({ color: PALETTE.wood.plankDark, roughness: 0.94 });
@@ -183,6 +191,7 @@ function buildBench(group: Group): void {
   }
 }
 
+/** Three offset flagstones, so a run of these reads as a wandering path. */
 function buildSteppingStones(group: Group): void {
   const stone = createStylizedMaterial({ color: '#b4ada0', roughness: 0.95, map: flagstoneTexture() });
   // Three slabs, offset, so a run of pieces reads as a wandering path rather

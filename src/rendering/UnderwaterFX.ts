@@ -200,6 +200,13 @@ export class UnderwaterFX {
     this.moteMaterial.opacity = this.strength * 0.55;
   }
 
+  /**
+   * Advances the shimmer and carries the volume with the camera.
+   *
+   * The ceiling stays welded to the real water surface; the shafts and the
+   * motes ride the camera, so the diver is always inside the effect however
+   * far they swim.
+   */
   update(dt: number, time: number, cameraPosition: Vector3): void {
     if (!this.group.visible) return;
 
@@ -229,6 +236,7 @@ export class UnderwaterFX {
     positions.needsUpdate = true;
   }
 
+  /** Releases the three layers' geometry and their shaders. */
   dispose(): void {
     for (const mesh of [this.ceiling, this.shafts]) {
       mesh.geometry.dispose();

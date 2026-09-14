@@ -319,6 +319,7 @@ function overlayCellsFor(patch: SurfacePatch): number[] {
   return keys;
 }
 
+/** Registers a patch, filed under every cell it touches. */
 export function addSurfacePatch(patch: SurfacePatch): void {
   for (const key of overlayCellsFor(patch)) {
     const bucket = overlayBuckets.get(key);
@@ -328,6 +329,7 @@ export function addSurfacePatch(patch: SurfacePatch): void {
   overlayCount++;
 }
 
+/** Unregisters a patch by id, wherever it was filed. */
 export function removeSurfacePatch(id: string): void {
   let removed = false;
   for (const [key, bucket] of overlayBuckets) {
@@ -340,6 +342,7 @@ export function removeSurfacePatch(id: string): void {
   if (removed) overlayCount = Math.max(0, overlayCount - 1);
 }
 
+/** Drops every patch — for loading a different island, or for a test. */
 export function clearSurfacePatches(): void {
   overlayBuckets.clear();
   overlayCount = 0;
