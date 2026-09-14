@@ -65,20 +65,25 @@ function showLoading(): { progress: (done: number, total: number) => void; done:
   };
 }
 
-// Fail with an explanation rather than a blank canvas when WebGL is missing.
-const probe = document.createElement('canvas');
-if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
-  reportFailure('Your browser did not provide a WebGL context.');
-} else {
-  void boot(container);
-}
-
 /**
  * How long the boot waits for optional asset kits before starting without them.
  * Generous enough for a cold cache on a slow connection, short enough that a
  * stalled request does not read as a hung game.
  */
 const ASSET_DEADLINE_MS = 15_000;
+
+// Fail with an explanation rather than a blank canvas when WebGL is missing.
+// NB: `boot` is started below, so every `const` it reads on its synchronous
+// path must be declared above this point. `boot` is async but runs to its
+// first `await` immediately, and a `new Promise` executor is synchronous, so a
+// constant declared further down the module is still in its temporal dead
+// zone when that code runs.
+const probe = document.createElement('canvas');
+if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
+  reportFailure('Your browser did not provide a WebGL context.');
+} else {
+  void boot(container);
+}
 
 /**
  * Starts the game: loads the optional asset kits, then constructs `Game`.
@@ -120,7 +125,11 @@ async function boot(root: HTMLElement): Promise<void> {
         }
       }
     } catch (error) {
-      console.warn('[cozy] asset kits unavailable; using generated art', error);
+      // `loadAll` already absorbs a failed kit, so reaching here means the
+      // loading path itself broke. That is a bug, not a missing file, and it
+      // silently costs every kit — log it as an error so it cannot hide among
+      // the warnings.
+      console.error('[cozy] asset loading failed outright; starting on generated art', error);
     } finally {
       loading.done();
     }
