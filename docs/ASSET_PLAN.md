@@ -570,6 +570,40 @@ poisons the graph and silences the whole mixer rather than one sound. Two of
 the ten check the data instead of the maths: no sound is flagged `mono` without
 a `src`, and nothing off the `sfx` channel is flagged.
 
+### 9.5c Looking at it — `npm run assets:preview`
+
+The game cannot be screenshotted in this environment: `vite` and `three` are
+unavailable, so it does not build, let alone run. What *can* be shown is the
+geometry itself, so `tools/renderKit.mjs` rasterises a kit GLB straight to PNG —
+no browser, no dependencies, z-buffer and flat shading in plain node, PNG
+written via `node:zlib`.
+
+It is deliberately faithful rather than pretty: face normals, because
+`Foliage`'s bark, canopy, pine and bush materials all set `flatShading: true`;
+the palette's own `bark`, `canopyMid` and `pine`; and the scales from
+`manifest.ts`, so the lineup shows the models at the sizes `Foliage` will
+instance them at relative to each other. It models no lighting, shadows, wind or
+season tint, and it is not a substitute for seeing the game run.
+
+It doubles as a check a person can actually perform: the numeric invariants in
+§9.5 assert that each canopy sits above its trunk, but a render shows whether
+the tree looks like a tree. Output is in `docs/preview/`.
+
+**Two things the renders show that the numbers did not**, both art judgements
+rather than defects, and neither acted on:
+
+- **`tree_palmShort` at ×5.7 is disproportionately chunky.** It is a short,
+  stubby palm scaled up a long way to reach the 6 m the procedural palm
+  occupied, so its trunk reads much thicker than the other trees'.
+  `tree_palmDetailedTall` would need far less scaling and should sit better next
+  to the rest — but it has extra `leafs` child nodes that the build script would
+  need to handle, so it is a change to make deliberately rather than in passing.
+- **The bushes are narrower than what they replace.** Height matches — the
+  procedural bush is ~0.84 m and `plant_bush` at ×3.5 is ~0.85 m — but the
+  procedural version is a wide icosahedron blob while Kenney's is a slim leafy
+  plant, so ground cover will read sparser than it does today.
+  `plant_bushDetailed` is the fuller alternative in the same kit.
+
 ### 9.6 Asset payload measured
 
 | Group | Bytes |
@@ -634,14 +668,21 @@ Neither of these is asset work, and neither is done. Recorded here because both
 were found while checking what the multiplayer target changes, and both get more
 expensive the later they are picked up.
 
-- **Assets in `public/` carry no cache-busting.** Vite content-hashes the bundle
-  chunks but copies `public/` verbatim, so `nature.glb` and the eight OGGs are
-  served on unhashed URLs. Self-hosting means you own the headers, so the choice
-  is long `Cache-Control` plus a versioned filename, or moving kits into
-  `src/assets/` and importing them so Vite hashes them. **Left undecided on
-  purpose** — it depends on how the server deploys and patches art, and picking
-  wrong means rewriting every manifest path. Cheapest to settle now, while there
-  is exactly one kit.
+- **Assets in `public/` carry no cache-busting — settled, in `docker/nginx.conf`.**
+  Vite content-hashes the bundle chunks but copies `public/` verbatim, so
+  `nature.glb` and the eight OGGs keep the same URL across deploys. With Docker
+  as the deployment target the answer is headers rather than filenames: hashed
+  bundle output is served `immutable` for a year, and
+  `/assets/{models,audio,textures,fonts}/` is served `no-cache`, meaning
+  revalidate — so a redeployed image reaches a browser that already has the old
+  art, at the cost of a 304 with no body.
+  Both kinds live under `/assets/` because Vite's default `assetsDir` is
+  `assets` and `public/assets/` copies alongside it; they are told apart by
+  subdirectory (nginx evaluates regex locations before prefix ones) rather than
+  by changing `build.assetsDir`, which would have meant editing build config
+  that cannot be built or tested in this environment. **Not built or run here**
+  — there is no Docker daemon, and npm is blocked, so the image has never been
+  assembled.
 - **`Math.random()` in gameplay will diverge across clients.** The world itself
   is already safe: `world/heightfield.ts` is pure and deterministic and imports
   no `three`, so an authoritative headless server can share it directly, and

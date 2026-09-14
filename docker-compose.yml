@@ -1,0 +1,11 @@
+# Browser-only build. `docker compose up --build`, then http://localhost:8080
+#
+# When the multiplayer server arrives it joins as a second service here; the
+# client below stays exactly as it is, since it is only static files.
+services:
+  cozy-cove:
+    build: .
+    image: cozy-cove:latest
+    ports:
+      - "8080:80"
+    restart: unless-stopped

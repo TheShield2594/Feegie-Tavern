@@ -12,7 +12,8 @@
     "assets:inspect": "tsx tools/inspectGlb.ts",
     "assets:verify": "tsx tools/verifyAssetImport.ts",
     "assets:credits": "tsx tools/genCredits.ts",
-    "audio:verify": "tsx tools/verifyDownmix.ts"
+    "audio:verify": "tsx tools/verifyDownmix.ts",
+    "assets:preview": "node tools/renderKit.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"
