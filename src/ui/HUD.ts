@@ -45,6 +45,8 @@ export class HUD {
   private toolBar: HTMLElement;
   private promptLayer: HTMLElement;
   private fishingMeter: HTMLElement | null = null;
+  private airMeter: HTMLElement | null = null;
+  private buildBar: HTMLElement | null = null;
 
   private lastCoins = -1;
   /** Cancels an in-flight coin roll so a second sale does not fight the first. */
@@ -257,5 +259,110 @@ export class HUD {
   setFishingCaption(text: string): void {
     const caption = this.fishingMeter?.querySelector('.caption');
     if (caption) caption.textContent = text;
+  }
+
+  // --- Air meter -----------------------------------------------------------
+
+  /**
+   * The diver's breath. Deliberately the only thing on screen while under the
+   * surface: the point of the dive is that you are counting one number down.
+   */
+  showAirMeter(): void {
+    if (this.airMeter) return;
+    const bar = el('i', { style: 'width:100%' });
+    this.airMeter = el('div', { id: 'air-meter' }, [
+      el('div', { class: 'cc-air-bar' }, [bar]),
+      el('div', { class: 'caption', text: 'Air' }),
+    ]);
+    this.ui.layers.hud.append(this.airMeter);
+  }
+
+  /** @param fraction Breath left, 1 to 0. */
+  updateAirMeter(fraction: number): void {
+    if (!this.airMeter) return;
+    const bar = this.airMeter.querySelector<HTMLElement>('.cc-air-bar > i');
+    const clamped = Math.max(0, Math.min(1, fraction));
+    if (bar) {
+      bar.style.width = `${clamped * 100}%`;
+      // The last quarter goes amber then red, so the decision to surface
+      // arrives before the meter empties rather than with it.
+      bar.style.background = clamped > 0.45
+        ? 'linear-gradient(180deg, #8fe0f2, #4aa8c4)'
+        : clamped > 0.2
+          ? 'linear-gradient(180deg, #f2d08f, #c49a4a)'
+          : 'linear-gradient(180deg, #f29a8f, #c4544a)';
+    }
+    this.airMeter.classList.toggle('urgent', clamped <= 0.2);
+  }
+
+  hideAirMeter(): void {
+    if (!this.airMeter) return;
+    removeAfter(this.airMeter, 'leaving', 200);
+    this.airMeter = null;
+  }
+
+  // --- Outdoor build bar ---------------------------------------------------
+
+  /** The landscaping cursor's readout: what is selected, and what it costs. */
+  showBuildBar(): void {
+    if (this.buildBar) return;
+    this.buildBar = el('div', { id: 'build-bar' }, [
+      el('div', { class: 'cc-build-name' }),
+      el('div', { class: 'cc-build-note' }),
+      el('div', { class: 'cc-build-cost' }),
+      el('div', { class: 'cc-build-keys' }),
+    ]);
+    this.ui.layers.hud.append(this.buildBar);
+  }
+
+  updateBuildBar(state: {
+    name: string;
+    description: string;
+    price: number;
+    cost?: { wood?: number; stone?: number; fiber?: number };
+    affordable: boolean;
+    /** True while this piece is in the player's hands rather than on the shelf. */
+    holding: boolean;
+    /** Whether the shoulder buttons would change its colour. */
+    hasTints: boolean;
+  }): void {
+    if (!this.buildBar) return;
+    const name = this.buildBar.querySelector<HTMLElement>('.cc-build-name');
+    const note = this.buildBar.querySelector<HTMLElement>('.cc-build-note');
+    const cost = this.buildBar.querySelector<HTMLElement>('.cc-build-cost');
+    const keys = this.buildBar.querySelector<HTMLElement>('.cc-build-keys');
+    if (name) name.textContent = state.name;
+    if (note) note.textContent = state.description;
+    if (cost) {
+      if (state.holding) {
+        cost.textContent = 'In hand';
+      } else {
+        const parts = [`${state.price} shells`];
+        for (const [key, label] of [['wood', 'wood'], ['stone', 'stone'], ['fiber', 'fibre']] as const) {
+          const amount = state.cost?.[key] ?? 0;
+          if (amount > 0) parts.push(`${amount} ${label}`);
+        }
+        cost.textContent = parts.join(' · ');
+      }
+    }
+    // The controls change meaning between carrying and choosing, so the line
+    // that teaches them has to change with it.
+    if (keys) {
+      keys.textContent = state.holding
+        ? `${state.hasTints ? `${this.input.glyph('toolPrev')} ${this.input.glyph('toolNext')} colour · ` : ''}`
+          + `${this.input.glyph('interact')} put down · ${this.input.glyph('useTool')} turn · `
+          + `${this.input.glyph('cancel')} put back`
+        : `${this.input.glyph('toolPrev')} ${this.input.glyph('toolNext')} choose · `
+          + `${this.input.glyph('interact')} place · ${this.input.glyph('useTool')} take back up · `
+          + `${this.input.glyph('cancel')} finish`;
+    }
+    this.buildBar.classList.toggle('unaffordable', !state.affordable);
+    this.buildBar.classList.toggle('holding', state.holding);
+  }
+
+  hideBuildBar(): void {
+    if (!this.buildBar) return;
+    removeAfter(this.buildBar, 'leaving', 200);
+    this.buildBar = null;
   }
 }

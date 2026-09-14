@@ -9,6 +9,7 @@ import { LightingRig } from '@/rendering/LightingRig';
 import { ParticleSystem } from '@/rendering/Particles';
 import { Renderer, type QualityLevel } from '@/rendering/Renderer';
 import { Sky } from '@/rendering/Sky';
+import { UnderwaterFX } from '@/rendering/UnderwaterFX';
 import { WeatherFX } from '@/rendering/WeatherFX';
 import { registerShaderChunks, updateSharedUniforms } from '@/rendering/materials';
 import { SEASON_TINT } from '@/rendering/palette';
@@ -31,6 +32,7 @@ import {
   type InteriorScene,
 } from '@/world/Interiors';
 import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, walkHeight, waterDepth } from '@/world/heightfield';
+import { Landscaping } from '@/world/Landscaping';
 import { CreekWater } from '@/world/CreekWater';
 import {
   isInRegion,
@@ -42,15 +44,16 @@ import {
   type RegionId,
 } from '@/world/regions';
 import { drawIslandMap } from '@/world/Minimap';
-import { Player } from '@/player/Player';
+import { DIVE_MIN_DEPTH, Player } from '@/player/Player';
 import { TOOLS, type ToolId } from '@/player/Tools';
 import { VillagerManager } from '@/npc/VillagerManager';
 import { Inventory, rollSize } from '@/inventory/Inventory';
 import { Museum } from '@/museum/Museum';
-import { FishSchools } from '@/fishing/FishSchools';
+import { FishSchools, ReefLife, type ReefCollectible } from '@/fishing/FishSchools';
 import { FishingSystem } from '@/fishing/FishingSystem';
 import { Farm } from '@/farming/Farm';
 import { DropSystem } from '@/gathering/DropSystem';
+import { Insects } from '@/gathering/Insects';
 import { InteractionSystem } from '@/interactions/InteractionSystem';
 import type { InteractionOption } from '@/interactions/types';
 import { QuestSystem } from '@/quests/QuestSystem';
@@ -58,13 +61,14 @@ import { Relationships } from '@/relationships/Relationships';
 import { ShopSystem } from '@/shops/ShopSystem';
 import { HomeFurnishing } from '@/housing/HomeFurnishing';
 import { SaveSystem, createNewSave } from '@/save/SaveSystem';
-import { SAVE_VERSION, type SaveDataV6 } from '@/save/schema';
+import { SAVE_VERSION, type SaveDataV7 } from '@/save/schema';
 import { DEFAULT_LOOK, type CharacterLook } from '@/data/clothing';
 import { FURNITURE_BY_ID, HOUSE_STYLES_BY_ID } from '@/data/furniture';
 import { CRAFTING, RECIPES } from '@/data/recipes';
 import { PUBLIC_WORKS } from '@/data/quests';
 import { VILLAGERS, VILLAGERS_BY_ID } from '@/data/villagers';
 import { ALL_SPECIES, BUGS, FOSSILS, SEA_CREATURES, SPECIES_BY_ID } from '@/data/species';
+import { DECOR, DECOR_BY_ID } from '@/data/decor';
 import { getItemDef } from '@/data/items';
 import type { SpeciesDef } from '@/items/types';
 import { iconFor } from '@/items/ItemIcons';
@@ -95,7 +99,18 @@ import { disposeObject } from '@/util/three';
 /** Interiors are built far from the island so both can exist in one scene. */
 const INTERIOR_ORIGIN = new Vector3(1000, 0, 0);
 
-type Mode = 'title' | 'exterior' | 'interior' | 'decorating';
+/** How far in front of the player the net reaches, in metres. */
+const NET_REACH = 2.6;
+/** Half the width of the swing's arc. A little over a quarter turn either way. */
+const NET_HALF_ANGLE = Math.PI * 0.42;
+/** What the prompt calls an insect before it has been caught and named. */
+const INSECT_WORD: Record<string, string> = {
+  butterfly: 'Butterfly',
+  beetle: 'Beetle',
+  dragonfly: 'Dragonfly',
+};
+
+type Mode = 'title' | 'exterior' | 'interior' | 'decorating' | 'building';
 
 export class Game {
   readonly bus = new EventBus();
@@ -109,6 +124,7 @@ export class Game {
   private cameraRig: CameraRig;
   private particles = new ParticleSystem();
   private weatherFX = new WeatherFX();
+  private underwaterFX = new UnderwaterFX();
 
   readonly time: TimeSystem;
   readonly weather: WeatherSystem;
@@ -124,6 +140,8 @@ export class Game {
   private wildlife!: Wildlife;
   private buildings!: Buildings;
   private fishSchools!: FishSchools;
+  private reef!: ReefLife;
+  private insects!: Insects;
   private farm!: Farm;
   private drops!: DropSystem;
   private villagers!: VillagerManager;
@@ -135,6 +153,7 @@ export class Game {
   readonly quests: QuestSystem;
   readonly shop = new ShopSystem();
   readonly furnishing: HomeFurnishing;
+  readonly landscaping: Landscaping;
   private fishing!: FishingSystem;
   private interactions: InteractionSystem;
 
@@ -170,6 +189,18 @@ export class Game {
   private lastFrame = 0;
 
   /**
+   * How submerged the presentation is, 0–1. Eased rather than switched, so
+   * going under and coming up are moments rather than cuts, and so a dive that
+   * ends because the air ran out still fades back to the island.
+   */
+  private underwater = 0;
+  /**
+   * Creatures collected on the current dive. They are revealed on surfacing —
+   * which is what makes going up a decision rather than a formality.
+   */
+  private pendingDiveCatches: string[] = [];
+
+  /**
    * `assets` is optional and may be half-loaded: every system falls back to its
    * generated art for anything the kits did not supply, so the game boots with
    * no kits at all.
@@ -194,6 +225,7 @@ export class Game {
     this.relationships = new Relationships(this.bus);
     this.quests = new QuestSystem(this.bus);
     this.furnishing = new HomeFurnishing(this.bus);
+    this.landscaping = new Landscaping(this.bus);
     this.interactions = new InteractionSystem(this.bus);
 
     this.uiRoot = new UIRoot(container, this.bus, this.input);
@@ -237,6 +269,8 @@ export class Game {
     this.wildlife = new Wildlife();
     this.buildings = new Buildings();
     this.fishSchools = new FishSchools();
+    this.reef = new ReefLife(SEA_CREATURES);
+    this.insects = new Insects();
     this.farm = new Farm(this.bus);
     this.drops = new DropSystem(this.bus);
 
@@ -250,6 +284,9 @@ export class Game {
       this.wildlife.group,
       this.buildings.group,
       this.fishSchools.group,
+      this.reef.group,
+      this.insects.group,
+      this.landscaping.group,
       this.farm.group,
       this.drops.group,
     );
@@ -260,6 +297,9 @@ export class Game {
       ...this.props.colliders,
     ];
     this.villagers = new VillagerManager(this.bus, obstacles);
+    // The same list keeps a bench off somebody's doorstep. Landscaping is built
+    // with the rest of the game systems, before there is a world to consult.
+    this.landscaping.obstacles = obstacles;
     this.exteriorRoot.add(this.villagers.group);
 
     this.player = new Player(this.bus, this.look);
@@ -269,6 +309,7 @@ export class Game {
     scene.add(this.fishing.group);
 
     scene.add(this.particles.normalPoints, this.particles.additivePoints, this.weatherFX.group);
+    scene.add(this.underwaterFX.group);
     this.interiorRoot.add(this.furnishing.group);
 
     this.cameraRig.bounds = new Box3(
@@ -412,7 +453,7 @@ export class Game {
 
   // --- Save ----------------------------------------------------------------
 
-  private applySave(data: SaveDataV6): void {
+  private applySave(data: SaveDataV7): void {
     this.time.load(data.clock.day, data.clock.minutes);
     // The elapsed-minute counter is absolute (day * 1440 + minutes); seeding it
     // with the time of day alone made the first frame after a load advance the
@@ -467,7 +508,8 @@ export class Game {
     this.regionSettleTimer = 0;
     this.pendingRegion = this.currentRegion;
     this.announcedOnDay.clear();
-    this.gardens = data.world.gardens.map((g) => ({ ...g }));
+    this.landscaping.load(data.world.decor);
+    this.reef.load(data.world.reef, this.time.day);
 
     Object.assign(this.settings, {
       masterVolume: data.settings.masterVolume,
@@ -508,9 +550,8 @@ export class Game {
   private regionSettleTimer = 0;
   /** The day each region was last announced, so arriving is once a day rather than once ever. */
   private announcedOnDay = new Map<RegionId, number>();
-  private gardens: { x: number; z: number; color: string }[] = [];
 
-  snapshot(): SaveDataV6 {
+  snapshot(): SaveDataV7 {
     return {
       version: SAVE_VERSION,
       slot: this.slot,
@@ -546,7 +587,14 @@ export class Game {
       },
       farm: { plots: this.farm.serialize() },
       world: {
-        gardens: this.gardens.map((g) => ({ ...g })),
+        // A projection of the flower beds in `decor`, which is what actually
+        // holds them. Written because this is the shape the prototype's saves
+        // carry their gardens in, and the migration reads it back.
+        gardens: this.landscaping.pieces
+          .filter((p) => p.def.kind === 'flower')
+          .map((p) => ({ x: p.x, z: p.z, color: p.tint ?? '#f4b5c7' })),
+        decor: this.landscaping.serialize(),
+        reef: this.reef.serialize(),
         gatherables: this.props.gatherNodes
           .filter((n) => n.harvestedOnDay > 0)
           .map((n) => ({ id: n.id, harvestedOnDay: n.harvestedOnDay })),
@@ -602,6 +650,7 @@ export class Game {
     if (!paused && !this.dialogue.isOpen) this.handleGameplayInput(dt);
 
     this.updatePlayer(dt, paused);
+    if (this.mode === 'exterior') this.updateDiving(paused);
     if (this.mode === 'exterior') this.updateRegionBanner(dt);
     this.updateWorld(dt, !paused);
     this.updateInteractions(dt, paused);
@@ -675,6 +724,54 @@ export class Game {
     this.cameraRig.update(dt, this.player.position, this.player.velocity, orbit);
   }
 
+  /**
+   * Everything that follows the player being under water: the camera, the air
+   * gauge, and what happens when the breath runs out.
+   *
+   * The dive itself lives on the player; this is the game's side of it, and it
+   * runs every frame rather than on a state change because the camera has to
+   * track the surface continuously as the diver crosses the shelf.
+   */
+  private updateDiving(paused: boolean): void {
+    const diving = this.player.diving;
+
+    if (diving !== this.wasDiving) {
+      this.wasDiving = diving;
+      this.cameraRig.setPreset(diving ? 'diving' : 'exterior');
+      this.cameraRig.terrainClamp = !diving;
+      // Just under the surface: a boom that swings over the shallows would
+      // otherwise lift the view out of the water mid-dive.
+      this.cameraRig.heightCeiling = diving ? SEA_LEVEL - 0.5 : null;
+      if (diving) this.pendingDiveCatches = [];
+      else this.resolveDiveCatches();
+    }
+
+    if (diving && !paused) {
+      this.hud.showAirMeter();
+      this.hud.updateAirMeter(this.player.airFraction);
+    } else {
+      this.hud.hideAirMeter();
+    }
+
+    if (this.player.consumeAirRanOut()) {
+      this.player.emoteBubble('exclaim', 1.2);
+      this.uiRoot.toast('Out of air — back to the surface.', 'warn');
+    }
+  }
+
+  /** Reveals what the dive brought up, one card after another. */
+  private resolveDiveCatches(): void {
+    const caught = this.pendingDiveCatches;
+    this.pendingDiveCatches = [];
+    if (caught.length === 0) return;
+    caught.forEach((defId, index) => {
+      window.setTimeout(() => this.onCatch(defId, undefined, 'Brought up'), index * 720);
+    });
+  }
+
+  /** Tracks the dive across frames so the camera only switches on the change. */
+  private wasDiving = false;
+
   private movementConstraints() {
     if (this.mode === 'interior' || this.mode === 'decorating') {
       const interior = this.activeInterior;
@@ -699,8 +796,11 @@ export class Game {
       }
     }
     return {
-      circles: this.props.colliders,
+      circles: [...this.props.colliders, ...this.landscaping.colliders],
       boxes: this.buildings.colliders,
+      // The shelf is where the dive happens, so the player has to be able to
+      // swim out onto it rather than stopping at waist depth.
+      allowSwimming: true,
     };
   }
 
@@ -708,6 +808,12 @@ export class Game {
     const time = this.time.snapshot();
     const weather = this.weather.current;
     const indoors = this.mode === 'interior' || this.mode === 'decorating';
+
+    // Half a second either way: long enough to read as breaking the surface,
+    // short enough that it is over before the player has swum anywhere.
+    const submerged = this.player.diving ? 1 : 0;
+    this.underwater += (submerged - this.underwater) * Math.min(1, dt * 4.5);
+    if (Math.abs(this.underwater - submerged) < 0.004) this.underwater = submerged;
 
     const seasonTint = new Color(SEASON_TINT[time.season]?.grass ?? '#8ecb6a');
     updateSharedUniforms(this.elapsed, weather.wind, this.weather.wetness, seasonTint);
@@ -718,6 +824,7 @@ export class Game {
       this.weather.lightningFlash,
       this.player.position,
       indoors,
+      this.underwater,
     );
     this.lighting.setShadowQuality(this.renderer.profile);
     this.renderer.setGrade(lightingOutput);
@@ -729,9 +836,13 @@ export class Game {
     this.sky.update(this.elapsed);
 
     // Indoors the sky dome would show through the open ceiling, so swap it for
-    // a plain backdrop and let the room read as a lit model.
-    this.sky.mesh.visible = !indoors;
+    // a plain backdrop and let the room read as a lit model. Under water the
+    // dome is just as wrong: a bright blue sky behind a teal fog ramp reads as
+    // a bug, so the backdrop becomes the water itself.
+    const deepUnder = this.underwater > 0.55;
+    this.sky.mesh.visible = !indoors && !deepUnder;
     if (indoors) this.renderer.renderer.setClearColor(0x1b2028, 1);
+    else if (deepUnder) this.renderer.renderer.setClearColor(0x123f4c, 1);
 
     if (!indoors) {
       this.water.follow(camera.position.x, camera.position.z);
@@ -756,6 +867,14 @@ export class Game {
       this.wildlife.update(dt, 1 - lightingOutput.darkness, weather.precipitation, time.season, weather.wind, camera.position.x, camera.position.z);
       this.buildings.update(dt, lightingOutput.darkness, this.townWorks.lighthouse, this.time.hour);
       this.fishSchools.update(dt, this.elapsed, camera.position.x, camera.position.z);
+      this.reef.update(dt, this.elapsed, this.time.hour, this.time.day, camera.position.x, camera.position.z);
+      this.insects.update(dt, this.elapsed, {
+        playerX: this.player.position.x,
+        playerZ: this.player.position.z,
+        playerSpeed: Math.hypot(this.player.velocity.x, this.player.velocity.z),
+        candidatesAt: (x, z) => (this.isSealed(x, z) ? [] : this.bugsActiveIn(regionAt(x, z), this.time.hour)),
+      });
+      this.landscaping.setLightLevel(lightingOutput.darkness);
       this.farm.update(dt);
       if (advance) this.villagers.update(dt, this.time.hour, this.player.position);
       this.drops.update(dt, this.player.position, (x, z) => walkHeight(x, z));
@@ -767,6 +886,8 @@ export class Game {
     }
 
     this.weatherFX.update(dt, weather, camera.position, lightingOutput.darkness, indoors, time.season);
+    this.underwaterFX.setStrength(indoors ? 0 : this.underwater);
+    this.underwaterFX.update(dt, this.elapsed, camera.position);
     this.particles.update(dt);
 
     if (time.season !== this.lastSeason) {
@@ -907,6 +1028,11 @@ export class Game {
       if (this.uiRoot.topPanelId === 'settings') this.uiRoot.close('settings');
       else this.openSettingsPanel();
     }
+    if (this.input.justPressed('build') && !this.uiRoot.isPanelOpen && !this.dialogue.isOpen) {
+      if (this.mode === 'building') this.exitBuildMode();
+      else if (this.mode === 'exterior') this.enterBuildMode();
+      else if (this.mode === 'interior') this.enterDecorating();
+    }
     if (this.input.justPressed('cancel') && !this.uiRoot.isPanelOpen) {
       if (this.dialogue.isOpen) this.dialogue.close();
       else if (this.fishing.isActive) this.fishing.reelIn(this.player);
@@ -914,6 +1040,17 @@ export class Game {
         // Escape puts down what you are carrying; press it again to finish.
         if (this.furnishing.editing) this.furnishing.cancelEdit();
         else this.exitDecorating();
+      } else if (this.mode === 'building') {
+        if (this.landscaping.editing) {
+          const refunded = this.landscaping.cancelEdit();
+          if (refunded) this.refundDecor(refunded);
+          this.refreshBuildBar();
+        } else {
+          this.exitBuildMode();
+        }
+      } else if (this.player.diving) {
+        // Coming up is always one press away, whatever else is going on.
+        this.player.endDive();
       }
     }
   }
@@ -923,6 +1060,11 @@ export class Game {
 
     if (this.mode === 'decorating') {
       this.updateDecorating();
+      return;
+    }
+
+    if (this.mode === 'building') {
+      this.updateBuildMode();
       return;
     }
 
@@ -988,6 +1130,9 @@ export class Game {
   // --- Actions -------------------------------------------------------------
 
   private tryUseTool(): void {
+    // Hands are busy swimming, and a rod cast from three metres down is not a
+    // cast. Collecting is the underwater verb, and it has its own prompt.
+    if (this.player.diving) return;
     if (this.player.state !== 'free' || this.player.animator.isBusy) return;
     const tool = this.player.tool;
 
@@ -1059,38 +1204,83 @@ export class Game {
     });
   }
 
+  /**
+   * Swings the net at whatever is actually in front of the player.
+   *
+   * This used to filter the catalogue and roll against a flat miss chance, with
+   * nothing in the world to aim at. Now the swing reaches for the nearest
+   * insect in an arc ahead: whether there is anything to catch is a question
+   * about the world, and whether you get it is a question about how you
+   * approached it.
+   */
   private resolveNetSwing(): void {
+    const origin = this.player.position;
     const target = this.player.forwardPoint(1.6);
-    // Bug catching is a soft-target action, but not a soft-*place* one: what is
-    // flying here depends on where here is. A net swung in the square will
-    // never turn up a Grove Stag Beetle.
-    const hour = this.time.hour;
     if (this.isSealed(target.x, target.z)) {
       this.particles.burst('leaves', target, 0.4);
       this.uiRoot.toast('The hedge is in the way.', 'neutral');
       return;
     }
-    const region = regionAt(target.x, target.z);
-    const candidates = this.bugsActiveIn(region, hour);
-    if (candidates.length === 0 || Math.random() > 0.5) {
+
+    const insect = this.insects.nearestInArc(origin.x, origin.z, this.player.facing, NET_REACH, NET_HALF_ANGLE);
+    if (!insect) {
       this.particles.burst('leaves', target, 0.4);
+      const region = regionAt(target.x, target.z);
+      const flying = this.bugsActiveIn(region, this.time.hour);
       this.uiRoot.toast(
-        candidates.length === 0
+        flying.length === 0
           ? `Nothing is flying in ${regionLabel(region)} right now.`
-          : 'Nothing in the net this time.',
+          : 'Nothing in the net. Get closer to one first.',
         'neutral',
       );
       return;
     }
-    const weights = candidates.map((c) => (
-      c.rarity === 'common' ? 100
-        : c.rarity === 'uncommon' ? 34
-          : c.rarity === 'rare' ? 9
-            : 3
-    ));
-    const bug = weightedPick(candidates, weights);
-    this.particles.burst('sparkle', target, 0.8);
-    this.onCatch(bug.id, undefined, 'Netted');
+
+    const species = SPECIES_BY_ID.get(insect.speciesId);
+    if (!species) {
+      this.insects.take(insect);
+      return;
+    }
+
+    // Settled is the easy catch and fleeing is nearly hopeless, which is what
+    // makes walking rather than running the skill.
+    const base = insect.state === 'settled' ? 0.95 : insect.state === 'fleeing' ? 0.3 : 0.74;
+    const shy = species.rarity === 'legendary' ? 0.3 : species.rarity === 'rare' ? 0.18 : 0;
+    const net = (this.player.toolLevels.net - 1) * 0.08;
+    const at = new Vector3(insect.x, insect.y, insect.z);
+    if (Math.random() > clamp01(base - shy + net)) {
+      this.insects.startle(insect, origin.x, origin.z);
+      this.particles.burst('leaves', at, 0.35);
+      this.bus.emit('audio:sfx', { id: 'ui.error', volume: 0.5 });
+      this.uiRoot.toast('It slipped the net.', 'neutral');
+      return;
+    }
+
+    this.insects.take(insect);
+    this.particles.burst('sparkle', at, 0.8);
+    this.onCatch(species.id, undefined, 'Netted');
+  }
+
+  /**
+   * Takes a sea creature off the shelf.
+   *
+   * It goes into a pocket rather than the bag: the reveal waits for the
+   * surface, which is what makes the choice between grabbing one more and
+   * going up while the air lasts an actual choice.
+   */
+  private collectReef(found: ReefCollectible): void {
+    this.reef.collect(found, this.time.day);
+    this.pendingDiveCatches.push(found.speciesId);
+    this.particles.burst('sparkle', new Vector3(found.x, found.y + found.hover, found.z), 0.7);
+    this.bus.emit('audio:sfx', { id: 'item.pickup' });
+    this.player.emoteBubble('sparkle', 1.0);
+    this.uiRoot.toast(
+      this.pendingDiveCatches.length === 1
+        ? 'Tucked away. Surface to see what it is.'
+        : `${this.pendingDiveCatches.length} to bring up.`,
+      'good',
+    );
+    this.save.markDirty();
   }
 
   private resolveDig(): void {
@@ -1211,6 +1401,7 @@ export class Game {
   private onNewDay(day: number): void {
     this.props.refreshNodes(day);
     this.foliage.refreshFruit(day);
+    this.reef.refresh(day);
     this.farm.newDay(day);
     this.quests.rollDaily(day, this.lastTownRating);
 
@@ -1395,6 +1586,202 @@ export class Game {
         }
       }
     }
+  }
+
+  // --- Outdoor build mode --------------------------------------------------
+
+  /** Which piece of the outdoor catalogue the cursor is holding. */
+  private buildIndex = 0;
+  /** The colourway last used for each piece, so a run of beds matches. */
+  private buildTints = new Map<string, string>();
+
+  private get buildPiece() {
+    return DECOR[this.buildIndex];
+  }
+
+  private enterBuildMode(): void {
+    if (this.mode !== 'exterior') {
+      this.uiRoot.toast('Step outside to landscape.', 'warn');
+      return;
+    }
+    if (this.player.diving || this.player.inWater) {
+      this.uiRoot.toast('Not from the water.', 'warn');
+      return;
+    }
+    if (this.fishing.isActive) return;
+    this.mode = 'building';
+    this.cameraRig.setPreset('exteriorClose');
+    this.hud.showBuildBar();
+    this.refreshBuildBar();
+    this.uiRoot.toast(
+      `Landscaping · ${this.input.glyph('toolPrev')}${this.input.glyph('toolNext')} choose · `
+      + `${this.input.glyph('interact')} place · ${this.input.glyph('useTool')} take back up · `
+      + `${this.input.glyph('cancel')} finish`,
+      'good',
+    );
+  }
+
+  private exitBuildMode(): void {
+    // Anything still in hand goes down where it is, or back on the shelf if
+    // that spot will not take it.
+    if (this.landscaping.editing) {
+      if (!this.landscaping.confirmEdit()) {
+        const refunded = this.landscaping.cancelEdit();
+        if (refunded) this.refundDecor(refunded);
+      }
+    }
+    this.mode = 'exterior';
+    this.cameraRig.setPreset('exterior');
+    this.hud.hideBuildBar();
+    this.uiRoot.toast('Looks good.', 'good');
+    this.save.markDirty();
+  }
+
+  /**
+   * Build mode's frame.
+   *
+   * Deliberately the same grammar as decorating indoors — place with the action
+   * button, rotate or take away with the tool button, cycle with the shoulder
+   * buttons — so there is one set of building controls in the game rather than
+   * two that nearly match.
+   */
+  private updateBuildMode(): void {
+    if (this.landscaping.editing) {
+      const target = this.player.forwardPoint(2.1);
+      this.landscaping.updateEdit(target.x, target.z);
+      if (this.input.justPressed('useTool')) this.landscaping.rotateEdit();
+      if (this.input.justPressed('toolNext') || this.input.justPressed('toolPrev')) {
+        if (this.landscaping.cycleTint()) {
+          const held = this.landscaping.editing;
+          if (held?.tint) this.buildTints.set(held.defId, held.tint);
+          this.refreshBuildBar();
+        }
+      }
+      if (this.input.justPressed('interact')) {
+        const piece = this.landscaping.editing;
+        if (this.landscaping.confirmEdit()) {
+          // A lifetime tally for the journal. The island's rating counts what
+          // is planted right now, which is a different question.
+          if (piece?.def.greenery) this.stats.flowersPlanted += 1;
+          this.save.markDirty();
+          this.refreshBuildBar();
+        }
+      }
+      return;
+    }
+
+    if (this.input.justPressed('toolNext')) this.cycleBuildPiece(1);
+    if (this.input.justPressed('toolPrev')) this.cycleBuildPiece(-1);
+
+    // Place is always place. It used to pick up a nearby piece instead when
+    // there was one in reach, which made laying a run of fence panels
+    // impossible: every panel put the next press within reach of the last one.
+    if (this.input.justPressed('interact')) {
+      this.beginPlacingDecor();
+      this.refreshBuildBar();
+    }
+
+    if (this.input.justPressed('useTool')) this.takeUpNearestDecor();
+  }
+
+  /**
+   * Takes the nearest piece back up, refunded in full.
+   *
+   * Also makes it the selected piece, colourway and all, because taking one up
+   * is how you move it: put it back down wherever you actually wanted it and
+   * nothing has been lost but the walk.
+   */
+  private takeUpNearestDecor(): void {
+    // Wide enough to reach past a solid piece's own collider, which holds the
+    // player about a metre and a half off a bench or a fence panel.
+    const near = this.landscaping.nearest(this.player.position.x, this.player.position.z, 2.4);
+    if (!near) {
+      this.uiRoot.toast('Stand next to something you put down to take it up.', 'neutral');
+      return;
+    }
+    const tint = near.tint;
+    const defId = this.landscaping.remove(near.uid);
+    if (!defId) return;
+    this.refundDecor(defId);
+    const index = DECOR.findIndex((d) => d.id === defId);
+    if (index >= 0) {
+      this.buildIndex = index;
+      if (tint) this.buildTints.set(defId, tint);
+    }
+    this.uiRoot.toast('Taken up.', 'neutral');
+    this.refreshBuildBar();
+    this.save.markDirty();
+  }
+
+  private cycleBuildPiece(direction: 1 | -1): void {
+    this.buildIndex = (this.buildIndex + direction + DECOR.length) % DECOR.length;
+    this.bus.emit('audio:sfx', { id: 'ui.hover', volume: 0.5 });
+    this.refreshBuildBar();
+  }
+
+  private beginPlacingDecor(): void {
+    const def = this.buildPiece;
+    if (!this.canAffordDecor(def)) {
+      this.uiRoot.toast(`Not enough for a ${def.name.toLowerCase()}.`, 'warn');
+      this.bus.emit('audio:sfx', { id: 'ui.error' });
+      return;
+    }
+    const target = this.player.forwardPoint(2.1);
+    const piece = this.landscaping.beginPlacing(def.id, target.x, target.z, this.buildTints.get(def.id) ?? def.tints?.[0]);
+    if (!piece) return;
+    this.spendDecor(def, 1);
+    this.refreshBuildBar();
+  }
+
+  private canAffordDecor(def: (typeof DECOR)[number]): boolean {
+    if (this.coins < def.price) return false;
+    const cost = def.cost ?? {};
+    return this.materials.wood >= (cost.wood ?? 0)
+      && this.materials.stone >= (cost.stone ?? 0)
+      && this.materials.fiber >= (cost.fiber ?? 0);
+  }
+
+  /** @param sign 1 to charge for a piece, -1 to hand it back. */
+  private spendDecor(def: (typeof DECOR)[number], sign: 1 | -1): void {
+    this.addCoins(-def.price * sign);
+    const cost = def.cost ?? {};
+    this.materials.wood -= (cost.wood ?? 0) * sign;
+    this.materials.stone -= (cost.stone ?? 0) * sign;
+    this.materials.fiber -= (cost.fiber ?? 0) * sign;
+  }
+
+  /**
+   * Hands back everything a piece cost.
+   *
+   * In full, not at a markdown: taking a bench back up is moving it, not
+   * selling it, and a game that charges for changing your mind gets decorated
+   * once and then left alone.
+   */
+  private refundDecor(defId: string): void {
+    const def = DECOR_BY_ID.get(defId);
+    if (def) this.spendDecor(def, -1);
+  }
+
+  /**
+   * Keeps the bar showing what is actually in the player's hands.
+   *
+   * While a piece is held the shoulder buttons cycle its colourway rather than
+   * the catalogue, so a bar that went on naming the catalogue selection would
+   * be describing something the player is not holding and cannot place.
+   */
+  private refreshBuildBar(): void {
+    const held = this.landscaping.editing;
+    const def = held?.def ?? this.buildPiece;
+    this.hud.updateBuildBar({
+      name: def.name,
+      description: def.description,
+      price: def.price,
+      cost: def.cost,
+      // What is in hand has already been paid for.
+      affordable: held ? true : this.canAffordDecor(def),
+      holding: !!held,
+      hasTints: (def.tints?.length ?? 0) > 1,
+    });
   }
 
   // --- Interactions --------------------------------------------------------
@@ -1586,7 +1973,7 @@ export class Game {
     });
 
     this.interactions.register('water', () => {
-      if (this.player.tool !== 'rod' || this.fishing.isActive) return null;
+      if (this.player.tool !== 'rod' || this.fishing.isActive || this.player.diving) return null;
       const ahead = this.player.forwardPoint(4);
       if (waterDepth(ahead.x, ahead.z) < 0.55) return null;
       return {
@@ -1598,6 +1985,83 @@ export class Game {
         worldX: ahead.x,
         worldY: SEA_LEVEL + 0.6,
         worldZ: ahead.z,
+        perform: () => this.tryUseTool(),
+      } satisfies InteractionOption;
+    });
+
+    // Diving. Offered wherever the player is already swimming and the water
+    // below is worth going into.
+    this.interactions.register('dive', () => {
+      if (!this.player.inWater || this.fishing.isActive) return null;
+      const { x, z } = this.player.position;
+      if (this.player.diving) {
+        return {
+          id: 'dive.surface',
+          kind: 'dive',
+          label: 'Surface',
+          action: 'interact',
+          priority: 70,
+          worldX: x,
+          worldY: SEA_LEVEL + 1.1,
+          worldZ: z,
+          perform: () => this.player.endDive(),
+        } satisfies InteractionOption;
+      }
+      if (waterDepth(x, z) < DIVE_MIN_DEPTH) return null;
+      return {
+        id: 'dive.down',
+        kind: 'dive',
+        label: 'Dive',
+        detail: 'See what is down there',
+        action: 'interact',
+        priority: 70,
+        worldX: x,
+        worldY: SEA_LEVEL + 1.1,
+        worldZ: z,
+        perform: () => this.player.beginDive(),
+      } satisfies InteractionOption;
+    });
+
+    this.interactions.register('reef', (context) => {
+      if (!this.player.diving) return null;
+      const found = this.reef.nearest(
+        this.player.position.x,
+        this.player.position.y,
+        this.player.position.z,
+        2.6,
+        context.hour,
+        context.day,
+      );
+      if (!found) return null;
+      return {
+        id: `reef.${found.id}`,
+        kind: 'gather',
+        label: 'Collect',
+        action: 'useTool',
+        priority: 95,
+        worldX: found.x,
+        worldY: found.y + found.hover + 0.6,
+        worldZ: found.z,
+        perform: () => this.collectReef(found),
+      } satisfies InteractionOption;
+    });
+
+    this.interactions.register('insects', () => {
+      if (this.player.tool !== 'net' || this.player.diving || this.fishing.isActive) return null;
+      const insect = this.insects.nearest(this.player.position.x, this.player.position.z, NET_REACH);
+      if (!insect || this.isSealed(insect.x, insect.z)) return null;
+      return {
+        id: `bug.${insect.id}`,
+        kind: 'catch',
+        // Named by silhouette, not species: finding out which one it was is
+        // the point of swinging.
+        detail: INSECT_WORD[insect.shape],
+        label: 'Catch',
+        action: 'useTool',
+        priority: 60,
+        worldX: insect.x,
+        worldY: insect.y + 0.55,
+        worldZ: insect.z,
         perform: () => this.tryUseTool(),
       } satisfies InteractionOption;
     });
@@ -1752,7 +2216,9 @@ export class Game {
   }
 
   private updateInteractions(dt: number, paused: boolean): void {
-    this.interactions.setEnabled(!paused && !this.dialogue.isOpen && !this.fishing.isActive && this.mode !== 'decorating');
+    this.interactions.setEnabled(
+      !paused && !this.dialogue.isOpen && !this.fishing.isActive && this.mode !== 'decorating' && this.mode !== 'building',
+    );
     this.interactions.update(dt, {
       playerX: this.player.position.x,
       playerY: this.player.position.y,
@@ -2348,6 +2814,7 @@ export class Game {
     const night = this.time.isNight;
 
     if (indoors) {
+      this.audio.setUnderwater(0);
       this.audio.setAmbience('ocean', 0.05);
       this.audio.setAmbience('wind', 0.04);
       this.audio.setAmbience('rain', weather.precipitation * 0.2);
@@ -2375,6 +2842,8 @@ export class Game {
     this.audio.setAmbience('birds', !night && weather.precipitation < 0.3 ? 0.4 : 0);
     this.audio.setAmbience('interior', 0);
     this.audio.setAmbience('museum', 0);
+    // Everything above the surface arrives through several metres of water.
+    this.audio.setUnderwater(this.underwater);
 
     this.updateMusic();
   }
@@ -2403,7 +2872,9 @@ export class Game {
       donated: this.museum.totalDonated,
       totalSpecies: ALL_SPECIES.length,
       friendshipTotal: this.relationships.total,
-      flowersPlanted: this.stats.flowersPlanted + this.gardens.length,
+      // What is planted *now*, not what has ever been planted: an island the
+      // player has stripped back should read as stripped back.
+      flowersPlanted: this.landscaping.greeneryCount,
       cropsHarvested: this.stats.harvested,
       worksBuilt: Object.values(this.townWorks).filter(Boolean).length,
       homeLevel: this.homeLevel,
@@ -2502,9 +2973,13 @@ export class Game {
     this.wildlife.dispose();
     this.buildings.dispose();
     this.fishSchools.dispose();
+    this.reef.dispose();
+    this.insects.dispose();
+    this.landscaping.dispose();
     this.farm.dispose();
     this.particles.dispose();
     this.weatherFX.dispose();
+    this.underwaterFX.dispose();
     this.villagers.dispose();
     this.player.dispose();
     this.renderer.dispose();

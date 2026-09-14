@@ -31,9 +31,21 @@ interface AmbienceVoice {
  * placeholder synthesiser exists only behind `playSound`/`setAmbience`, so
  * swapping in recorded assets is a data change rather than a code change.
  */
+/** Cutoff of the submerge filter when the player is dry — effectively bypassed. */
+const DRY_CUTOFF_HZ = 20000;
+/** ...and when they are fully under, where only the low end carries. */
+const SUBMERGED_CUTOFF_HZ = 520;
+
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /**
+   * Sits between the master bus and the speakers so everything — music,
+   * ambience, the splash the player just made — goes muffled together when the
+   * surface closes over their head. Wide open the rest of the time.
+   */
+  private submerged: BiquadFilterNode | null = null;
+  private submergedAmount = 0;
   private channels = new Map<SfxChannel, ChannelStrip>();
   private ambienceVoices = new Map<AmbienceId, AmbienceVoice>();
   private buffers = new Map<string, AudioBuffer>();
@@ -59,7 +71,15 @@ export class AudioSystem {
       this.ctx = new Ctor();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : this.volumes.master;
-      this.master.connect(this.ctx.destination);
+      this.submerged = this.ctx.createBiquadFilter();
+      this.submerged.type = 'lowpass';
+      this.submerged.frequency.value = DRY_CUTOFF_HZ;
+      this.submerged.Q.value = 0.7;
+      this.master.connect(this.submerged);
+      this.submerged.connect(this.ctx.destination);
+      // A filter created after the player had already gone under would sit
+      // wide open until they surfaced and dived again.
+      if (this.submergedAmount > 0) this.setUnderwater(this.submergedAmount);
 
       for (const name of ['music', 'sfx', 'ui', 'ambience'] as SfxChannel[]) {
         const gain = this.ctx.createGain();
@@ -98,6 +118,21 @@ export class AudioSystem {
     Object.assign(this.volumes, v);
     if (this.master) this.master.gain.value = this.muted ? 0 : this.volumes.master;
     for (const [name, strip] of this.channels) strip.target = this.volumeFor(name);
+  }
+
+  /**
+   * Muffles the whole mix. 0 is dry, 1 is fully under.
+   *
+   * Stored even before Web Audio has started, so a dive that begins before the
+   * first gesture unlocks the context still sounds right once it does.
+   */
+  setUnderwater(amount: number): void {
+    this.submergedAmount = clamp01(amount);
+    if (!this.submerged || !this.ctx) return;
+    // Exponential in the cutoff, because pitch is: a linear ramp spends most
+    // of its travel in frequencies nobody can hear the difference between.
+    const cutoff = DRY_CUTOFF_HZ * Math.pow(SUBMERGED_CUTOFF_HZ / DRY_CUTOFF_HZ, this.submergedAmount);
+    this.rampTo(this.submerged.frequency, cutoff, 0.35);
   }
 
   setMuted(muted: boolean): void {

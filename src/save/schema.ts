@@ -8,10 +8,11 @@ import type { WeatherKind } from '@/time/WeatherSystem';
  * Bump this whenever the shape below changes and add a matching entry to
  * MIGRATIONS in ./migrations.ts. Never edit an old migration — write a new one.
  */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
-export const SAVE_KEY_PREFIX = 'cozyCove.save.v6.slot';
+export const SAVE_KEY_PREFIX = 'cozyCove.save.v7.slot';
 /** Older keys, read once each so existing players keep their island. */
+export const LEGACY_V6_KEY_PREFIX = 'cozyCove.save.v6.slot';
 export const LEGACY_V5_KEY_PREFIX = 'cozyCove.save.v5.slot';
 export const LEGACY_V4_KEY_PREFIX = 'cozyCoveSaveV4_slot';
 export const LEGACY_V2_KEY = 'cozyCoveSaveV2';
@@ -33,6 +34,18 @@ export interface PlacedFurnitureData {
   /** Yaw in radians, snapped to 90° increments by the placement UI. */
   rotation: number;
   room: string;
+}
+
+export interface PlacedDecorData {
+  uid: string;
+  defId: string;
+  /** World position on the island, in metres. */
+  x: number;
+  z: number;
+  /** Yaw in radians, snapped to eighth-turns by the build cursor. */
+  rotation: number;
+  /** Chosen colourway, for the pieces that offer any. */
+  tint?: string;
 }
 
 export interface CropPlotData {
@@ -70,8 +83,8 @@ export interface SettingsData {
   invertCameraX: boolean;
 }
 
-export interface SaveDataV6 {
-  version: 6;
+export interface SaveDataV7 {
+  version: 7;
   slot: number;
   savedAt: number;
   playtimeSeconds: number;
@@ -128,8 +141,18 @@ export interface SaveDataV6 {
   };
 
   world: {
-    /** Decorative flowers the player planted around town. */
+    /**
+     * Decorative flowers the player planted around town.
+     *
+     * Written as a projection of the flower beds in `decor`, which is the
+     * authoritative list. Kept because the prototype's saves carry their
+     * gardens in this shape and this is where they land on the way in.
+     */
     gardens: { x: number; z: number; color: string }[];
+    /** Everything the player has placed outdoors — flowers, fences, lamps, paths. */
+    decor: PlacedDecorData[];
+    /** Sea creatures already taken off the shelf, and the day they were taken. */
+    reef: { id: number; takenOnDay: number }[];
     gatherables: GatherableStateData[];
     townWorks: { bridge: boolean; stairs: boolean; lighthouse: boolean };
     /** Whether the Secret Orchard's gate has been unlocked. */
@@ -153,8 +176,8 @@ export interface SaveDataV6 {
   settings: SettingsData;
 }
 
-/** Any historical shape. Migrations narrow these into SaveDataV6. */
-export type AnySaveData = SaveDataV6 | Record<string, unknown>;
+/** Any historical shape. Migrations narrow these into SaveDataV7. */
+export type AnySaveData = SaveDataV7 | Record<string, unknown>;
 
 export const DEFAULT_SETTINGS: SettingsData = {
   masterVolume: 0.8,

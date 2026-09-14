@@ -8,6 +8,7 @@ export type GameAction =
   | 'cancel'
   | 'run'
   | 'useTool'
+  | 'build'
   | 'inventory'
   | 'map'
   | 'journal'
@@ -31,7 +32,7 @@ export type GameAction =
 
 export const ALL_ACTIONS: GameAction[] = [
   'moveUp', 'moveDown', 'moveLeft', 'moveRight',
-  'interact', 'cancel', 'run', 'useTool',
+  'interact', 'cancel', 'run', 'useTool', 'build',
   'inventory', 'map', 'journal',
   'toolPrev', 'toolNext',
   'cameraLeft', 'cameraRight', 'zoomIn', 'zoomOut',
@@ -54,6 +55,7 @@ export const KEYBOARD_BINDINGS: Record<string, GameAction[]> = {
   Backspace: ['uiBack'],
   KeyI: ['inventory'],
   Tab: ['inventory'],
+  KeyB: ['build'],
   KeyM: ['map'],
   KeyQ: ['journal'],
   KeyZ: ['toolPrev'],
@@ -84,6 +86,9 @@ export const GAMEPAD_BUTTON_BINDINGS: Record<number, GameAction[]> = {
   7: ['zoomIn'],
   8: ['map'],
   9: ['menu'],
+  // Left stick click: the only standard button left, and building is the one
+  // mode that wants a dedicated one rather than a menu.
+  10: ['build'],
   // The D-pad doubles as the emote wheel outside menus; the UI actions only
   // matter while a panel is open, so the two never compete.
   12: ['uiUp', 'emoteWave'],
@@ -102,6 +107,7 @@ export const ACTION_GLYPHS: Record<GameAction, { key: string; pad: string }> = {
   cancel: { key: 'Esc', pad: 'B' },
   run: { key: 'Shift', pad: 'B' },
   useTool: { key: 'Space', pad: 'X' },
+  build: { key: 'B', pad: 'L3' },
   inventory: { key: 'I', pad: 'Y' },
   map: { key: 'M', pad: 'View' },
   journal: { key: 'Q', pad: 'Y' },

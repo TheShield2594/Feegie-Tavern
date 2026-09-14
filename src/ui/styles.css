@@ -837,6 +837,69 @@ html, body {
   letter-spacing: 0.02em;
 }
 
+#air-meter {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 118px);
+  transform: translateX(-50%);
+  width: min(260px, 60vw);
+  animation: cc-pop-in 280ms var(--spring) both;
+}
+.cc-air-bar {
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: rgba(12, 34, 44, 0.55);
+  box-shadow: var(--lift-2), inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.cc-air-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(180deg, #8fe0f2, #4aa8c4);
+  transition: width 120ms linear, background 240ms var(--ease-out);
+}
+#air-meter .caption {
+  text-align: center;
+  margin-top: 7px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* The last of the breath pulses, so it is noticed without a second prompt. */
+#air-meter.urgent { animation: cc-air-urgent 620ms ease-in-out infinite; }
+@keyframes cc-air-urgent {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+#build-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 118px);
+  transform: translateX(-50%);
+  width: min(360px, 80vw);
+  padding: 12px 16px 11px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(253, 249, 240, 0.96), rgba(243, 233, 214, 0.94));
+  box-shadow: var(--lift-2);
+  text-align: center;
+  animation: cc-pop-in 280ms var(--spring) both;
+}
+.cc-build-name { font-size: 16px; font-weight: 900; letter-spacing: -0.01em; }
+.cc-build-note { margin-top: 2px; font-size: 12px; opacity: 0.72; }
+.cc-build-cost { margin-top: 6px; font-size: 13px; font-weight: 800; }
+.cc-build-keys { margin-top: 8px; font-size: 11.5px; font-weight: 700; opacity: 0.6; }
+/* The whole card, not just the price: the cost is the reason it is refusing. */
+#build-bar.unaffordable .cc-build-cost { color: #b4564a; }
+#build-bar.unaffordable { box-shadow: var(--lift-2), inset 0 0 0 2px rgba(180, 86, 74, 0.45); }
+/* Carrying something is a different state from choosing something. */
+#build-bar.holding { box-shadow: var(--lift-2), inset 0 0 0 2px rgba(127, 214, 168, 0.6); }
+#build-bar.holding .cc-build-cost { color: #3f8f66; letter-spacing: 0.04em; text-transform: uppercase; font-size: 12px; }
+
 /* --------------------------------------------------------------------------
    Boot / loading
    -------------------------------------------------------------------------- */

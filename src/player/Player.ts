@@ -7,7 +7,7 @@ import { CharacterRig } from './CharacterRig';
 import { disposeObject } from '@/util/three';
 import { EmoteBubble, type EmoteKind } from '@/rendering/WorldLabel';
 import { makeTool, TOOLS, type ToolId } from './Tools';
-import { SEA_LEVEL, isWalkable, sampleWalkSurface, walkHeight, type Surface } from '@/world/heightfield';
+import { SEA_LEVEL, isSwimmable, isWalkable, sampleWalkSurface, walkHeight, type Surface } from '@/world/heightfield';
 
 export interface MovementConstraints {
   /** Circles the player cannot walk into. */
@@ -16,15 +16,24 @@ export interface MovementConstraints {
   boxes: { x: number; z: number; halfW: number; halfD: number; rotation: number }[];
   /** When set, movement is confined to this axis-aligned rectangle (interiors). */
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Lets the player leave the shallows for the shelf, rather than stopping at waist depth. */
+  allowSwimming?: boolean;
   /** Skip terrain sampling and pin to this height (interiors). */
   fixedHeight?: number;
 }
 
-export type PlayerState = 'free' | 'fishing' | 'busy' | 'talking' | 'swimming' | 'sitting' | 'sleeping';
+export type PlayerState = 'free' | 'fishing' | 'busy' | 'talking' | 'swimming' | 'diving' | 'sitting' | 'sleeping';
 
 const WALK_SPEED = 4.4;
 const RUN_SPEED = 7.6;
 const SWIM_SPEED = 3.1;
+const DIVE_SPEED = 3.6;
+/** Seconds of air a full breath is worth. */
+export const DIVE_AIR_SECONDS = 26;
+/** How far the body sits under the surface while swimming on top of it. */
+const FLOAT_SUBMERSION = 0.45;
+/** Water this deep, or deeper, is worth diving into. */
+export const DIVE_MIN_DEPTH = 1.5;
 const ACCELERATION = 26;
 const FRICTION = 18;
 const TURN_HALF_LIFE = 0.055;
@@ -59,6 +68,12 @@ export class Player {
   /** True while wading or swimming. */
   inWater = false;
   swimDepth = 0;
+  /** True while the player is under the surface rather than on it. */
+  diving = false;
+  /** Seconds of breath left, counted down only while diving. */
+  air = DIVE_AIR_SECONDS;
+  /** Set for one frame when the air ran out and the body surfaced on its own. */
+  private airRanOut = false;
 
   private footstepTimer = 0;
   private lastFootstepFoot: 'L' | 'R' = 'L';
@@ -207,8 +222,47 @@ export class Player {
     this.rig.setExpression('sleepy');
   }
 
+  // --- Diving --------------------------------------------------------------
+
+  /**
+   * Ducks under the surface. Only meaningful while swimming — the caller is
+   * expected to have checked the water is deep enough to be worth it.
+   */
+  beginDive(): void {
+    if (this.diving || !this.inWater) return;
+    this.diving = true;
+    this.state = 'diving';
+    this.air = DIVE_AIR_SECONDS;
+    this.airRanOut = false;
+    this.animator.play('dive', { force: true });
+    this.bus.emit('audio:sfx', { id: 'tool.splash', volume: 0.7 });
+  }
+
+  /** Comes back up. A breath is spent whether it was the player's idea or not. */
+  endDive(): void {
+    if (!this.diving) return;
+    this.diving = false;
+    this.state = this.inWater ? 'swimming' : 'free';
+    this.air = DIVE_AIR_SECONDS;
+    this.bus.emit('audio:sfx', { id: 'tool.splash', volume: 0.55 });
+  }
+
+  /** True once, on the frame the breath ran out and the body came up by itself. */
+  consumeAirRanOut(): boolean {
+    const ran = this.airRanOut;
+    this.airRanOut = false;
+    return ran;
+  }
+
+  /** Air left as a fraction, for the meter. */
+  get airFraction(): number {
+    return clamp(this.air / DIVE_AIR_SECONDS, 0, 1);
+  }
+
   /** Moves the player instantly, grounding them on the deck or terrain unless a height is given. */
   teleport(x: number, z: number, facing = this.facing, height?: number): void {
+    this.diving = false;
+    this.air = DIVE_AIR_SECONDS;
     this.position.set(x, height ?? walkHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.facing = facing;
@@ -232,11 +286,11 @@ export class Player {
       }
     }
 
-    const canMove = this.state === 'free' || this.state === 'swimming';
+    const canMove = this.state === 'free' || this.state === 'swimming' || this.state === 'diving';
     const inputLength = Math.hypot(moveX, moveZ);
 
     if (canMove && inputLength > 0.02) {
-      const maxSpeed = this.inWater ? SWIM_SPEED : running ? RUN_SPEED : WALK_SPEED;
+      const maxSpeed = this.diving ? DIVE_SPEED : this.inWater ? SWIM_SPEED : running ? RUN_SPEED : WALK_SPEED;
       const targetX = (moveX / Math.max(inputLength, 1)) * maxSpeed * Math.min(1, inputLength);
       const targetZ = (moveZ / Math.max(inputLength, 1)) * maxSpeed * Math.min(1, inputLength);
       this.velocity.x = lerp(this.velocity.x, targetX, 1 - Math.exp(-ACCELERATION * dt));
@@ -262,16 +316,44 @@ export class Player {
       this.swimDepth = 0;
     } else {
       const sample = sampleWalkSurface(this.position.x, this.position.z);
-      // Ease onto the new height so slopes and steps do not jolt the camera.
-      this.position.y = lerp(this.position.y, sample.height, 1 - Math.exp(-18 * dt));
       this.surface = sample.surface;
       // Standing on decking over the sea is dry, however deep the water below.
       this.swimDepth = sample.surface === 'wood' ? 0 : Math.max(0, SEA_LEVEL - sample.height);
       const wasInWater = this.inWater;
       this.inWater = this.swimDepth > 0.55;
+
+      // Walking out of the water ends a dive, whatever the air gauge says.
+      if (this.diving && !this.inWater) this.diving = false;
+
+      if (this.diving) {
+        this.air -= dt;
+        if (this.air <= 0) {
+          this.air = 0;
+          this.airRanOut = true;
+          this.endDive();
+        }
+      }
+
+      // Three ways to be grounded: on the bottom, floating on top of the
+      // water, or somewhere between the two with a lungful of air.
+      let targetY: number;
+      if (this.diving) {
+        // Deep enough to be properly under, never so deep as to clip the bed.
+        targetY = Math.max(SEA_LEVEL - Math.max(1.0, this.swimDepth * 0.6), sample.height + 0.35);
+      } else if (this.inWater) {
+        targetY = SEA_LEVEL - FLOAT_SUBMERSION;
+      } else {
+        targetY = sample.height;
+      }
+      // Ease onto the new height so slopes and steps do not jolt the camera.
+      // Sinking and rising are slower still, so a dive reads as a descent.
+      this.position.y = lerp(this.position.y, targetY, 1 - Math.exp(-(this.diving ? 5 : 18) * dt));
+
       if (this.inWater !== wasInWater) {
         this.bus.emit('audio:sfx', { id: 'tool.splash', volume: 0.5 });
-        this.state = this.inWater ? 'swimming' : 'free';
+        if (this.state === 'free' || this.state === 'swimming' || this.state === 'diving') {
+          this.state = this.inWater ? 'swimming' : 'free';
+        }
       }
     }
 
@@ -283,7 +365,7 @@ export class Player {
     this.bubble.update(dt);
     // The contact shadow fades as the body goes under water.
     const shadowMaterial = this.rig.blobShadow.material as { opacity: number };
-    shadowMaterial.opacity = this.inWater ? 0.15 : 0.9;
+    shadowMaterial.opacity = this.diving ? 0 : this.inWater ? 0.15 : 0.9;
   }
 
   private move(dx: number, dz: number, constraints: MovementConstraints): void {
@@ -310,7 +392,7 @@ export class Player {
     const b = constraints.bounds;
     if (b) {
       if (x < b.minX + RADIUS || x > b.maxX - RADIUS || z < b.minZ + RADIUS || z > b.maxZ - RADIUS) return false;
-    } else if (!isWalkable(x, z)) {
+    } else if (!(constraints.allowSwimming ? isSwimmable(x, z) : isWalkable(x, z))) {
       return false;
     }
 
@@ -338,7 +420,7 @@ export class Player {
   private updateAnimation(dt: number): void {
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
 
-    if (this.state === 'free' || this.state === 'swimming') {
+    if (this.state === 'free' || this.state === 'swimming' || this.state === 'diving') {
       if (this.inWater) {
         this.animator.play('swim');
         this.animator.intensity = clamp(speed / SWIM_SPEED, 0.4, 1);
@@ -366,7 +448,8 @@ export class Player {
 
   private updateFootsteps(dt: number): void {
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
-    if (speed < 0.4 || this.state === 'busy' || this.state === 'talking') {
+    // Nothing underfoot to step on while under the surface.
+    if (speed < 0.4 || this.diving || this.state === 'busy' || this.state === 'talking') {
       this.footstepTimer = 0;
       return;
     }
