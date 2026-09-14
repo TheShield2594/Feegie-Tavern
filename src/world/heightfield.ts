@@ -182,9 +182,12 @@ function baseElevation(x: number, z: number): number {
   if (mask <= 0) {
     // Seabed: slope away from *this* stretch of coast, so a bay shelves as
     // gently as it should while the open water still goes properly deep.
+    // It starts a hair under sea level right at the coast and meets the beach
+    // shelf continuously; the half-metre ledge it used to start from drew a
+    // stair-stepped waterline out of the terrain triangles.
     const d = Math.hypot(x, z);
-    const drop = smoothstep(0, 22, d - coastRadius(x, z));
-    return lerp(-0.5, SEABED_FLOOR, drop);
+    const drop = smoothstep(-1.5, 24, d - coastRadius(x, z));
+    return lerp(0, SEABED_FLOOR, drop);
   }
 
   const rolling = fbm2D(x * 0.012, z * 0.012, 4, SHAPE_SEED) * 7.5;

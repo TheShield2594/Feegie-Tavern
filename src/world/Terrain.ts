@@ -12,7 +12,22 @@ import { PALETTE, SEASON_TINT } from '@/rendering/palette';
 import { clamp01, lerp, smoothstep } from '@/util/math';
 import { fbm2D } from '@/util/rng';
 import { hash2 } from '@/util/math';
-import { ISLAND_HALF, SEA_LEVEL, sampleSurface, terrainHeight, type Surface } from './heightfield';
+import { ISLAND_HALF, PATHS, SEA_LEVEL, sampleSurface, terrainHeight, type Surface } from './heightfield';
+
+/** Metres from a point to the nearest path edge, as a 0–1 falloff input. */
+function distanceToPathEdge(x: number, z: number): number {
+  let best = Infinity;
+  for (const p of PATHS) {
+    const dx = p.bx - p.ax;
+    const dz = p.bz - p.az;
+    const lenSq = dx * dx + dz * dz;
+    const t = lenSq < 1e-6 ? 0 : clamp01(((x - p.ax) * dx + (z - p.az) * dz) / lenSq);
+    const d = Math.hypot(x - (p.ax + dx * t), z - (p.az + dz * t)) - p.width * 0.5;
+    if (d < best) best = d;
+  }
+  // Normalised against a 3 m apron.
+  return clamp01(best / 3);
+}
 
 const SURFACE_COLORS: Record<Surface, [string, string]> = {
   grass: [PALETTE.grass.base, PALETTE.grass.highlight],
@@ -74,13 +89,25 @@ export class Terrain {
       // mottle instead of a flat fill.
       const mottle = fbm2D(x * 0.09, z * 0.09, 3, 7);
       const patch = fbm2D(x * 0.021, z * 0.021, 2, 19);
-      color.set(dark).lerp(new Color(light), clamp01(mottle * 0.75 + patch * 0.45 - 0.12));
+      const sweep = fbm2D(x * 0.008 + 3.1, z * 0.008 - 1.7, 2, 23);
+      color.set(dark).lerp(new Color(light), clamp01(mottle * 0.6 + patch * 0.45 - 0.1));
 
       if (sample.surface === 'grass') {
+        // Three broad washes — dry straw, cool moss, and the base — laid over
+        // each other at different scales, so a meadow reads as painted ground
+        // rather than one flat fill.
+        color.lerp(new Color(PALETTE.grass.moss), smoothstep(0.35, 0.8, sweep) * 0.5);
+        color.lerp(new Color(PALETTE.grass.dry), smoothstep(0.55, 0.9, patch) * 0.3);
         // Slopes catch less light, and grass thins out near rock.
-        color.lerp(new Color(PALETTE.grass.shadow), sample.slope * 0.55);
+        color.lerp(new Color(PALETTE.grass.shadow), sample.slope * 0.5);
         color.lerp(new Color(PALETTE.rock.base), smoothstep(0.42, 0.75, sample.slope) * 0.6);
-        color.lerp(new Color(PALETTE.grass.dry), smoothstep(0.55, 0.9, patch) * 0.22);
+        // Worn ground either side of the paths.
+        const nearPath = smoothstep(0.32, 0.04, distanceToPathEdge(x, z));
+        color.lerp(new Color(PALETTE.dirt.path), nearPath * 0.28);
+      }
+      if (sample.surface === 'sand') {
+        // Wind ripples and the odd darker drift.
+        color.lerp(new Color(PALETTE.sand.shadow), smoothstep(0.5, 0.85, mottle) * 0.35);
       }
 
       // Damp sand right at the waterline, and a wet band just below it.
@@ -110,6 +137,7 @@ export class Terrain {
       roughness: 0.96,
       metalness: 0,
       wetResponse: 0.55,
+      groundDetail: 0.85,
     });
 
     this.mesh = new Mesh(plane, material);

@@ -7,9 +7,29 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { makeKitMesh, softTint } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { FURNITURE_BY_ID, type FurnitureDef } from '@/data/furniture';
 import { roundedBoxGeometry } from '@/world/BuildingKit';
+
+/**
+ * Which furniture-kit model stands in for each kind, and how it is fitted to
+ * the footprint the gameplay grid already uses. The kit is authored in metres
+ * (a chair 0.94 m tall), so scales are close to one.
+ */
+const KIT_FURNITURE: Record<FurnitureKindKey, { id: string; scale: number; rotation?: number; light?: number }> = {
+  sofa: { id: 'furniture.sofa', scale: 1.0 },
+  table: { id: 'furniture.table', scale: 0.9 },
+  lamp: { id: 'furniture.lampFloor', scale: 0.85, light: 1.45 },
+  rug: { id: 'furniture.rug', scale: 0.8 },
+  music: { id: 'furniture.music', scale: 1.15 },
+  plant: { id: 'furniture.plant', scale: 0.85 },
+  shelf: { id: 'furniture.shelf', scale: 0.95 },
+  bed: { id: 'furniture.bed', scale: 1.05, rotation: Math.PI },
+  chair: { id: 'furniture.stool', scale: 0.85 },
+};
+
+type FurnitureKindKey = FurnitureDef['kind'];
 
 export interface BuiltFurniture {
   group: Group;
@@ -24,6 +44,23 @@ export function makeFurniture(defId: string): BuiltFurniture | null {
 
   const group = new Group();
   group.name = `Furniture_${def.id}`;
+
+  // Kit model first. The baked colours are pulled toward the piece's own
+  // palette so two sofas from the same kit mesh still read as different items.
+  const kit = KIT_FURNITURE[def.kind];
+  const kitMesh = kit ? makeKitMesh(kit.id, { scale: kit.scale, tint: softTint(def.palette.primary, 0.4), roughness: 0.86 }) : null;
+  if (kitMesh) {
+    if (kit.rotation) kitMesh.rotation.y = kit.rotation;
+    group.add(kitMesh);
+    let light: PointLight | null = null;
+    if (def.light) {
+      light = new PointLight(def.light.color, 0, 7, 2);
+      light.position.y = kit.light ?? def.light.height;
+      group.add(light);
+    }
+    return { group, light, def };
+  }
+
   const primary = createStylizedMaterial({ color: def.palette.primary, roughness: 0.85 });
   const secondary = createStylizedMaterial({ color: def.palette.secondary, roughness: 0.82 });
   const accent = createStylizedMaterial({ color: def.palette.accent, roughness: 0.7 });

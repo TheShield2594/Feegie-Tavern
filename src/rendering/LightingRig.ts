@@ -31,56 +31,56 @@ const DAY_STOPS: GradeStops[] = [
   {
     at: 0,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
-    sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
-    fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
+    sun: PALETTE.light.moon, sunIntensity: 0.4,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 1.1,
+    fog: '#1a2440', fogDensity: 0.0048,
+    tint: [0.86, 0.92, 1.1], lift: 0.045, exposure: 1.0,
   },
   {
     at: 5.1,
     skyTop: '#2f4a80', skyBottom: '#8f7fa8', horizon: '#d78f7a',
-    sun: '#ff9d7a', sunIntensity: 0.5,
-    ambient: '#6b7aa0', ambientIntensity: 0.62,
+    sun: '#ff9d7a', sunIntensity: 0.55,
+    ambient: '#6b7aa0', ambientIntensity: 0.82,
     fog: '#5d6b90', fogDensity: 0.0095,
     tint: [1.03, 0.94, 0.98], lift: 0.03, exposure: 0.97,
   },
   {
     at: 6.8,
     skyTop: PALETTE.sky.dawnTop, skyBottom: PALETTE.sky.dawnBottom, horizon: '#ffcb96',
-    sun: PALETTE.light.sunDawn, sunIntensity: 1.5,
-    ambient: '#9fc0dd', ambientIntensity: 0.72,
+    sun: PALETTE.light.sunDawn, sunIntensity: 1.35,
+    ambient: '#a9c4dd', ambientIntensity: 0.9,
     fog: '#c9c4bb', fogDensity: 0.0072,
     tint: [1.08, 0.99, 0.93], lift: 0.012, exposure: 1.03,
   },
   {
     at: 9.5,
     skyTop: PALETTE.sky.dayTop, skyBottom: PALETTE.sky.dayBottom, horizon: '#e2f2fa',
-    sun: PALETTE.light.sunDay, sunIntensity: 2.55,
-    ambient: PALETTE.light.ambientDay, ambientIntensity: 0.78,
-    fog: '#cfe6f2', fogDensity: 0.0042,
+    sun: PALETTE.light.sunDay, sunIntensity: 2.05,
+    ambient: PALETTE.light.ambientDay, ambientIntensity: 1.0,
+    fog: '#cfe6f2', fogDensity: 0.0036,
     tint: [1.0, 1.0, 1.0], lift: 0.0, exposure: 1.06,
   },
   {
     at: 13,
     skyTop: '#3f96d4', skyBottom: '#d6eefa', horizon: '#eaf6fb',
-    sun: '#fffaf0', sunIntensity: 2.85,
-    ambient: '#c6e0ee', ambientIntensity: 0.8,
-    fog: '#d6ebf5', fogDensity: 0.0038,
+    sun: '#fffaf0', sunIntensity: 2.25,
+    ambient: '#c6e0ee', ambientIntensity: 1.02,
+    fog: '#d6ebf5', fogDensity: 0.0032,
     tint: [1.0, 1.0, 1.0], lift: 0.0, exposure: 1.08,
   },
   {
     at: 16.5,
     skyTop: '#4d92c6', skyBottom: '#f0dfc0', horizon: '#f7d3a0',
-    sun: '#ffe2b0', sunIntensity: 2.2,
-    ambient: '#c2d2dd', ambientIntensity: 0.74,
-    fog: '#dcd7c6', fogDensity: 0.0048,
+    sun: '#ffe2b0', sunIntensity: 1.9,
+    ambient: '#c2d2dd', ambientIntensity: 0.94,
+    fog: '#dcd7c6', fogDensity: 0.0042,
     tint: [1.04, 1.0, 0.95], lift: 0.0, exposure: 1.06,
   },
   {
     at: 18.6,
     skyTop: PALETTE.sky.sunsetTop, skyBottom: PALETTE.sky.sunsetBottom, horizon: '#ff9a5c',
-    sun: PALETTE.light.sunSunset, sunIntensity: 1.45,
-    ambient: '#8f8fb8', ambientIntensity: 0.74,
+    sun: PALETTE.light.sunSunset, sunIntensity: 1.35,
+    ambient: '#9a94b8', ambientIntensity: 0.92,
     fog: '#c98f74', fogDensity: 0.0068,
     tint: [1.11, 0.96, 0.9], lift: 0.012, exposure: 1.02,
   },
@@ -88,25 +88,25 @@ const DAY_STOPS: GradeStops[] = [
     at: 20.2,
     skyTop: '#26325e', skyBottom: '#7a5a86', horizon: '#c76d72',
     sun: '#c07a92', sunIntensity: 0.6,
-    ambient: '#5a6698', ambientIntensity: 0.68,
+    ambient: '#5f6c9c', ambientIntensity: 0.9,
     fog: '#54527a', fogDensity: 0.0086,
     tint: [0.95, 0.9, 1.04], lift: 0.03, exposure: 0.96,
   },
   {
     at: 22,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
-    sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
-    fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
+    sun: PALETTE.light.moon, sunIntensity: 0.4,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 1.1,
+    fog: '#1a2440', fogDensity: 0.0048,
+    tint: [0.86, 0.92, 1.1], lift: 0.045, exposure: 1.0,
   },
   { // Wraps back to midnight.
     at: 24,
     skyTop: PALETTE.sky.nightTop, skyBottom: PALETTE.sky.nightBottom, horizon: '#2b3a63',
-    sun: PALETTE.light.moon, sunIntensity: 0.28,
-    ambient: PALETTE.light.ambientNight, ambientIntensity: 0.66,
-    fog: '#1c2745', fogDensity: 0.0075,
-    tint: [0.80, 0.87, 1.10], lift: 0.062, exposure: 0.95,
+    sun: PALETTE.light.moon, sunIntensity: 0.4,
+    ambient: PALETTE.light.ambientNight, ambientIntensity: 1.1,
+    fog: '#1a2440', fogDensity: 0.0048,
+    tint: [0.86, 0.92, 1.1], lift: 0.045, exposure: 1.0,
   },
 ];
 
@@ -121,6 +121,11 @@ export interface LightingOutput {
   bloom: number;
   /** 0–1, how lit the world is. Drives window lights, lamps and fireflies. */
   darkness: number;
+}
+
+/** Extra flat fill once the sun is down, so night shadows stay readable. */
+function darknessFill(sunHeight: number): number {
+  return clamp01(-sunHeight * 3);
 }
 
 const scratchA = new Color();
@@ -150,11 +155,11 @@ export class LightingRig {
     this.sun.shadow.mapSize.set(3072, 3072);
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 260;
-    this.sun.shadow.bias = -0.0006;
-    this.sun.shadow.normalBias = 0.035;
-    // A slightly blurred edge reads as a soft contact shadow rather than a
-    // hard cut, which suits the diorama look.
-    this.sun.shadow.radius = 2.4;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.05;
+    // A blurred penumbra reads as a soft contact shadow rather than a hard
+    // cut, which suits the diorama look. Needs PCFShadowMap on the renderer.
+    this.sun.shadow.radius = 5;
     scene.add(this.sun);
     scene.add(this.sun.target);
 
@@ -162,7 +167,7 @@ export class LightingRig {
     scene.add(this.moon);
     scene.add(this.moon.target);
 
-    this.hemi = new HemisphereLight(0xbcd8e8, 0x7f9a5f, 0.55);
+    this.hemi = new HemisphereLight(0xbcd8e8, 0x7f9a5f, 0.8);
     scene.add(this.hemi);
 
     this.ambient = new AmbientLight(0xffffff, 0.28);
@@ -210,7 +215,9 @@ export class LightingRig {
     // --- Sun / moon direction ---------------------------------------------
     const sunAngle = ((hour - 6) / 12) * Math.PI;
     const sunHeight = Math.sin(sunAngle);
-    const sunDir = new Vector3(Math.cos(sunAngle) * 0.82, Math.max(-0.4, sunHeight), 0.42).normalize();
+    // The sun is tilted off the zenith so even noon has a little rake to it:
+    // dead-overhead light flattens every face and shortens every shadow.
+    const sunDir = new Vector3(Math.cos(sunAngle) * 0.82, Math.max(-0.4, sunHeight), 0.6).normalize();
     const moonDir = sunDir.clone().negate();
 
     this.sunTarget.copy(focus);
@@ -238,7 +245,7 @@ export class LightingRig {
 
     // The moon only contributes once the sun is genuinely below the horizon.
     const moonStrength = clamp01(-sunHeight * 2.2);
-    this.moon.intensity = moonStrength * 0.42 * lerp(1, 0.4, overcast) * indoorCut;
+    this.moon.intensity = moonStrength * 1.05 * lerp(1, 0.45, overcast) * indoorCut;
     this.moon.castShadow = false;
 
     scratchA.set(a.ambient);
@@ -247,8 +254,8 @@ export class LightingRig {
     this.hemi.color.copy(ambientColor);
     this.hemi.groundColor.set(PALETTE.light.groundBounce).lerp(ambientColor, 0.55 + overcast * 0.25);
     // Overcast skies flatten the key light but raise the fill.
-    this.hemi.intensity = lerp(a.ambientIntensity, b.ambientIntensity, t) * 1.15 * lerp(1, 1.35, overcast) * (indoors ? 0.34 : 1);
-    this.ambient.intensity = 0.2 + overcast * 0.12 + (indoors ? 0.05 : 0);
+    this.hemi.intensity = lerp(a.ambientIntensity, b.ambientIntensity, t) * 1.15 * lerp(1, 1.3, overcast) * (indoors ? 0.4 : 1);
+    this.ambient.intensity = 0.16 + overcast * 0.12 + (indoors ? 0.06 : 0) + darknessFill(sunHeight) * 0.1;
 
     // --- Fog ---------------------------------------------------------------
     scratchA.set(a.fog);
@@ -296,13 +303,13 @@ export class LightingRig {
 
     return {
       tint: [tint[0] * (1 - gloom * 0.16), tint[1] * (1 - gloom * 0.13), tint[2] * (1 - gloom * 0.06)],
-      saturation: 1.1 * desat,
-      contrast: 1.045 - overcast * 0.035,
-      vignette: 0.3 + darkness * 0.18 + overcast * 0.05,
+      saturation: 1.04 * desat,
+      contrast: 1.035 - overcast * 0.03,
+      vignette: 0.26 + darkness * 0.16 + overcast * 0.05,
       lift: lerp(a.lift, b.lift, t) + (weather.kind === 'fog' ? 0.03 : 0),
       flash: lightningFlash * 0.65,
       exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.94, overcast),
-      bloom: 0.3 + darkness * 0.4 + (weather.kind === 'rain' || weather.kind === 'storm' ? 0.15 : 0),
+      bloom: 0.2 + darkness * 0.18 + (weather.kind === 'rain' || weather.kind === 'storm' ? 0.12 : 0),
       darkness,
     };
   }

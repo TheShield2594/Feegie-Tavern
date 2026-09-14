@@ -16,7 +16,7 @@ import {
 } from 'three';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
-import { makeWindow, roundedBoxGeometry } from './BuildingKit';
+import { makeWindow, roundedBoxGeometry, surfaces } from './BuildingKit';
 
 export interface RoomOptions {
   width: number;
@@ -195,7 +195,7 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
   group.add(floorMesh);
 
   // --- Walls ---------------------------------------------------------------
-  const wallMaterial = createStylizedMaterial({ color: wallColor, roughness: 0.94 });
+  const wallMaterial = surfaces.plaster(wallColor);
   const trimMaterial = createStylizedMaterial({ color: trimColor, roughness: 0.85 });
   const windowGlass: MeshStandardMaterial[] = [];
 
@@ -203,9 +203,10 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
 
   const addWall = (w: number, x: number, z: number, rotation: number, nx = 0, nz = 0) => {
     const parts: Mesh[] = [];
-    // Each wall gets its own material clone so the camera can fade just the
-    // one standing between it and the player.
-    const wall = new Mesh(new BoxGeometry(w, height, WALL_THICKNESS), wallMaterial.clone());
+    // Each wall gets its own material so one can be dimmed or hidden alone.
+    // A rounded-box rather than a BoxGeometry: its UVs are in metres, so the
+    // plaster grain tiles at one density on a 7 m cottage wall and a 36 m hall.
+    const wall = new Mesh(roundedBoxGeometry(w, height, WALL_THICKNESS, 0.02), surfaces.plaster(wallColor));
     wall.position.set(x, height / 2, z);
     wall.rotation.y = rotation;
     wall.castShadow = true;
@@ -244,7 +245,7 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     addWall(sideWidth, doorwayWidth / 2 + sideWidth / 2, halfD, 0, 0, 1);
 
     // Lintel above the opening.
-    const lintel = new Mesh(new BoxGeometry(doorwayWidth + 0.4, height - 2.5, WALL_THICKNESS), wallMaterial.clone());
+    const lintel = new Mesh(roundedBoxGeometry(doorwayWidth + 0.4, height - 2.5, WALL_THICKNESS, 0.02), wallMaterial);
     lintel.position.set(0, height - (height - 2.5) / 2, halfD);
     lintel.userData.noFade = true;
     group.add(lintel);

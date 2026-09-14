@@ -16,8 +16,27 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { kitGeometry } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
+import { plankTexture, plasterTexture, roofTileTexture, stoneTexture } from '@/rendering/textures';
+
+/**
+ * Shared surface materials for architecture. One instance per surface type
+ * would break `applyHouseStyle`, which recolours a cottage by editing the
+ * materials it was built with, so these are factories: each building gets its
+ * own tinted copy of a textured material.
+ */
+export const surfaces = {
+  plaster: (color: string) =>
+    createStylizedMaterial({ color, roughness: 0.92, map: plasterTexture(), mapRepeat: 0.55, groundDetail: 0.3 }),
+  roof: (color: string) =>
+    createStylizedMaterial({ color, roughness: 0.88, map: roofTileTexture(), mapRepeat: 0.62 }),
+  plank: (color: string, repeat = 0.5) =>
+    createStylizedMaterial({ color, roughness: 0.9, map: plankTexture(), mapRepeat: repeat }),
+  stone: (color: string) =>
+    createStylizedMaterial({ color, roughness: 0.96, map: stoneTexture(), mapRepeat: 0.5 }),
+};
 
 /**
  * Reusable architectural parts.
@@ -122,6 +141,11 @@ export function hipRoofGeometry(width: number, depth: number, rise: number, over
 
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
+  // Planar UVs in metres, so the tile texture repeats at the same density as
+  // on the extruded gable roofs.
+  const uvs: number[] = [];
+  for (let i = 0; i < positions.length; i += 3) uvs.push(positions[i], positions[i + 2] + positions[i + 1] * 0.7);
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -174,6 +198,13 @@ export function makeWindow(options: WindowOptions = {}): BuiltWindow {
   const glass = new Mesh(new PlaneGeometry(width, height), glassMaterial);
   glass.position.z = 0.1;
   group.add(glass);
+
+  // A sill under every window throws a small shadow line and stops the frame
+  // reading as a sticker on the wall.
+  const sill = new Mesh(roundedBoxGeometry(width + 0.34, 0.09, 0.22, 0.03), frameMaterial);
+  sill.position.set(0, -height / 2 - 0.09, 0.1);
+  sill.castShadow = true;
+  group.add(sill);
 
   if (panes) {
     const mullionMaterial = createStylizedMaterial({ color: frameColor, roughness: 0.8 });
@@ -255,6 +286,15 @@ export function makeDoor(options: DoorOptions = {}): BuiltDoor {
   panel.position.set(width / 2, height / 2, 0);
   panel.castShadow = true;
   leaf.add(panel);
+
+  // Two recessed panels, drawn as slightly darker insets.
+  const panelMaterial = createStylizedMaterial({ color: new Color(color).multiplyScalar(0.82), roughness: 0.75 });
+  for (const [py, ph] of [[height * 0.7, height * 0.34], [height * 0.28, height * 0.3]] as [number, number][]) {
+    const inset = new Mesh(roundedBoxGeometry(width * 0.62, 0.03, ph, 0.04), panelMaterial);
+    inset.rotation.x = Math.PI / 2;
+    inset.position.set(width / 2, py, 0.055);
+    leaf.add(inset);
+  }
 
   const knob = new Mesh(
     new SphereGeometry(0.075, 10, 8),
@@ -441,10 +481,17 @@ export function makeLandscaping(width: number, depth: number, seed = 0): Group {
     { x: width / 2 + 0.45, z: -depth / 3, s: 0.68 },
   ];
 
+  const kitBush = kitGeometry('bush.small');
   spots.forEach((spot, i) => {
-    const bush = new Mesh(new SphereGeometry(spot.s, 8, 6), shrub);
-    bush.position.set(spot.x, spot.s * 0.7, spot.z);
-    bush.scale.set(1.15, 0.8, 1.15);
+    const bush = kitBush ? new Mesh(kitBush, shrub) : new Mesh(new SphereGeometry(spot.s, 8, 6), shrub);
+    if (kitBush) {
+      bush.position.set(spot.x, 0, spot.z);
+      bush.rotation.y = i * 1.9 + seed;
+      bush.scale.setScalar(spot.s * 1.25);
+    } else {
+      bush.position.set(spot.x, spot.s * 0.7, spot.z);
+      bush.scale.set(1.15, 0.8, 1.15);
+    }
     bush.castShadow = true;
     bush.receiveShadow = true;
     group.add(bush);

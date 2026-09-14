@@ -11,6 +11,7 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { makeBlobShadow } from '@/rendering/BlobShadow';
 import { createStylizedMaterial } from '@/rendering/materials';
 import type { CharacterLook, HairStyleId, HatId, OutfitId, ShoeId } from '@/data/clothing';
 import { OUTFITS } from '@/data/clothing';
@@ -108,7 +109,15 @@ export class CharacterRig {
 
     this.buildSkeleton(v);
     this.applyRestPose();
+
+    // Contact shadow. Parented to the group, not the bobbing root, so it stays
+    // on the ground while the body rises and falls.
+    this.blobShadow = makeBlobShadow(0.36 * (v ? v.girth : 1) + 0.12, 0.9);
+    this.group.add(this.blobShadow);
   }
+
+  /** The soft disc under the feet. Callers can dim it while swimming. */
+  readonly blobShadow: Mesh;
 
   private makeJoint(name: JointName, parent: Object3D, x = 0, y = 0, z = 0): Object3D {
     const joint = new Object3D();
@@ -337,19 +346,19 @@ export class CharacterRig {
     const pupilMaterial = createStylizedMaterial({ color: '#2b2a33', roughness: 0.3 });
 
     const makeEye = (side: number) => {
-      const white = new Mesh(new SphereGeometry(r * 0.15, 12, 10), whiteMaterial);
+      const white = new Mesh(new SphereGeometry(r * 0.165, 12, 10), whiteMaterial);
       white.position.set(side * eyeX, eyeY, faceZ);
       white.scale.set(1, 1.12, 0.55);
       head.add(white);
 
-      const pupil = new Mesh(new SphereGeometry(r * 0.088, 10, 8), pupilMaterial);
-      pupil.position.set(side * eyeX, eyeY, faceZ + r * 0.06);
-      pupil.scale.set(1, 1.15, 0.6);
+      const pupil = new Mesh(new SphereGeometry(r * 0.1, 10, 8), pupilMaterial);
+      pupil.position.set(side * eyeX, eyeY - r * 0.01, faceZ + r * 0.06);
+      pupil.scale.set(1, 1.2, 0.6);
       head.add(pupil);
 
       // A single specular dot does more for character than any shader.
-      const glint = new Mesh(new SphereGeometry(r * 0.03, 6, 6), whiteMaterial);
-      glint.position.set(side * eyeX + r * 0.035, eyeY + r * 0.045, faceZ + r * 0.1);
+      const glint = new Mesh(new SphereGeometry(r * 0.036, 6, 6), whiteMaterial);
+      glint.position.set(side * eyeX + r * 0.04, eyeY + r * 0.05, faceZ + r * 0.11);
       head.add(glint);
 
       return { white, pupil };

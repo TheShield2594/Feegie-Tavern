@@ -4,9 +4,16 @@ A stylised 3D cozy island life sim that runs in the browser. Fish the cove,
 fill the museum, grow a garden, get to know four neighbours, and slowly make
 the island somewhere worth living.
 
-Built with **TypeScript**, **Three.js** and **Vite**. No art pipeline required:
-the island, its buildings, its characters and every item icon are generated
-from data at load time, so the whole game is a repository you can clone and run.
+Built with **TypeScript**, **Three.js** and **Vite**. The island, its
+buildings, its characters and every item icon are generated from data at load
+time, dressed with a handful of CC0 model kits (see `ASSET_LICENSES.md`), so
+the whole game is a repository you can clone and run.
+
+> **Single-player today.** There is no game server, no accounts and no
+> networking in this repository; saves live in the browser's `localStorage`.
+> The presentation layer (nameplates, emote bubbles, blob shadows, the
+> character rig and animator) is written so a remote player can be drawn with
+> the same pieces as a villager, but a multiplayer server is future work.
 
 ```bash
 npm install
@@ -75,6 +82,7 @@ when the game itself cannot be built (see issue #21).
 | Journal | `Q` | — |
 | Settings | `F` | Menu |
 | Cycle tool | `Z` / `C` | `LB` / `RB` |
+| Emotes: wave · cheer · nod · sit | `1` `2` `3` `4` | D-pad |
 | Orbit camera | `O` / `P` | Right stick |
 | Zoom | `+` / `-` | `RT` / `LT` |
 | Performance overlay | `F3` | — |
@@ -89,8 +97,10 @@ first touch input.
 ```
 src/
   core/        Game orchestrator, typed event bus
-  rendering/   renderer + post chain, sky, lighting rig, camera, particles, weather FX
-  world/       heightfield, terrain, water, foliage, props, buildings, interiors, minimap
+  rendering/   renderer + post chain, sky, lighting rig, camera, particles, weather FX,
+               procedural surface textures, world-space labels and emote bubbles
+  world/       heightfield, terrain, water, foliage, scatter, wildlife, props, buildings, interiors, minimap
+  assets/      kit manifest, GLB loader, and the registry world systems pull kit geometry from
   player/      character rig, procedural animator, tools, movement controller
   npc/         navigation grid, villagers, schedules
   interactions/ contextual prompt system
@@ -125,10 +135,22 @@ the collection screen and the map of what is left to find.
 
 ---
 
-## Replacing the placeholder art
+## Art: kits and procedural fallbacks
 
-The game ships with procedural assets so it is playable and coherent today.
-Every one of them is behind a seam:
+Five Kenney kits (nature, fantasy town, furniture, survival, food) ship as
+meshopt GLBs under `public/assets/models/`. `src/assets/registry.ts` hands
+their geometry to any system that asks — rocks, harbour props, fences,
+signposts, furniture, interiors, item drops and hand tools all use kit meshes
+when the kit loaded and fall back to generated geometry when it did not, so the
+game boots with no assets at all. Kit colours are baked per vertex and drawn
+through the same stylised material as everything else, which is what keeps a
+Kenney barrel and a procedural lamp post looking like one game.
+
+Surfaces that are still generated — roofs, plaster, planks, stone, flagstones —
+are textured at load by `src/rendering/textures.ts`: neutral tiling canvases
+multiplied by each material's colour, so repainting the cottage still works.
+
+Everything else remains behind a seam:
 
 | Placeholder | Replace by |
 | --- | --- |

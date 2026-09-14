@@ -8,9 +8,25 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { makeKitMesh } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { getItemDef } from '@/data/items';
 import type { ItemVisual } from './types';
+
+/**
+ * Item ids with a matching food- or survival-kit model. Only true matches are
+ * listed: a pear drawn as an apple would contradict its own icon, so the pear
+ * stays procedural until a pear exists.
+ */
+const KIT_ITEMS: Record<string, { id: string; scale: number }> = {
+  'mat.wood': { id: 'drop.wood', scale: 0.75 },
+  'mat.stone': { id: 'drop.stone', scale: 0.8 },
+  'crop.pumpkin': { id: 'item.pumpkin', scale: 0.5 },
+  'crop.strawberry': { id: 'item.strawberry', scale: 0.9 },
+  'meal.pearTart': { id: 'item.pie', scale: 0.55 },
+  'meal.gardenStew': { id: 'item.soup', scale: 0.55 },
+  'meal.seasidePlate': { id: 'item.dinner', scale: 0.55 },
+};
 
 /**
  * Small 3D representations of items, used for drops the player picks up and
@@ -23,7 +39,18 @@ export function makeItemModel(defId: string, scale = 1): Group {
   group.name = `Item_${defId}`;
   if (!def) return group;
 
-  buildVisual(group, def.visual);
+  const kit = KIT_ITEMS[defId];
+  const kitMesh = kit ? makeKitMesh(kit.id, { scale: kit.scale, roughness: 0.7 }) : null;
+  if (kitMesh) {
+    // Kit models stand on their base; item models are centred, which is what
+    // drops, exhibits and the held-item pose all expect.
+    kitMesh.geometry.computeBoundingBox();
+    const box = kitMesh.geometry.boundingBox;
+    if (box) kitMesh.position.y = -((box.max.y - box.min.y) * kit.scale) / 2;
+    group.add(kitMesh);
+  } else {
+    buildVisual(group, def.visual);
+  }
   group.scale.setScalar(scale * (def.visual.scale ?? 1));
   group.traverse((child) => {
     const mesh = child as Mesh;

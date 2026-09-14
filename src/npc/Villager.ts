@@ -2,6 +2,7 @@ import { Group, Vector3 } from 'three';
 import { CharacterAnimator } from '@/player/CharacterAnimator';
 import { CharacterRig } from '@/player/CharacterRig';
 import { dampAngle, lerp } from '@/util/math';
+import { EmoteBubble, Nameplate } from '@/rendering/WorldLabel';
 import { LANDMARKS, terrainHeight } from '@/world/heightfield';
 import type { ScheduleEntry, VillagerDef } from '@/data/villagers';
 import type { Navigation, NavPoint } from './Navigation';
@@ -32,6 +33,8 @@ export class Villager {
   scheduleLabel = '';
   /** Where the schedule currently wants them. */
   private anchor = new Vector3();
+  /** Personal offset from a shared schedule anchor. */
+  readonly anchorOffset: { x: number; z: number };
   private path: NavPoint[] = [];
   private pathIndex = 0;
   private repathTimer = 0;
@@ -44,6 +47,18 @@ export class Villager {
 
   /** Villagers with an unmet request show a marker. */
   hasRequest = false;
+  /** Another villager this one is chatting with, set by the manager. */
+  chattingWith: Villager | null = null;
+  private chatTimer = 0;
+  private glanceTimer = 3;
+  private glanceYaw = 0;
+
+  readonly nameplate: Nameplate;
+  readonly bubble = new EmoteBubble();
+  /** Seconds until a queued reaction (a wave back) plays. */
+  private reactionTimer = 0;
+  private queuedReaction: 'wave' | 'nod' | null = null;
+  private greetCooldown = 0;
 
   constructor(
     readonly def: VillagerDef,
@@ -53,6 +68,17 @@ export class Villager {
     this.animator = new CharacterAnimator(this.rig);
     this.group.add(this.rig.group);
     this.group.name = `Villager_${def.id}`;
+
+    this.nameplate = new Nameplate({ text: def.name, accent: def.look.outfit });
+    this.nameplate.sprite.position.y = this.rig.height * def.look.height + 0.55;
+    this.group.add(this.nameplate.sprite);
+    this.bubble.baseY = this.rig.height * def.look.height + 1.05;
+    this.group.add(this.bubble.sprite);
+
+    // Each villager stands a little off the shared anchor, at their own angle,
+    // so two neighbours sent to the square do not occupy the same spot.
+    const seed = [...def.id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+    this.anchorOffset = { x: Math.cos(seed * 1.7) * 1.7, z: Math.sin(seed * 1.7) * 1.7 };
 
     const home = LANDMARKS[def.homeAnchor] ?? LANDMARKS['square.center'];
     this.position.set(home.x, terrainHeight(home.x, home.z), home.z);
@@ -83,7 +109,9 @@ export class Villager {
     this.activity = entry.activity;
 
     const target = LANDMARKS[entry.at] ?? LANDMARKS['square.center'];
-    this.anchor.set(target.x, terrainHeight(target.x, target.z), target.z);
+    const x = target.x + this.anchorOffset.x;
+    const z = target.z + this.anchorOffset.z;
+    this.anchor.set(x, terrainHeight(x, z), z);
     this.repath();
   }
 
@@ -117,12 +145,38 @@ export class Villager {
 
   /** Plays a one-off reaction, e.g. when the player donates or gives a gift. */
   react(kind: 'happy' | 'surprised' | 'celebrate'): void {
-    if (kind === 'celebrate') this.animator.play('celebrate', { force: true });
+    if (kind === 'celebrate') {
+      this.animator.play('celebrate', { force: true });
+      this.bubble.show('heart', 1.6);
+    }
     this.rig.setExpression(kind === 'celebrate' ? 'excited' : kind);
+  }
+
+  /**
+   * The player waved nearby. Villagers answer after a beat — the delay is what
+   * makes it read as a response rather than a mirror.
+   */
+  greetBack(): void {
+    if (this.talking || this.activity === 'sleep' || this.greetCooldown > 0) return;
+    this.queuedReaction = Math.random() < 0.75 ? 'wave' : 'nod';
+    this.reactionTimer = 0.35 + Math.random() * 0.4;
+    this.greetCooldown = 6;
   }
 
   update(dt: number, hour: number, playerPosition: Vector3): void {
     this.repathTimer -= dt;
+    this.greetCooldown = Math.max(0, this.greetCooldown - dt);
+
+    if (this.queuedReaction) {
+      this.reactionTimer -= dt;
+      if (this.reactionTimer <= 0) {
+        const reaction = this.queuedReaction;
+        this.queuedReaction = null;
+        this.animator.play(reaction, { force: true });
+        this.rig.setExpression('happy');
+        this.bubble.show(reaction === 'wave' ? 'happy' : 'heart', 1.3);
+      }
+    }
 
     if (!this.talking) {
       if (this.path.length > 0) {
@@ -153,6 +207,31 @@ export class Villager {
     }
 
     this.animator.update(dt);
+
+    // Presence: name within earshot, and a bubble for whatever they are up to.
+    const distance = Math.sqrt(distanceSq);
+    this.nameplate.update(dt, distance);
+    this.updateBubble(distance);
+    this.bubble.update(dt);
+  }
+
+  /** Sticky status bubbles — a request to make, a nap — with reactions on top. */
+  private updateBubble(distance: number): void {
+    const current = this.bubble.current;
+    // Reactions (hearts, waves) are timed and own the bubble while they play.
+    if (current === 'heart' || current === 'happy') return;
+    if (distance > 24) {
+      if (current) this.bubble.hide();
+      return;
+    }
+    let wanted: 'exclaim' | 'sleep' | 'dots' | 'note' | null = null;
+    if (this.talking) wanted = 'dots';
+    else if (this.hasRequest) wanted = 'exclaim';
+    else if (this.activity === 'sleep' && this.path.length === 0) wanted = 'sleep';
+    else if ((this.activity === 'browse' || this.activity === 'tend') && this.path.length === 0 && Math.floor(this.activityTimer / 7) % 3 === 1) wanted = 'note';
+    if (!wanted && this.chattingWith && this.animator.currentClip === 'talk') wanted = 'dots';
+    if (wanted && current !== wanted) this.bubble.show(wanted, Infinity);
+    else if (!wanted && current) this.bubble.hide();
   }
 
   private followPath(dt: number): void {
@@ -241,7 +320,26 @@ export class Villager {
 
       case 'idle':
       default:
+        if (this.chattingWith) {
+          // Face the other villager and gesture; the manager pairs them.
+          const other = this.chattingWith;
+          this.facing = dampAngle(this.facing, Math.atan2(other.position.x - this.position.x, other.position.z - this.position.z), 0.25, dt);
+          this.chatTimer += dt;
+          // Take turns: one talks while the other listens and nods.
+          const speaking = Math.floor(this.chatTimer / 3.2) % 2 === (this.def.id < other.def.id ? 0 : 1);
+          if (speaking) this.animator.play('talk');
+          else if (!this.animator.isBusy && Math.random() < dt * 0.35) this.animator.play('nod', { force: true });
+          else if (!this.animator.isBusy) this.animator.play('idle');
+          break;
+        }
         this.animator.play(hour >= 22 || hour < 6 ? 'idleTired' : 'idle');
+        // Look around now and then, so standing still is not standing frozen.
+        this.glanceTimer -= dt;
+        if (this.glanceTimer <= 0) {
+          this.glanceTimer = 4 + Math.random() * 6;
+          this.glanceYaw = (Math.random() - 0.5) * 1.6;
+        }
+        this.facing = dampAngle(this.facing, this.facing + this.glanceYaw * dt * 0.4, 0.3, dt);
         // Drift back if they have been nudged off their spot.
         if (this.repathTimer <= 0) {
           this.repathTimer = 3;
@@ -257,5 +355,7 @@ export class Villager {
 
   dispose(): void {
     this.rig.dispose();
+    this.nameplate.dispose();
+    this.bubble.dispose();
   }
 }

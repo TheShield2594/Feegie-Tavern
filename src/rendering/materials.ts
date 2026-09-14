@@ -4,6 +4,7 @@ import {
   MeshStandardMaterial,
   ShaderChunk,
   type IUniform,
+  type Texture,
   type WebGLProgramParametersWithUniforms,
 } from 'three';
 import { PALETTE } from './palette';
@@ -45,6 +46,20 @@ vec3 applyWind(vec3 pos, vec3 anchor, float stiffness, float phase) {
 }
 `;
 
+const DETAIL_PARS = /* glsl */ `
+float cozyHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float cozyNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(cozyHash(i), cozyHash(i + vec2(1.0, 0.0)), u.x),
+             mix(cozyHash(i + vec2(0.0, 1.0)), cozyHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float cozyFbm(vec2 p) {
+  return cozyNoise(p) * 0.6 + cozyNoise(p * 2.13 + 5.2) * 0.4;
+}
+`;
+
 export interface StylizedMaterialOptions {
   color?: string | Color;
   roughness?: number;
@@ -63,6 +78,16 @@ export interface StylizedMaterialOptions {
   emissiveIntensity?: number;
   /** Darkens and glosses the surface when it rains. */
   wetResponse?: number;
+  /**
+   * Breaks up large flat surfaces with a two-octave value noise in world space.
+   * Used by the terrain and by big plaster walls, where a single vertex colour
+   * reads as a default engine material from a few metres away.
+   */
+  groundDetail?: number;
+  /** A neutral tiling texture multiplied by `color`. See rendering/textures.ts. */
+  map?: Texture;
+  /** Texture repeats per metre, when `map` is set. */
+  mapRepeat?: number;
 }
 
 /**
@@ -86,6 +111,9 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
     emissive,
     emissiveIntensity = 1,
     wetResponse = 0.35,
+    groundDetail = 0,
+    map,
+    mapRepeat,
   } = options;
 
   const material = new MeshStandardMaterial({
@@ -100,7 +128,11 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
     emissive: emissive ? new Color(emissive) : new Color(0x000000),
     emissiveIntensity,
     ...(side ? { side } : {}),
+    ...(map ? { map } : {}),
   });
+  // Textures are shared between materials, so the tiling density is applied
+  // in the shader per material rather than by mutating the texture's repeat.
+  const uvRepeat = map && mapRepeat !== undefined ? mapRepeat : 0;
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     shader.uniforms.uTime = sharedUniforms.uTime;
@@ -111,6 +143,36 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
     shader.uniforms.uWetResponse = { value: wetResponse };
 
     shader.vertexShader = `uniform float uWindScale;\n${WIND_PARS}\n${shader.vertexShader}`;
+
+    if (uvRepeat > 0) {
+      // Object-space UVs from ExtrudeGeometry are already in metres; scale
+      // them here so one shared texture tiles at a consistent density.
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <uv_vertex>',
+        /* glsl */ `
+        #include <uv_vertex>
+        #ifdef USE_MAP
+          vMapUv = vMapUv * ${uvRepeat.toFixed(3)};
+        #endif
+        `,
+      );
+    }
+
+    if (groundDetail > 0) {
+      shader.vertexShader = `varying vec3 vCozyWorld;\n${shader.vertexShader}`.replace(
+        '#include <worldpos_vertex>',
+        /* glsl */ `
+        #include <worldpos_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vCozyWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+          #else
+            vCozyWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          #endif
+        }
+        `,
+      );
+    }
 
     if (wind !== 'none') {
       // `stiffness` differs by plant type: grass bends from the ground up,
@@ -141,6 +203,24 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
     }
 
     shader.fragmentShader = `uniform float uWetness;\nuniform float uWetResponse;\n${shader.fragmentShader}`;
+    if (groundDetail > 0) {
+      shader.fragmentShader = `varying vec3 vCozyWorld;\n${DETAIL_PARS}\n${shader.fragmentShader}`.replace(
+        '#include <color_fragment>',
+        /* glsl */ `
+        #include <color_fragment>
+        {
+          // Hand-painted mottle: one broad wash plus a fine grain, and a faint
+          // hue drift so the two are never the same shade of the base colour.
+          float broad = cozyFbm(vCozyWorld.xz * 0.35);
+          float fine = cozyFbm(vCozyWorld.xz * 2.1 + 17.0);
+          float shade = 0.90 + broad * 0.14 + (fine - 0.5) * 0.10;
+          vec3 warm = diffuseColor.rgb * vec3(1.06, 1.02, 0.90);
+          vec3 cool = diffuseColor.rgb * vec3(0.92, 1.0, 1.08);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(cool, warm, broad), ${groundDetail.toFixed(2)}) * mix(1.0, shade, ${groundDetail.toFixed(2)});
+        }
+        `,
+      );
+    }
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <roughnessmap_fragment>',
       /* glsl */ `
@@ -160,7 +240,7 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
   };
 
   // Distinct keys keep three's program cache from merging incompatible patches.
-  material.customProgramCacheKey = () => `cozy:${wind}:${windScale}:${wetResponse}`;
+  material.customProgramCacheKey = () => `cozy:${wind}:${windScale}:${wetResponse}:${groundDetail}:${uvRepeat}`;
 
   return material;
 }

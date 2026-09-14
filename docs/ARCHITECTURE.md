@@ -62,7 +62,49 @@ the shader to the render pipeline; instead the terrain height is baked into a
 texture because float textures are not linearly filterable everywhere — that
 bug rendered the whole ocean flat and pale until it was tracked down.
 
+## Why kit geometry goes through a registry
+
+`Foliage` takes the `AssetManager` as a constructor argument, because it was the
+first system to use kit art. Everything after it — props, interiors, furniture,
+drops, tools — is built several layers down, so `src/assets/registry.ts` exposes
+the same manager by import (`kitGeometry`, `makeKitMesh`, `kitMaterial`).
+`Game` sets it once before building the world. Every caller keeps its
+procedural fallback: a missing kit degrades the look, never the boot.
+
+Kit meshes are drawn with `createStylizedMaterial({ vertexColors: true })` and
+a *tint* rather than their own materials, so they take the wind, wetness and
+season uniforms like everything else. `softTint` lifts a palette colour toward
+white before multiplying, because a straight multiply by a mid-tone halves the
+brightness of the baked colours.
+
+## Why the textures are neutral
+
+`rendering/textures.ts` bakes small canvases (roof tiles, plaster, planks,
+stone, flagstones) as light greys with darker seams, and the material's
+`color` supplies the hue. `Buildings.applyHouseStyle` repaints the cottage by
+matching material colours; a coloured texture would silently break that. The
+tiling density is applied per material in the vertex shader (`mapRepeat`), so
+one shared texture serves a 6 m cottage and a 36 m museum hall.
+
+## Why characters carry a blob shadow, a nameplate and a bubble
+
+The shadow map grounds a character in sunlight and abandons them at dusk,
+indoors and under a canopy; the soft disc under the feet is always there.
+Nameplates and emote bubbles are sprites in the scene, not HTML: they sit
+behind a lamp post like a real sign would and fade with distance. All three
+hang off the rig's group, so a remote player rendered with the same rig would
+get them for free.
+
 ## Gotchas worth knowing
+
+- `PCFSoftShadowMap` ignores `shadow.radius`; the renderer uses `PCFShadowMap`
+  so the sun's penumbra actually blurs.
+- The camera keeps itself above the heightfield (`CameraRig.terrainClamp`);
+  interiors switch it off because they sit far outside the island.
+- Interior walls are rounded boxes, not `BoxGeometry`: extruded geometry has
+  UVs in metres, which is what lets the plaster texture tile evenly.
+- The interaction poll uses the clamped frame `dt`; on a very slow frame it
+  polls every frame rather than letting a stale prompt linger.
 
 - `roundedBoxGeometry` measures its outer size exactly and is centred on its
   origin, like `BoxGeometry`. It did not always: the extrude bevel used to be

@@ -73,7 +73,9 @@ export class InteractionSystem {
   update(dt: number, context: Omit<InteractionContext, 'distanceSq'>): void {
     if (!this.enabled) return;
     this.pollTimer -= dt;
-    if (this.pollTimer > 0) return;
+    // On a slow frame the clamped dt would let a stale prompt linger for
+    // several frames, so a frame longer than the poll interval always polls.
+    if (this.pollTimer > 0 && dt < this.pollInterval) return;
     this.pollTimer = this.pollInterval;
 
     const found: InteractionOption[] = [];

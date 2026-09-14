@@ -93,7 +93,7 @@ export class TitleScreen {
 
     children.push(el('div', {
       class: 'cc-title-foot',
-      html: 'Move <b>WASD</b> · Interact <b>E</b> · Tool <b>Space</b> · Bag <b>I</b><br>Xbox-style controllers are supported.',
+      html: 'Move <b>WASD</b> · Interact <b>E</b> · Tool <b>Space</b> · Bag <b>I</b> · Wave <b>1</b><br>Xbox-style controllers are supported.',
     }));
 
     this.card.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));

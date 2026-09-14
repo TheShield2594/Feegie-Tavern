@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { clamp, damp, dampAngle, lerp } from '@/util/math';
 import { Spring } from '@/util/easing';
+import { terrainHeight } from '@/world/heightfield';
 
 export interface CameraPreset {
   /** Horizontal distance from the target. */
@@ -24,12 +25,14 @@ export interface CameraPreset {
 export const CAMERA_PRESETS: Record<string, CameraPreset> = {
   // The default exterior framing: high enough to read the island as a diorama,
   // shallow enough that buildings still have visible faces.
-  exterior: { distance: 14.5, height: 10.2, pitchOffset: 0.0, fov: 38 },
-  exteriorClose: { distance: 13, height: 9.5, pitchOffset: 0.1, fov: 40 },
-  exteriorWide: { distance: 26, height: 19, pitchOffset: -0.05, fov: 36 },
-  interior: { distance: 11.0, height: 8.5, pitchOffset: 0.1, fov: 44 },
-  fishing: { distance: 12, height: 7.5, pitchOffset: 0.16, fov: 36 },
-  dialogue: { distance: 8.5, height: 5.6, pitchOffset: 0.2, fov: 34 },
+  // Lower and closer than a top-down diorama: the player fills more of the
+  // frame, buildings show their facades, and the horizon stays in shot.
+  exterior: { distance: 11.2, height: 6.4, pitchOffset: 0.0, fov: 40 },
+  exteriorClose: { distance: 9.6, height: 5.6, pitchOffset: 0.06, fov: 42 },
+  exteriorWide: { distance: 22, height: 15, pitchOffset: -0.05, fov: 36 },
+  interior: { distance: 9.2, height: 6.2, pitchOffset: 0.08, fov: 44 },
+  fishing: { distance: 10.4, height: 5.4, pitchOffset: 0.1, fov: 38 },
+  dialogue: { distance: 7.2, height: 4.2, pitchOffset: 0.14, fov: 36 },
   vista: { distance: 34, height: 26, pitchOffset: -0.1, fov: 34 },
 };
 
@@ -84,6 +87,8 @@ export class CameraRig {
    * so the view never ends up buried in a wall.
    */
   positionBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
+  /** Keeps the camera above the island heightfield. Off indoors. */
+  terrainClamp = true;
 
   constructor(
     private camera: PerspectiveCamera,
@@ -188,6 +193,18 @@ export class CameraRig {
     if (this.positionBounds) {
       desired.x = clamp(desired.x, this.positionBounds.minX, this.positionBounds.maxX);
       desired.z = clamp(desired.z, this.positionBounds.minZ, this.positionBounds.maxZ);
+    } else if (this.terrainClamp) {
+      // A lower camera can end up inside a hillside behind the player. Sample
+      // the ground along the last stretch of the boom and lift the camera
+      // clear of it, so a slope never cuts across the frame.
+      let floor = -Infinity;
+      for (let i = 0; i <= 3; i++) {
+        const t = 0.45 + (i / 3) * 0.55;
+        const sx = lerp(this.smoothedFocus.x, desired.x, t);
+        const sz = lerp(this.smoothedFocus.z, desired.z, t);
+        floor = Math.max(floor, terrainHeight(sx, sz) + 1.7 + (1 - t) * 1.2);
+      }
+      desired.y = Math.max(desired.y, floor);
     }
 
     if (immediate) {
@@ -210,7 +227,7 @@ export class CameraRig {
     this.camera.position.set(this.currentPosition.x + shakeX, this.currentPosition.y + shakeY, this.currentPosition.z);
 
     const lookTarget = this.smoothedFocus.clone();
-    lookTarget.y += 1.35 - this.preset.pitchOffset * 8;
+    lookTarget.y += 1.2 - this.preset.pitchOffset * 8;
     this.camera.up.copy(UP);
     this.camera.lookAt(lookTarget);
 

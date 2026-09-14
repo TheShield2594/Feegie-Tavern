@@ -95,6 +95,13 @@ export class Navigation {
     return this.cost[gz * this.width + gx] === 0;
   }
 
+  /** The closest standable point to `x, z` — the point itself when it is open. */
+  snapToOpen(x: number, z: number): NavPoint {
+    if (!this.isBlocked(x, z)) return { x, z };
+    const index = this.nearestOpen(x, z);
+    return index === null ? { x, z } : this.toWorld(index);
+  }
+
   /** Nearest open cell to a point, so a target inside a building still works. */
   private nearestOpen(x: number, z: number): number | null {
     const { gx, gz } = this.toGrid(x, z);
@@ -121,7 +128,12 @@ export class Navigation {
     const start = this.nearestOpen(fromX, fromZ);
     const goal = this.nearestOpen(toX, toZ);
     if (start === null || goal === null) return [];
-    if (start === goal) return [{ x: toX, z: toZ }];
+    // A target inside an obstacle (the fountain's centre is a schedule anchor)
+    // is walked to its nearest open cell, never to the raw point: the old
+    // behaviour handed back the exact coordinates and marched villagers into
+    // the basin.
+    const end = this.isBlocked(toX, toZ) ? this.toWorld(goal) : { x: toX, z: toZ };
+    if (start === goal) return [end];
 
     const open: Node[] = [];
     const bestG = new Map<number, number>();
@@ -158,7 +170,7 @@ export class Navigation {
       if (node.parent >= 0) cameFrom.set(node.index, node.parent);
 
       if (node.index === goal) {
-        return this.smooth(this.reconstruct(cameFrom, goal), toX, toZ);
+        return this.smooth(this.reconstruct(cameFrom, goal), end.x, end.z);
       }
 
       const gx = node.index % this.width;

@@ -6,15 +6,17 @@ import { Color } from 'three';
  */
 export const PALETTE = {
   grass: {
-    base: '#7cb85f',
-    shadow: '#4f8c4a',
-    highlight: '#a8d97a',
-    dry: '#b6c46a',
+    base: '#7aad60',
+    shadow: '#55804a',
+    highlight: '#a6cb7c',
+    dry: '#b4b86c',
+    /** Cooler, bluer green for shaded hollows. */
+    moss: '#5f9866',
   },
   sand: {
-    base: '#e8d3a8',
-    wet: '#c9ae7f',
-    shadow: '#c2a878',
+    base: '#e9d6ac',
+    wet: '#c8ad82',
+    shadow: '#c9b083',
   },
   dirt: {
     base: '#b9835a',
@@ -82,9 +84,9 @@ export const PALETTE = {
     sunDay: '#fff4dc',
     sunSunset: '#ff9d63',
     moon: '#9fb6e8',
-    ambientDay: '#bcd8e8',
-    ambientNight: '#3a4a75',
-    groundBounce: '#96977f',
+    ambientDay: '#c4dbe6',
+    ambientNight: '#4a5c8c',
+    groundBounce: '#9a9a7c',
   },
 } as const;
 
@@ -102,8 +104,8 @@ export const COLORS = {
 
 /** Season tint applied over foliage and grass. */
 export const SEASON_TINT: Record<string, { grass: string; canopy: string; saturation: number }> = {
-  Spring: { grass: '#84bd68', canopy: '#7bb268', saturation: 0.98 },
-  Summer: { grass: '#6faa58', canopy: '#579355', saturation: 0.96 },
+  Spring: { grass: '#83b76a', canopy: '#7bb268', saturation: 0.97 },
+  Summer: { grass: '#74a95c', canopy: '#5a9457', saturation: 0.96 },
   Autumn: { grass: '#a8b060', canopy: '#d08b3f', saturation: 0.95 },
   Winter: { grass: '#9db08c', canopy: '#7f9a86', saturation: 0.78 },
 };
