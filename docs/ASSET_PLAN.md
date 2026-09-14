@@ -247,7 +247,7 @@ of the current code must survive the swap, or the world will visibly regress:
 | Property to preserve | Where it lives now | How it survives |
 | --- | --- | --- |
 | **Season reactivity** — `SEASON_TINT` desaturates and recolours foliage per season (Winter → 0.78 saturation) | `rendering/palette.ts`, `materials.ts` shared uniforms | Imported meshes must use `createStylizedMaterial`, **not** the GLTF's own materials. Strip incoming materials at load and re-bind to the shared uniform set. |
-| **Wind displacement** — two-frequency sway driven by `uTime`/`uWind`, with per-vertex stiffness | `materials.ts` `applyWind` | Needs a stiffness attribute. Kenney/Quaternius meshes have no such channel, so generate it at import time from normalised local Y (0 at base, 1 at tip). |
+| **Wind displacement** — two-frequency sway driven by `uTime`/`uWind` | `materials.ts` `applyWind` | **Correction to the first draft of this plan:** no vertex attribute is needed. `createStylizedMaterial` derives stiffness *in the shader* from `uv.y` (grass) or `transformed.y` (foliage/canopy), so an imported mesh works as-is **provided its origin sits at the base** — which is exactly what `normalizeGeometry`'s `groundOrigin` guarantees. |
 | **Wetness response** | `materials.ts` `uWetness` | Comes free once materials are re-bound. |
 | **Instancing** — foliage is drawn instanced | `world/Foliage.ts` | Keep the instancing path; swap only the source geometry. |
 | **Palette cohesion** | `rendering/palette.ts` | Re-tint imported albedo toward the palette rather than shipping pack colours, so the kits still read as one set. |
@@ -286,11 +286,51 @@ rather than the reverse).
      even where no licence compels it. It will simply record
      "attribution: not required" for everything except the font.
 
-## 9. Current blockers
+## 9. Status
 
-| Blocker | Owner | Needed for |
+| Blocker | State |
+| --- | --- |
+| PR #20 merged to `main` | ✅ **Cleared** 2026-09-14 (`cc5be5d`). This branch is rebased onto it. |
+| Egress allowlist (§2) | ❌ **Still blocking.** Re-tested `kenney.nl` and `quaternius.com` on 2026-09-14 — both `EGRESS_BLOCKED`. **No asset has been downloaded.** |
+
+### Done while blocked
+
+The loading layer (§7 step 3) needs no asset files to build or to test, so it is
+finished and verified:
+
+- `src/assets/manifest.ts` — kits and models as a data table, matching the
+  `sounds.ts` pattern. `MODELS` is intentionally **empty**: node names get
+  filled in from the real GLBs via `npm run assets:inspect`, not invented ahead
+  of seeing the files.
+- `src/assets/gltfImport.ts` — bakes node world matrices, strips attributes the
+  renderer never reads, moves the origin to the base.
+- `src/assets/AssetManager.ts` — loads kits in parallel, keeps only the geometry
+  the manifest claims, disposes the rest. **A missing kit is not an error:** it
+  leaves the procedural path untouched, which is what makes replacing one
+  category at a time possible, and means a bad asset deploy degrades to the old
+  look rather than a black screen.
+- `tools/` + `npm run assets:{inspect,verify,credits}`.
+- `licenses/` and `ASSET_CREDITS.md` (generated from the manifest, so the
+  credits cannot drift from what actually ships).
+
+**Verified, not assumed:** `npm run assets:verify` builds a glTF-binary fixture
+by hand, parses it through three's real `GLTFLoader`, and asserts parent
+transform baking, ground origin, XZ centring and attribute stripping. All ten
+checks pass.
+
+**Not yet wired into `Game.ts`.** `AssetManager` is deliberately not imported by
+the game loop: with `MODELS` empty it would load nothing while pulling the
+GLTFLoader and meshopt decoder into the bundle for no benefit. Wiring it is a
+few lines in `beginGame` once the first kit lands.
+
+### Bundle baseline (pre-asset, `npm run build`)
+
+| Chunk | Raw | Gzip |
 | --- | --- | --- |
-| Egress allowlist not yet in effect (§2) | You / environment config | Any download at all |
-| PR #20 not yet merged | You | Any integration work (decision 2) |
+| `three` | 522.37 kB | 133.21 kB |
+| app | 379.34 kB | 117.14 kB |
+| CSS | 25.80 kB | 6.36 kB |
+| **Total** | **927.51 kB** | **256.71 kB** |
 
-Nothing further can proceed in this session until at least the first clears.
+This is what the §7 step 5 before/after comparison measures against; the ≤ 8 MB
+first-load budget in §5 is for assets on top of it.

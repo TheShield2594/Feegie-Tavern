@@ -8,13 +8,18 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "assets:inspect": "tsx tools/inspectGlb.ts",
+    "assets:verify": "tsx tools/verifyAssetImport.ts",
+    "assets:credits": "tsx tools/genCredits.ts"
   },
   "dependencies": {
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@types/node": "^26.5.1",
     "@types/three": "^0.180.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }
