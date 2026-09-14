@@ -292,7 +292,7 @@ rather than the reverse).
 | Blocker | State |
 | --- | --- |
 | PR #20 merged to `main` | ✅ **Cleared** 2026-09-14 (`cc5be5d`). This branch is rebased onto it. |
-| Egress allowlist (§2) | ❌ **Still blocking.** Full re-test of every §2 host on 2026-09-14 (table below) — all asset hosts denied. **No asset has been downloaded.** |
+| Egress allowlist (§2) | ❌ **Still blocking.** Full re-test of every §2 host on 2026-09-14, repeated independently at the start of the integration session the same day (tables below) — all asset hosts denied both times. **No asset has been downloaded.** |
 
 ### Egress re-test, 2026-09-14
 
@@ -331,6 +331,34 @@ Two results are worth separating out:
   makes the creator's own `License.txt` authoritative. Switching to mirrors
   would reverse a locked decision and weaken the licence chain, so it is left
   for the owner to decide rather than taken unilaterally.
+
+### Re-test repeated at the start of the integration session, 2026-09-14
+
+Before beginning the download/verify/optimise work, the allowlist was re-tested
+independently rather than trusted from the record above. **Result: unchanged —
+the allowlist is still not in effect and no asset has been downloaded.**
+
+All ten asset hosts still answer 403 at CONNECT, with the same
+`connect_rejected — gateway answered 403 to CONNECT (policy denial)`
+classification in the proxy's own `recentRelayFailures` log. Two hosts were
+added to the sweep this time:
+
+| Host | Result |
+| --- | --- |
+| `itch.io` (bare domain, for the `*.itch.io` rule) | ❌ 403 |
+| `raw.githubusercontent.com` | ✅ reachable |
+
+Neither changes the conclusion: the bare `itch.io` denial confirms the
+`*.itch.io` entry is not applied at any level, and `raw.githubusercontent.com`
+is a mirror path that §2 and §8 decision 1 rule out for the same licence-chain
+reason as `github.com`.
+
+Consequently §7 steps 1–2 and 4–6 remain unstartable: each one needs the asset
+bytes, and step 1 forbids committing anything whose `License.txt` has not been
+read. The toolchain was re-verified green on this branch regardless — typecheck
+clean, all ten `assets:verify` checks passing, `npm run build` reproducing the
+bundle baseline below exactly, and `assets:credits` regenerating with no diff —
+so the loading layer is confirmed ready for the first kit that lands.
 
 ### Verified again on the rebased branch
 
