@@ -209,10 +209,11 @@ export class Game {
    */
   private underwater = 0;
   /**
-   * Creatures collected on the current dive. They are revealed on surfacing —
-   * which is what makes going up a decision rather than a formality.
+   * Catch cards held back for the surface. The creatures themselves are already
+   * in the bag; only the reveal waits, which is what makes going up a moment
+   * rather than a formality without putting the catch itself at risk.
    */
-  private pendingDiveCatches: string[] = [];
+  private pendingDiveCards: (() => void)[] = [];
 
   /**
    * `assets` is optional and may be half-loaded: every system falls back to its
@@ -611,7 +612,7 @@ export class Game {
         // A projection of the flower beds in `decor`, which is what actually
         // holds them. Written because this is the shape the prototype's saves
         // carry their gardens in, and the migration reads it back.
-        gardens: this.landscaping.pieces
+        gardens: this.landscaping.placed
           .filter((p) => p.def.kind === 'flower')
           .map((p) => ({ x: p.x, z: p.z, color: p.tint ?? '#f4b5c7' })),
         decor: this.landscaping.serialize(),
@@ -671,7 +672,6 @@ export class Game {
     if (!paused && !this.dialogue.isOpen) this.handleGameplayInput(dt);
 
     this.updatePlayer(dt, paused);
-    if (this.mode === 'exterior') this.updateDiving(paused);
     if (this.mode === 'exterior') this.updateRegionBanner(dt);
     this.updateWorld(dt, !paused);
     this.updateInteractions(dt, paused);
@@ -738,6 +738,12 @@ export class Game {
     const running = this.input.isDown('run') && this.player.state === 'free';
     this.player.update(paused ? 0 : dt, moveX, moveZ, running, constraints);
 
+    // Between the two on purpose: the dive's preset and its ceiling are decided
+    // by the step that just ran, and have to be in place before the camera
+    // reads them, or the frame the player goes under is framed as though they
+    // had not.
+    if (this.mode === 'exterior') this.updateDiving(paused);
+
     // Camera
     const orbit = -this.input.look.x + (this.input.isDown('cameraLeft') ? -1 : 0) + (this.input.isDown('cameraRight') ? 1 : 0);
     if (this.input.justPressed('zoomIn')) this.cameraRig.nudgeZoom(-0.16);
@@ -763,7 +769,7 @@ export class Game {
       // Just under the surface: a boom that swings over the shallows would
       // otherwise lift the view out of the water mid-dive.
       this.cameraRig.heightCeiling = diving ? SEA_LEVEL - 0.5 : null;
-      if (diving) this.pendingDiveCatches = [];
+      if (diving) this.pendingDiveCards = [];
       else this.resolveDiveCatches();
     }
 
@@ -782,12 +788,9 @@ export class Game {
 
   /** Reveals what the dive brought up, one card after another. */
   private resolveDiveCatches(): void {
-    const caught = this.pendingDiveCatches;
-    this.pendingDiveCatches = [];
-    if (caught.length === 0) return;
-    caught.forEach((defId, index) => {
-      window.setTimeout(() => this.onCatch(defId, undefined, 'Brought up'), index * 720);
-    });
+    const cards = this.pendingDiveCards;
+    this.pendingDiveCards = [];
+    cards.forEach((show, index) => window.setTimeout(show, index * 720));
   }
 
   /** Tracks the dive across frames so the camera only switches on the change. */
@@ -1067,8 +1070,8 @@ export class Game {
         else this.exitDecorating();
       } else if (this.mode === 'building') {
         if (this.landscaping.editing) {
-          const refunded = this.landscaping.cancelEdit();
-          if (refunded) this.refundDecor(refunded);
+          // Nothing to hand back: a piece in hand was never paid for.
+          this.landscaping.cancelEdit();
           this.refreshBuildBar();
         } else {
           this.exitBuildMode();
@@ -1294,15 +1297,22 @@ export class Game {
    * going up while the air lasts an actual choice.
    */
   private collectReef(found: ReefCollectible): void {
+    // Into the bag first, and only then off the shelf. The other order loses
+    // the creature outright to an autosave taken mid-dive — the reef would
+    // remember it gone and the bag would never have had it.
+    if (!this.onCatch(found.speciesId, undefined, 'Brought up', true)) {
+      this.uiRoot.toast('No room in your bag for that.', 'warn');
+      this.bus.emit('audio:sfx', { id: 'ui.error' });
+      return;
+    }
     this.reef.collect(found, this.time.day);
-    this.pendingDiveCatches.push(found.speciesId);
     this.particles.burst('sparkle', new Vector3(found.x, found.y + found.hover, found.z), 0.7);
     this.bus.emit('audio:sfx', { id: 'item.pickup' });
     this.player.emoteBubble('sparkle', 1.0);
     this.uiRoot.toast(
-      this.pendingDiveCatches.length === 1
+      this.pendingDiveCards.length === 1
         ? 'Tucked away. Surface to see what it is.'
-        : `${this.pendingDiveCatches.length} to bring up.`,
+        : `${this.pendingDiveCards.length} to bring up.`,
       'good',
     );
     this.save.markDirty();
@@ -1369,13 +1379,23 @@ export class Game {
     this.uiRoot.toast('Nothing to swing at here.', 'neutral');
   }
 
-  /** Shared handler for anything that produces a species. */
-  private onCatch(defId: string, sizeCm: number | undefined, headline: string): void {
+  /**
+   * Shared handler for anything that produces a species.
+   *
+   * Returns false when the bag had no room, so a caller that took the creature
+   * out of the world can put it back.
+   *
+   * @param deferReveal Holds the catch card instead of showing it, for the
+   * diver: the item itself lands in the bag now — a deferred *item* would be
+   * lost to an autosave, or to a bag that filled up between the seabed and the
+   * surface — and only the reveal waits for the player to come up.
+   */
+  private onCatch(defId: string, sizeCm: number | undefined, headline: string, deferReveal = false): boolean {
     const species = SPECIES_BY_ID.get(defId);
-    if (!species) return;
+    if (!species) return false;
     const measured = sizeCm ?? rollSize(species);
     const item = this.inventory.addById(defId, { sizeCm: measured, day: this.time.day });
-    if (!item) return;
+    if (!item) return false;
 
     this.stats.totalCaught += 1;
     this.quests.record('catch', 1);
@@ -1409,9 +1429,11 @@ export class Game {
       isNewSpecies: isNew,
       isRecord,
     });
-    if (reeled) window.setTimeout(show, 620);
+    if (deferReveal) this.pendingDiveCards.push(show);
+    else if (reeled) window.setTimeout(show, 620);
     else show();
     this.save.markDirty();
+    return true;
   }
 
   private addCoins(amount: number): void {
@@ -1652,10 +1674,13 @@ export class Game {
   private exitBuildMode(): void {
     // Anything still in hand goes down where it is, or back on the shelf if
     // that spot will not take it.
-    if (this.landscaping.editing) {
-      if (!this.landscaping.confirmEdit()) {
-        const refunded = this.landscaping.cancelEdit();
-        if (refunded) this.refundDecor(refunded);
+    const held = this.landscaping.editing;
+    if (held) {
+      if (this.canAffordDecor(held.def) && this.landscaping.confirmEdit()) {
+        this.spendDecor(held.def, 1);
+        if (held.def.greenery) this.stats.flowersPlanted += 1;
+      } else {
+        this.landscaping.cancelEdit();
       }
     }
     this.mode = 'exterior';
@@ -1687,7 +1712,13 @@ export class Game {
       }
       if (this.input.justPressed('interact')) {
         const piece = this.landscaping.editing;
-        if (this.landscaping.confirmEdit()) {
+        // Coins cannot change while build mode is open, but the check belongs
+        // next to the charge rather than three presses earlier.
+        if (piece && !this.canAffordDecor(piece.def)) {
+          this.uiRoot.toast(`Not enough for a ${piece.def.name.toLowerCase()}.`, 'warn');
+          this.bus.emit('audio:sfx', { id: 'ui.error' });
+        } else if (this.landscaping.confirmEdit()) {
+          if (piece) this.spendDecor(piece.def, 1);
           // A lifetime tally for the journal. The island's rating counts what
           // is planted right now, which is a different question.
           if (piece?.def.greenery) this.stats.flowersPlanted += 1;
@@ -1747,6 +1778,13 @@ export class Game {
     this.refreshBuildBar();
   }
 
+  /**
+   * Takes a piece of the selected kind into the player's hands.
+   *
+   * Nothing is charged for it yet: a piece in hand is not a piece placed, and
+   * charging here meant an autosave taken mid-carry had already billed for
+   * something that was never put down.
+   */
   private beginPlacingDecor(): void {
     const def = this.buildPiece;
     if (!this.canAffordDecor(def)) {
@@ -1755,9 +1793,7 @@ export class Game {
       return;
     }
     const target = this.player.forwardPoint(2.1);
-    const piece = this.landscaping.beginPlacing(def.id, target.x, target.z, this.buildTints.get(def.id) ?? def.tints?.[0]);
-    if (!piece) return;
-    this.spendDecor(def, 1);
+    this.landscaping.beginPlacing(def.id, target.x, target.z, this.buildTints.get(def.id) ?? def.tints?.[0]);
     this.refreshBuildBar();
   }
 

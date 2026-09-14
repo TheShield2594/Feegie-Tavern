@@ -26,6 +26,15 @@ export interface PlacedDecor extends PlacedDecorData {
 export const OUTDOOR_GRID = 0.5;
 
 /**
+ * Points around a piece's rim that have to stand on good ground too.
+ *
+ * Four, at the compass points. This runs every frame while a piece is being
+ * carried, and the footprints are round: eight would double the heightfield
+ * sampling to catch cases four already refuses a step earlier.
+ */
+const FOOTPRINT_SAMPLES = 4;
+
+/**
  * Everything the player has put down outdoors.
  *
  * The indoor equivalent, `HomeFurnishing`, places into a known rectangle with a
@@ -225,33 +234,48 @@ export class Landscaping {
   }
 
   /**
-   * Puts the carried piece back on the shelf. Returns its definition id so the
-   * caller can hand back what it cost.
+   * Puts the carried piece back on the shelf.
+   *
+   * Nothing to refund: a piece is charged for when it is set down, not when it
+   * is picked up, so changing your mind mid-carry costs nothing.
    */
-  cancelEdit(): string | null {
+  cancelEdit(): void {
     const piece = this.editing;
-    if (!piece) return null;
-    const defId = piece.defId;
+    if (!piece) return;
     this.remove(piece.uid);
     this.bus.emit('audio:sfx', { id: 'ui.back' });
-    return defId;
   }
 
-  /**
-   * Whether a piece may stand at a point.
-   *
-   * Four rules, in the order a player would discover them: on dry, level,
-   * walkable ground; clear of the town; clear of the player's own other
-   * pieces; and, for anything that is not a path, off the built surfaces the
-   * island depends on being clear.
-   */
-  isValid(piece: PlacedDecor, x: number, z: number): boolean {
+  /** Whether one point of ground would take this piece: dry, level, walkable, free. */
+  private groundTakes(piece: PlacedDecor, x: number, z: number): boolean {
     const sample = sampleSurface(x, z);
     if (sample.height < SEA_LEVEL + 0.25) return false;
     if (sample.slope > 0.45) return false;
     if (!isWalkable(x, z)) return false;
     // Paths are laid *on* routes; everything else would block one.
     if (piece.def.kind !== 'path' && (sample.surface === 'plaza' || sample.surface === 'wood')) return false;
+    return true;
+  }
+
+  /**
+   * Whether a piece may stand at a point.
+   *
+   * Four rules, in the order a player would discover them: on dry, level,
+   * walkable ground under the whole of its footprint; clear of the town; clear
+   * of the player's own other pieces; and, for anything that is not a path,
+   * off the built surfaces the island depends on being clear.
+   */
+  isValid(piece: PlacedDecor, x: number, z: number): boolean {
+    // The centre, then the rim. A bench is over a metre across, and testing
+    // only its middle lets half of it hang over the water or across the plaza
+    // — the model's height comes from the centre, so the overhanging half ends
+    // up floating or buried.
+    if (!this.groundTakes(piece, x, z)) return false;
+    const r = piece.def.radius;
+    for (let i = 0; i < FOOTPRINT_SAMPLES; i++) {
+      const a = (i / FOOTPRINT_SAMPLES) * Math.PI * 2;
+      if (!this.groundTakes(piece, x + Math.cos(a) * r, z + Math.sin(a) * r)) return false;
+    }
 
     for (const obstacle of this.obstacles) {
       const reach = obstacle.radius + piece.def.radius * 0.8;
@@ -293,7 +317,12 @@ export class Landscaping {
 
   /** How much greenery the player has put in, for the island's rating. */
   get greeneryCount(): number {
-    return this.pieces.filter((p) => p.def.greenery).length;
+    return this.pieces.filter((p) => p.def.greenery && p !== this.editing).length;
+  }
+
+  /** Everything actually set down — the piece in hand is not one of them. */
+  get placed(): PlacedDecor[] {
+    return this.pieces.filter((p) => p !== this.editing);
   }
 
   /** Garden lamps come on with the street lamps. */
@@ -308,8 +337,14 @@ export class Landscaping {
 
   // --- Persistence ---------------------------------------------------------
 
+  /**
+   * What is on the island. The piece in the player's hands is deliberately not
+   * in it: it has not been paid for, it is floating, and the spot under it has
+   * not been checked — restoring one on load would put an unvalidated piece
+   * into the world and paint the ground under it.
+   */
   serialize(): PlacedDecorData[] {
-    return this.pieces.map((p) => ({
+    return this.placed.map((p) => ({
       uid: p.uid,
       defId: p.defId,
       x: p.x,

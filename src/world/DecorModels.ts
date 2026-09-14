@@ -7,7 +7,7 @@ import {
   PointLight,
   SphereGeometry,
 } from 'three';
-import { kitGeometry, kitMaterial } from '@/assets/registry';
+import { kitGeometry } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { flagstoneTexture } from '@/rendering/textures';
@@ -29,6 +29,14 @@ export interface BuiltDecor {
  * Built from the same kit helpers the town itself is built from — the bench is
  * the square's bench, the lamp is the square's lamp — so a garden the player
  * lays out belongs to the same island rather than looking like a mod of it.
+ *
+ * With one rule the rest of the world does not need: every piece owns its
+ * geometry and its materials outright. Decorations are the only things in the
+ * game that are built and destroyed one at a time while it runs, and taking one
+ * up calls `disposeObject` on it — which would otherwise free the shared kit
+ * geometry and the cached kit material that every bush and fence on the island
+ * is also drawn from. So kit geometry is cloned and kit materials are built
+ * rather than fetched from the registry's cache.
  */
 export function makeDecor(defId: string, tint?: string): BuiltDecor | null {
   const def = DECOR_BY_ID.get(defId);
@@ -110,7 +118,7 @@ function buildShrub(group: Group, tint: string): void {
   });
   const kit = kitGeometry('bush.small');
   if (kit) {
-    const bush = new Mesh(kit, material);
+    const bush = new Mesh(kit.clone(), material);
     bush.scale.setScalar(1.15);
     group.add(bush);
     return;
@@ -125,8 +133,15 @@ function buildFencePanel(group: Group): void {
   const kit = kitGeometry('yard.fence');
   if (kit) {
     // The town kit's fence runs along its own local Z, which is the axis the
-    // placement system rotates, so it needs no re-aiming here.
-    group.add(new Mesh(kit, kitMaterial({ roughness: 0.92, tint: '#f0e4d0' })));
+    // placement system rotates, so it needs no re-aiming here. The material is
+    // built rather than taken from `kitMaterial`, whose cache hands the same
+    // instance to every fence on the island.
+    const material = createStylizedMaterial({
+      vertexColors: true,
+      color: '#f0e4d0',
+      roughness: 0.92,
+    });
+    group.add(new Mesh(kit.clone(), material));
     return;
   }
   const wood = createStylizedMaterial({ color: PALETTE.wood.plankDark, roughness: 0.94 });

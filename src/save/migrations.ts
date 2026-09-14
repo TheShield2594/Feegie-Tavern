@@ -396,13 +396,30 @@ export function detectVersion(data: AnySaveData): number {
  * truncated record can reach here claiming to be current. Failing loudly keeps
  * that out of `applySave`, where the first `data.clock.day` would throw from
  * inside the frame loop instead of from a read the caller already guards.
+ *
+ * The version itself is one of the checks: a record that merely looks current
+ * enough to guess at is not current, and every blob that really is — written by
+ * `snapshot`, by `createNewSave`, or by the last migration in the chain —
+ * carries the number. The arrays are checked too, because `applySave` iterates
+ * them the moment it is handed one and an absent field would throw from inside
+ * a `for ... of` rather than from here.
  */
 function assertCurrent(data: AnySaveData): asserts data is SaveDataV7 {
   const d = data as Record<string, unknown>;
+  if (d.version !== SAVE_VERSION) {
+    throw new Error(`Save does not declare version ${SAVE_VERSION} (found ${String(d.version)})`);
+  }
   const required = ['clock', 'player', 'museum', 'home', 'farm', 'world', 'quests', 'relationships', 'settings'];
   const missing = required.filter((key) => typeof d[key] !== 'object' || d[key] === null);
   if (missing.length > 0) {
     throw new Error(`Save is missing required section(s): ${missing.join(', ')}`);
+  }
+
+  const world = d.world as Record<string, unknown>;
+  const lists = ['gardens', 'decor', 'reef', 'gatherables'];
+  const malformed = lists.filter((key) => !Array.isArray(world[key]));
+  if (malformed.length > 0) {
+    throw new Error(`Save has malformed world list(s): ${malformed.join(', ')}`);
   }
 }
 

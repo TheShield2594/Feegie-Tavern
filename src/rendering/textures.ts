@@ -29,6 +29,9 @@ function make(key: string, size: number, draw: (ctx: CanvasRenderingContext2D, s
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.anisotropy = 4;
+  // Cached and handed to every caller that asks for this key, so anything
+  // tearing down one object it happens to be on must leave it alone.
+  texture.userData.shared = true;
   cache.set(key, texture);
   return texture;
 }

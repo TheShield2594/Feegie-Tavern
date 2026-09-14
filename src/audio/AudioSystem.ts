@@ -129,10 +129,8 @@ export class AudioSystem {
   setUnderwater(amount: number): void {
     this.submergedAmount = clamp01(amount);
     if (!this.submerged || !this.ctx) return;
-    // Exponential in the cutoff, because pitch is: a linear ramp spends most
-    // of its travel in frequencies nobody can hear the difference between.
     const cutoff = DRY_CUTOFF_HZ * Math.pow(SUBMERGED_CUTOFF_HZ / DRY_CUTOFF_HZ, this.submergedAmount);
-    this.rampTo(this.submerged.frequency, cutoff, 0.35);
+    this.rampFrequencyTo(this.submerged.frequency, cutoff, 0.35);
   }
 
   setMuted(muted: boolean): void {
@@ -474,6 +472,30 @@ export class AudioSystem {
         this.ambienceVoices.delete(id);
       }
     }
+  }
+
+  /**
+   * Ramps a filter cutoff, exponentially.
+   *
+   * Cutoff is a pitch, and a linear ramp from 20 kHz to 500 Hz spends most of
+   * its travel among frequencies nobody can tell apart — the muffling would
+   * arrive all at once at the end of the ramp instead of following the head
+   * going under. `exponentialRampToValueAtTime` refuses a zero or negative
+   * target, so the value is floored; both ends of this ramp are well above it
+   * anyway, and the fallback keeps a browser without the method working.
+   */
+  private rampFrequencyTo(param: AudioParam, value: number, seconds: number): void {
+    if (!this.ctx) return;
+    const target = Math.max(20, value);
+    if (typeof param.exponentialRampToValueAtTime !== 'function') {
+      this.rampTo(param, target, seconds);
+      return;
+    }
+    const now = this.ctx.currentTime;
+    param.cancelScheduledValues(now);
+    // The curve is undefined from zero, so it has to start from a real value.
+    param.setValueAtTime(Math.max(20, param.value), now);
+    param.exponentialRampToValueAtTime(target, now + seconds);
   }
 
   private rampTo(param: AudioParam, value: number, seconds: number): void {
