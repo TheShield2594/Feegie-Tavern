@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Cozy Cove — Round 5</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="shell">
+  <div id="titleScreen" class="titleScreen">
+    <div class="titleCard">
+      <div class="logoMark">🌿</div><div class="eyebrow">ROUND 5 · A COZY ISLAND LIFE SIM</div><h1>Cozy Cove</h1>
+      <p>Build the island into a five-star home, deepen friendships, cook, craft, decorate, and uncover a small story about Cozy Cove’s forgotten lighthouse.</p>
+      <div class="slotRow"><button class="slotBtn active" data-slot="1">Save 1</button><button class="slotBtn" data-slot="2">Save 2</button><button class="slotBtn" data-slot="3">Save 3</button></div>
+      <div class="titleActions"><button id="continueGame" class="primaryBig">Continue</button><button id="newGame" class="secondaryBig">New Island</button></div>
+      <small id="slotSummary">Local browser save · Slot 1</small>
+    </div>
+  </div>
+  <canvas id="game"></canvas>
+  <div id="topbar"><div class="topLeft"><div class="pill" id="clock">Day 1 · 8:00 AM</div><div class="pill subtle" id="weather">☀️ Clear</div><div class="pill subtle" id="season">🌱 Spring</div></div><div class="topRight"><button class="soundPill" id="soundToggle" title="Toggle ambience">🔊</button><div class="pill" id="coins">✦ 250</div></div></div>
+  <div id="quest" class="panel"><div class="eyebrow">DAILY GOAL</div><b id="questTitle">A Place for Everything</b><span id="questText">Donate one creature to the museum.</span><div class="progress"><i id="questProgress"></i></div></div>
+  <div id="help" class="panel">Move: WASD / Arrows · E: Interact · F: Fish · B: Net · X: Dig · G: Plant · Z: Gather · V: Dive · C: Craft · K: Cook · L: Town · I: Bag · M: Map · Q: Journal · Gamepad supported</div>
+  <div id="prompt" class="pill hidden"></div>
+  <div id="dialogue" class="modal hidden"><div class="portrait" id="portrait">🐿️</div><div class="dialogueText"><div class="dialogueHead"><b id="speaker">Pip</b><span id="friendship"></span></div><p id="line"></p><small>Press E</small></div></div>
+  <div id="inventory" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">POCKETS</div><h2>Backpack</h2></div><button data-close="inventory">×</button></div><div class="summaryRow"><span id="bagCount">0 / 24 items</span><span>Duplicates are great for selling.</span></div><div id="inventoryGrid" class="grid"></div></div>
+  <div id="museum" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">ARCHIVE HALL</div><h2>Cozy Cove Museum</h2></div><button data-close="museum">×</button></div><div class="tabs"><button class="tab active" data-museum-tab="All">All</button><button class="tab" data-museum-tab="Fish">Fish</button><button class="tab" data-museum-tab="Bug">Bugs</button><button class="tab" data-museum-tab="Fossil">Fossils</button><button class="tab" data-museum-tab="Sea">Sea</button></div><p class="muted" id="museumSummary"></p><div id="museumGrid" class="grid"></div></div>
+  <div id="shop" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">BRUNO'S BOARDWALK</div><h2>General Store</h2></div><button data-close="shop">×</button></div><p class="muted">Sell discoveries, then spend your shells on furniture and home upgrades.</p><div class="shopColumns"><section><h3>Today’s Furniture</h3><div id="shopGrid" class="grid"></div></section><section><h3>Sell From Backpack</h3><div id="sellGrid" class="grid compact"></div></section></div></div>
+  <div id="journal" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">ISLAND LIFE</div><h2>Journal</h2></div><button data-close="journal">×</button></div><div class="journalStats" id="journalStats"></div><h3>Neighbors</h3><div id="friendsGrid" class="grid"></div><h3>Requests</h3><div id="requestsGrid" class="grid"></div></div>
+  <div id="craft" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">WORKBENCH</div><h2>Craft & Upgrade</h2></div><button data-close="craft">×</button></div><div id="materialStats" class="resourceStrip"></div><p class="muted">Gather wood and fruit from trees, stone from rocks, and fiber from the grove. Better tools improve rewards.</p><div id="craftGrid" class="grid"></div></div>
+  <div id="wardrobe" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">CHARACTER</div><h2>Look & Clothing</h2></div><button data-close="wardrobe">×</button></div><div class="creatorPreview" id="creatorPreview"></div><div id="wardrobeGrid" class="creatorGrid"></div></div>
+  <div id="farm" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">GARDEN LOG</div><h2>Farm & Orchard</h2></div><button data-close="farm">×</button></div><div id="farmStats" class="journalStats"></div><p class="muted">Plant seeds on grass with G. Crops mature over in-game time and can be harvested with E.</p><div id="cropGrid" class="grid"></div></div>
+  <div id="home" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">YOUR COTTAGE</div><h2>Home Designer</h2></div><button data-close="home">×</button></div><div class="homeUpgrade"><div><b id="homeLevelLabel">Cottage Level 1</b><p class="muted" id="homeUpgradeText">Upgrade for more decorating space.</p></div><button id="upgradeHome">Upgrade</button></div><p class="muted">Choose owned furniture to place it in your cottage. Higher cottage levels unlock more display space.</p><h3>Exterior</h3><div id="exteriorGrid" class="styleChoices"></div><h3>Furniture</h3><div id="homeGrid" class="grid"></div></div>
+  <div id="mapPanel" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">COZY COVE</div><h2>Island Map</h2></div><button data-close="mapPanel">×</button></div><canvas id="miniMap" width="760" height="460"></canvas><div class="mapLegend"><span>🏠 Your cottage</span><span>🏛️ Museum</span><span>🛍️ Shop</span><span>🎣 South Shore</span><span>🦋 West Grove</span><span>⛰️ High Meadow</span><span>🍐 Secret Orchard</span></div></div>
+
+  <div id="town" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">ISLAND PROGRESS</div><h2>Town Hall</h2></div><button data-close="town">×</button></div><div id="townRating" class="ratingHero"></div><h3>Story</h3><div id="storyCard" class="storyCard"></div><h3>Public Works</h3><div id="worksGrid" class="grid"></div></div>
+  <div id="cook" class="sheet hidden"><div class="sheetHead"><div><div class="eyebrow">KITCHEN</div><h2>Cookbook</h2></div><button data-close="cook">×</button></div><p class="muted">Turn fruit, crops and sea finds into valuable dishes. Recipes unlock as Cozy Cove grows.</p><div id="cookGrid" class="grid"></div></div>
+  <div id="toast"></div>
+  <div id="mobileControls"><button data-action="interact">E</button><button data-action="fish">🎣</button><button data-action="bug">🦋</button><button data-action="dig">⛏️</button><button data-action="dive">🤿</button></div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
