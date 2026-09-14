@@ -8,10 +8,11 @@ import type { WeatherKind } from '@/time/WeatherSystem';
  * Bump this whenever the shape below changes and add a matching entry to
  * MIGRATIONS in ./migrations.ts. Never edit an old migration — write a new one.
  */
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
-export const SAVE_KEY_PREFIX = 'cozyCove.save.v5.slot';
-/** The round-5 prototype's key, read once so existing players keep their island. */
+export const SAVE_KEY_PREFIX = 'cozyCove.save.v6.slot';
+/** Older keys, read once each so existing players keep their island. */
+export const LEGACY_V5_KEY_PREFIX = 'cozyCove.save.v5.slot';
 export const LEGACY_V4_KEY_PREFIX = 'cozyCoveSaveV4_slot';
 export const LEGACY_V2_KEY = 'cozyCoveSaveV2';
 
@@ -69,8 +70,8 @@ export interface SettingsData {
   invertCameraX: boolean;
 }
 
-export interface SaveDataV5 {
-  version: 5;
+export interface SaveDataV6 {
+  version: 6;
   slot: number;
   savedAt: number;
   playtimeSeconds: number;
@@ -131,6 +132,8 @@ export interface SaveDataV5 {
     gardens: { x: number; z: number; color: string }[];
     gatherables: GatherableStateData[];
     townWorks: { bridge: boolean; stairs: boolean; lighthouse: boolean };
+    /** Whether the Secret Orchard's gate has been unlocked. */
+    orchardOpen: boolean;
   };
 
   quests: {
@@ -150,8 +153,8 @@ export interface SaveDataV5 {
   settings: SettingsData;
 }
 
-/** Any historical shape. Migrations narrow these into SaveDataV5. */
-export type AnySaveData = SaveDataV5 | Record<string, unknown>;
+/** Any historical shape. Migrations narrow these into SaveDataV6. */
+export type AnySaveData = SaveDataV6 | Record<string, unknown>;
 
 export const DEFAULT_SETTINGS: SettingsData = {
   masterVolume: 0.8,

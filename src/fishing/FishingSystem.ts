@@ -17,7 +17,8 @@ import type { SpeciesDef } from '@/items/types';
 import { clamp, clamp01, lerp } from '@/util/math';
 import type { ParticleSystem } from '@/rendering/Particles';
 import type { Player } from '@/player/Player';
-import { SEA_LEVEL, waterDepth } from '@/world/heightfield';
+import { SEA_LEVEL, anyWaterDepth, creekDepth, creekSurfaceHeight, waterDepth } from '@/world/heightfield';
+import { regionAt, type RegionId } from '@/world/regions';
 import type { FishSchools } from './FishSchools';
 import type { Season } from '@/time/TimeSystem';
 
@@ -69,6 +70,15 @@ export class FishingSystem {
   private castStart = new Vector3();
   private castTarget = new Vector3();
   private bobberPosition = new Vector3();
+  /**
+   * The water under the bobber. The creek stands metres above sea level, so
+   * every bob, dip and ripple is measured from here rather than from SEA_LEVEL.
+   */
+  private waterLevel = SEA_LEVEL;
+  /** Whether the lure is in the creek. Fresh and salt draw from separate pools. */
+  private freshwater = false;
+  /** Region the lure landed in, for species that live in exactly one place. */
+  private waterRegion: RegionId = 'sea';
   private stateTimer = 0;
   private nibbleCount = 0;
   private struggle = 0;
@@ -127,16 +137,23 @@ export class FishingSystem {
   cast(player: Player, rodLevel: number): boolean {
     if (this.state !== 'idle') return false;
 
-    // Find the furthest reachable water within the rod's range.
+    // Find the furthest reachable water within the rod's range. The creek
+    // counts: it is the only fresh water on the island and half the catalogue
+    // lives in it.
     const maxRange = 6 + rodLevel * 1.6;
     let target: Vector3 | null = null;
     for (let distance = maxRange; distance >= 2.5; distance -= 0.5) {
       const x = player.position.x + player.forwardX * distance;
       const z = player.position.z + player.forwardZ * distance;
-      if (waterDepth(x, z) > 0.55) {
-        target = new Vector3(x, SEA_LEVEL, z);
-        break;
-      }
+      if (anyWaterDepth(x, z) <= 0.55) continue;
+      this.freshwater = creekDepth(x, z) > waterDepth(x, z);
+      this.waterLevel = this.freshwater ? creekSurfaceHeight(x, z) : SEA_LEVEL;
+      // Salt water is one region as far as fishing is concerned; a named
+      // region's circle can reach past the waterline, and a cast off the
+      // orchard's shore should still be a cast into the cove.
+      this.waterRegion = this.freshwater ? regionAt(x, z) : 'sea';
+      target = new Vector3(x, this.waterLevel, z);
+      break;
     }
     if (!target) return false;
 
@@ -245,7 +262,7 @@ export class FishingSystem {
           this.particles.burst('waterRing', this.bobberPosition, 1);
           this.ripple.visible = true;
           this.ripple.scale.setScalar(0.4);
-          this.ripple.position.copy(this.bobberPosition).setY(SEA_LEVEL + 0.03);
+          this.ripple.position.copy(this.bobberPosition).setY(this.waterLevel + 0.03);
           this.bus.emit('audio:sfx', { id: 'tool.splash' });
           player.setFishingPose('wait');
           this.bus.emit('fishing:state', { state: this.state });
@@ -254,11 +271,11 @@ export class FishingSystem {
       }
 
       case 'waiting': {
-        this.bobberPosition.y = SEA_LEVEL + Math.sin(this.stateTimer * 2.2) * 0.04;
+        this.bobberPosition.y = this.waterLevel + Math.sin(this.stateTimer * 2.2) * 0.04;
         // A better rod draws attention faster.
         const attractDelay = lerp(3.4, 1.4, (context.rodLevel - 1) / 2);
         if (this.stateTimer > attractDelay) {
-          const approach = this.schools.attractTo(this.bobberPosition, 11);
+          const approach = this.schools.attractTo(this.bobberPosition, 11, this.freshwater);
           this.state = 'investigating';
           this.stateTimer = 0;
           this.bus.emit('fishing:state', { state: this.state });
@@ -272,7 +289,7 @@ export class FishingSystem {
       }
 
       case 'investigating': {
-        this.bobberPosition.y = SEA_LEVEL + Math.sin(this.stateTimer * 2.6) * 0.05;
+        this.bobberPosition.y = this.waterLevel + Math.sin(this.stateTimer * 2.6) * 0.05;
         const fish = this.schools.luredPosition();
         if (fish) {
           const distance = Math.hypot(fish.x - this.bobberPosition.x, fish.z - this.bobberPosition.z);
@@ -295,7 +312,7 @@ export class FishingSystem {
       case 'nibbling': {
         // Small dips of the bobber: the tell that separates a bite from a tease.
         const dip = Math.max(0, Math.sin(this.stateTimer * 9)) * 0.16;
-        this.bobberPosition.y = SEA_LEVEL - dip;
+        this.bobberPosition.y = this.waterLevel - dip;
         if (dip > 0.14 && Math.random() < 0.25) {
           this.particles.burst('waterRing', this.bobberPosition, 0.35);
           this.bus.emit('audio:sfx', { id: 'tool.reel', volume: 0.4 });
@@ -315,7 +332,7 @@ export class FishingSystem {
       }
 
       case 'biting': {
-        this.bobberPosition.y = SEA_LEVEL - 0.24 - Math.sin(this.stateTimer * 22) * 0.06;
+        this.bobberPosition.y = this.waterLevel - 0.24 - Math.sin(this.stateTimer * 22) * 0.06;
         if (this.stateTimer > BITE_WINDOW) {
           this.miss(player, 'It slipped the hook.');
         }
@@ -349,9 +366,9 @@ export class FishingSystem {
         }
 
         // Draw the bobber in as the fish tires.
-        const toPlayer = new Vector3(player.position.x, SEA_LEVEL, player.position.z);
+        const toPlayer = new Vector3(player.position.x, this.waterLevel, player.position.z);
         this.bobberPosition.lerp(toPlayer, this.progress * dt * 1.6);
-        this.bobberPosition.y = SEA_LEVEL - 0.16 - Math.sin(this.stateTimer * 14) * 0.05 * this.struggle;
+        this.bobberPosition.y = this.waterLevel - 0.16 - Math.sin(this.stateTimer * 14) * 0.05 * this.struggle;
 
         if (Math.random() < dt * 6 * this.struggle) {
           this.particles.burst('waterRing', this.bobberPosition, 0.3);
@@ -403,7 +420,7 @@ export class FishingSystem {
     this.bobber.rotation.z = Math.sin(this.stateTimer * 9) * tilt;
 
     if (this.ripple.visible) {
-      this.ripple.position.set(this.bobberPosition.x, SEA_LEVEL + 0.03, this.bobberPosition.z);
+      this.ripple.position.set(this.bobberPosition.x, this.waterLevel + 0.03, this.bobberPosition.z);
       const grow = this.state === 'reeling' ? 3.5 : 1.2;
       this.ripple.scale.x += dt * grow;
       this.ripple.scale.y += dt * grow;
@@ -427,20 +444,31 @@ export class FishingSystem {
 
   /** Weighted pick from what is actually biting at this hour and season. */
   private pickSpecies(context: { hour: number; season: Season; rodLevel: number }): SpeciesDef {
-    const depth = waterDepth(this.bobberPosition.x, this.bobberPosition.z);
-    const habitat = depth > 4.5 ? 'deep' : depth > 1.6 ? 'shallow' : 'river';
+    const pool = this.freshwater ? FRESHWATER : SALTWATER;
 
-    const pool = [...FISH, ...SEA_CREATURES.filter((s) => s.habitat === 'deep' || s.habitat === 'reef')];
+    // Depth only sorts the sea. The creek is shallow everywhere, and grading it
+    // by depth would have put the whole shelf's worth of species into it.
+    const depth = waterDepth(this.bobberPosition.x, this.bobberPosition.z);
+    const habitat = depth > 4.5 ? 'deep' : 'shallow';
+
     const weights: number[] = [];
 
     for (const species of pool) {
+      // A species that lives in one region lives nowhere else — that is the
+      // whole point of walking out to it.
+      if (species.region && species.region !== this.waterRegion) {
+        weights.push(0);
+        continue;
+      }
+
       let weight = rarityWeight(species.rarity);
 
-      // Habitat: species out of their water are rare, not impossible.
-      if (species.habitat && species.habitat !== habitat) {
-        const compatible =
-          (habitat === 'deep' && (species.habitat === 'reef' || species.habitat === 'shallow')) ||
-          (habitat === 'shallow' && (species.habitat === 'river' || species.habitat === 'reef'));
+      // Habitat: species out of their water are rare, not impossible. Fresh and
+      // salt never mix, because the pools above already kept them apart.
+      if (!this.freshwater && species.habitat && species.habitat !== habitat) {
+        const compatible = habitat === 'deep'
+          ? species.habitat === 'reef' || species.habitat === 'shallow'
+          : species.habitat === 'reef';
         weight *= compatible ? 0.45 : 0.12;
       }
 
@@ -467,6 +495,9 @@ export class FishingSystem {
 
     let total = 0;
     for (const w of weights) total += w;
+    // Everything eligible was region-locked out — only reachable if a pool is
+    // ever reduced to locked species. Fall back to the first thing that is not.
+    if (total <= 0) return pool.find((s) => !s.region) ?? pool[0];
     let pick = Math.random() * total;
     for (let i = 0; i < pool.length; i++) {
       pick -= weights[i];
@@ -479,6 +510,20 @@ export class FishingSystem {
     this.lineGeometry.dispose();
   }
 }
+
+/**
+ * The two catalogues, split once at module load.
+ *
+ * Keeping them apart here rather than weighting a single pool is what makes
+ * "river species distinct from the sea" true rather than merely unlikely: a
+ * Bluegill cannot be pulled out of the cove at any odds, and a Velvet Ray
+ * cannot be pulled out of the creek.
+ */
+const FRESHWATER: SpeciesDef[] = FISH.filter((s) => s.habitat === 'river');
+const SALTWATER: SpeciesDef[] = [
+  ...FISH.filter((s) => s.habitat !== 'river'),
+  ...SEA_CREATURES.filter((s) => s.habitat === 'deep' || s.habitat === 'reef'),
+];
 
 function rarityWeight(rarity: SpeciesDef['rarity']): number {
   switch (rarity) {

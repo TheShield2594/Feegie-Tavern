@@ -87,6 +87,7 @@ const CATEGORY_TABS: { id: ItemCategory | 'all'; label: string }[] = [
   { id: 'fossil', label: 'Fossils' },
   { id: 'sea', label: 'Sea' },
   { id: 'crop', label: 'Crops' },
+  { id: 'forage', label: 'Forage' },
   { id: 'material', label: 'Materials' },
   { id: 'meal', label: 'Dishes' },
 ];

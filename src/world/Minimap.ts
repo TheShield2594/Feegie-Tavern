@@ -1,6 +1,7 @@
 import { PALETTE } from '@/rendering/palette';
 import { BUILDINGS } from './Buildings';
-import { CREEK, ISLAND_HALF, LANDMARKS, PATHS, SEA_LEVEL, sampleSurface } from './heightfield';
+import { BRIDGES, CREEK, FORD, ISLAND_HALF, LANDMARKS, PATHS, SEA_LEVEL, creekDepth, sampleSurface } from './heightfield';
+import { REGIONS, regionAnchor } from './regions';
 
 export interface MapPin {
   x: number;
@@ -40,7 +41,8 @@ export function drawIslandMap(
       const sample = sampleSurface(wx, wz);
 
       let color: string;
-      if (sample.height < SEA_LEVEL - 4) color = '#2f6f92';
+      if (sample.height > SEA_LEVEL && creekDepth(wx, wz) > 0.12) color = '#59a8c4';
+      else if (sample.height < SEA_LEVEL - 4) color = '#2f6f92';
       else if (sample.height < SEA_LEVEL - 0.6) color = '#59a8c4';
       else if (sample.height < SEA_LEVEL + 0.1) color = '#8fd0e0';
       else if (sample.surface === 'sand') color = PALETTE.sand.base;
@@ -59,18 +61,44 @@ export function drawIslandMap(
   }
 
   // --- Creek ---------------------------------------------------------------
-  ctx.strokeStyle = '#6bc0d8';
-  ctx.lineWidth = Math.max(3, (CREEK.width / extent) * width);
+  // Two passes: a wide band for the wet channel, then a bright thread down the
+  // middle, so the creek reads as water the width it actually is rather than
+  // as a pencil line someone drew across the island.
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  for (const [color, metres] of [['#4fa8c4', CREEK.width * 1.9], ['#8fd8e8', CREEK.width * 0.8]] as const) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, (metres / extent) * width);
+    ctx.beginPath();
+    CREEK.points.forEach((point, index) => {
+      const x = toCanvasX(point.x);
+      const y = toCanvasY(point.z);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // --- Crossings -----------------------------------------------------------
+  // Drawn over the creek: where the water can be crossed is the single most
+  // useful thing a map of this island can tell you.
+  ctx.strokeStyle = '#8a6238';
+  ctx.lineWidth = Math.max(2, (2.4 / extent) * width);
+  for (const bridge of BRIDGES) {
+    const sx = Math.sin(bridge.rotation) * bridge.length * 0.5;
+    const sz = Math.cos(bridge.rotation) * bridge.length * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(bridge.x - sx), toCanvasY(bridge.z - sz));
+    ctx.lineTo(toCanvasX(bridge.x + sx), toCanvasY(bridge.z + sz));
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(240, 236, 225, 0.9)';
+  ctx.setLineDash([Math.max(2, (1.4 / extent) * width), Math.max(2, (1.2 / extent) * width)]);
   ctx.beginPath();
-  CREEK.points.forEach((point, index) => {
-    const x = toCanvasX(point.x);
-    const y = toCanvasY(point.z);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
+  ctx.moveTo(toCanvasX(FORD.x - FORD.halfW), toCanvasY(FORD.z));
+  ctx.lineTo(toCanvasX(FORD.x + FORD.halfW), toCanvasY(FORD.z));
   ctx.stroke();
+  ctx.setLineDash([]);
 
   // --- Paths ---------------------------------------------------------------
   ctx.strokeStyle = 'rgba(220, 200, 160, 0.9)';
@@ -109,7 +137,18 @@ export function drawIslandMap(
     });
   }
 
-  for (const key of ['beach.pier', 'meadow.high', 'farm.terrace', 'grove.west', 'orchard.secret']) {
+  // Every region gets a pin, read from `REGIONS` rather than from a list kept
+  // here: a hand-maintained list is a list that goes stale, and a new region
+  // whose pin someone forgot is a region nobody finds.
+  for (const region of REGIONS) {
+    if (!region.named) continue;
+    const anchor = regionAnchor(region.id);
+    if (!anchor) continue;
+    pins.push({ x: toCanvasX(anchor.x), y: toCanvasY(anchor.z), label: region.label, color: '#5c6a6b' });
+  }
+
+  // Landmarks worth their own pin inside a region that already has one.
+  for (const key of ['beach.pier', 'meadow.spring']) {
     const landmark = LANDMARKS[key];
     if (!landmark) continue;
     pins.push({ x: toCanvasX(landmark.x), y: toCanvasY(landmark.z), label: landmark.label, color: '#5c6a6b' });

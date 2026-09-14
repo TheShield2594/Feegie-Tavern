@@ -79,6 +79,11 @@ export const FLAT_ZONES: FlatZone[] = [
   { x: 42, z: -46, radius: 11, falloff: 10, height: 13.5, surface: 'rock' },    // lighthouse point
   { x: -44, z: -38, radius: 15, falloff: 12, height: 9.5, surface: 'grass' },   // high meadow
   { x: -34, z: 20, radius: 12, falloff: 8, height: 2.2, surface: 'dirt' },      // farm terrace
+  // The grove clearing and the orchard hollow. Both are kept small and well
+  // short of the waterline: a wide pad this near the coast would lift the
+  // beach with it and push the whole shoreline out.
+  { x: -56, z: 4, radius: 6, falloff: 5, height: 4.5, surface: 'grass' },       // west grove clearing
+  { x: 46, z: -16, radius: 8, falloff: 7, height: 5.0, surface: 'grass' },      // secret orchard
   { x: HARBOUR.x, z: HARBOUR.z, radius: 5, falloff: 6, height: 1.1, surface: 'sand' }, // harbour apron
 ];
 
@@ -105,10 +110,22 @@ export const PATHS: PathSegment[] = [
   { ax: -6, az: -44, bx: -2, bz: -50, width: 4.0, surface: 'path' },
   { ax: 2, az: -54, bx: 22, bz: -52, width: 4.2, surface: 'path' },
   { ax: 22, az: -52, bx: 38, bz: -47, width: 4.0, surface: 'path' },
-  // Farm spur
-  { ax: -26, az: 10, bx: -33, bz: 17, width: 3.2, surface: 'dirt' },
+  // Farm spur, stopping on the near bank rather than in the stream.
+  { ax: -26, az: 10, bx: -27, bz: 18, width: 3.2, surface: 'dirt' },
+  // ...and its twin on the far bank, picked up from the bridge.
+  { ax: -35, az: 9, bx: -39, bz: 18, width: 3.0, surface: 'dirt' },
   // Pip's house spur
   { ax: 24, az: -22, bx: 29, bz: -30, width: 3.4, surface: 'path' },
+  // Cottage → foot of the meadow stairs. The stair run itself is deliberately
+  // unpathed: flattening it would undo the steps Props cuts into the ridge.
+  { ax: -16, az: -22, bx: -29, bz: -24, width: 3.4, surface: 'path' },
+  // Head of the stairs → the meadow proper.
+  { ax: -39, az: -34, bx: -42, bz: -40, width: 3.4, surface: 'path' },
+  // West grove spur, off the end of the west road.
+  { ax: -44, az: -8, bx: -52, bz: -1, width: 3.4, surface: 'path' },
+  { ax: -52, az: -1, bx: -56, bz: 4, width: 3.2, surface: 'path' },
+  // A short track off the east road that stops dead at the orchard gate.
+  { ax: 43, az: 3, bx: 45.5, bz: -6, width: 3.0, surface: 'path' },
 ];
 
 /** The creek, as a curve sampled by the height function. */
@@ -124,10 +141,66 @@ export const CREEK = {
   ],
   width: 4.6,
   depth: 1.9,
+  /**
+   * How deep the water stands over the channel floor. Less than `depth`, so
+   * the carve leaves dry bank either side of the stream, and more than the
+   * 0.55 m a cast needs, so the whole channel is fishable rather than just
+   * its centreline.
+   */
+  fill: 0.8,
 };
 
-/** Where the creek is bridged, so the path stays walkable. */
-export const BRIDGES = [{ x: -34, z: 7, rotation: Math.PI / 2 - 0.22, width: 8, length: 4.5 }];
+export interface Bridge {
+  x: number;
+  z: number;
+  /** Yaw. The span runs along the bridge's local +Z. */
+  rotation: number;
+  /** Breadth of the walkway. */
+  width: number;
+  /** Length of the span, which has to clear the whole wet channel. */
+  length: number;
+  /** Height of the decking, taken from the banks the span lands on. */
+  deck: number;
+}
+
+/**
+ * Where the creek is bridged, so the path stays walkable.
+ *
+ * The span is sized and aimed at the channel rather than eyeballed: a bridge
+ * shorter than the creek is wide, or turned along the water instead of across
+ * it, is scenery rather than a crossing.
+ */
+export const BRIDGES: Bridge[] = [makeBridge(-34, 7, 4.2, 12)];
+
+/** A crossing centred on the creek, square to the flow, with its deck levelled. */
+function makeBridge(x: number, z: number, width: number, length: number): Bridge {
+  // Aim the span across the flow: sample the centreline either side of the
+  // crossing and take the perpendicular.
+  const ahead = projectOntoCreek(x, z + 3);
+  const behind = projectOntoCreek(x, z - 3);
+  const flow = Math.atan2(ahead.x - behind.x, ahead.z - behind.z);
+  const rotation = flow + Math.PI / 2;
+
+  // Both abutments, then the higher one, so the deck never dips into a bank.
+  const sx = Math.sin(rotation);
+  const sz = Math.cos(rotation);
+  const reach = length / 2;
+  const deck = Math.max(
+    terrainHeight(x + sx * reach, z + sz * reach),
+    terrainHeight(x - sx * reach, z - sz * reach),
+  ) + 0.1;
+
+  return { x, z, rotation, width, length, deck };
+}
+
+/**
+ * The ford where the west road meets the creek.
+ *
+ * The road has always crossed here; before the creek held water it did so by
+ * walking through the ditch. Stones keep it a crossing now that there is a
+ * stream in the way.
+ */
+export const FORD = { x: -36.4, z: -6.4, halfW: 5.6, halfD: 1.9 };
 
 /** Deck height of the harbour pier above sea level, shared with `Props`. */
 export const PIER_DECK_HEIGHT = 1.7;
@@ -151,6 +224,8 @@ export interface Platform {
   halfD: number;
   height: number;
   surface: Surface;
+  /** Yaw of the platform's box, for anything that does not sit square to the world. */
+  rotation?: number;
 }
 
 export const PLATFORMS: Platform[] = [
@@ -162,12 +237,42 @@ export const PLATFORMS: Platform[] = [
     height: PIER_DECK_HEIGHT,
     surface: 'wood',
   },
+  // Creek crossings. Without these the bridge is a handrail you walk under and
+  // the ford is a place to get wet.
+  ...BRIDGES.map((bridge) => ({
+    x: bridge.x,
+    z: bridge.z,
+    halfW: bridge.width / 2,
+    halfD: bridge.length / 2,
+    height: bridge.deck + 0.16,
+    surface: 'wood' as Surface,
+    rotation: bridge.rotation,
+  })),
+  {
+    x: FORD.x,
+    z: FORD.z,
+    halfW: FORD.halfW,
+    halfD: FORD.halfD,
+    height: creekSurfaceHeight(FORD.x, FORD.z) + 0.06,
+    surface: 'rock',
+  },
 ];
 
 /** The platform under a point, if any. */
 export function platformAt(x: number, z: number): Platform | null {
   for (const p of PLATFORMS) {
-    if (Math.abs(x - p.x) <= p.halfW && Math.abs(z - p.z) <= p.halfD) return p;
+    let dx = x - p.x;
+    let dz = z - p.z;
+    if (p.rotation) {
+      // Into the platform's own frame; its local +Z is the yawed axis.
+      const sin = Math.sin(p.rotation);
+      const cos = Math.cos(p.rotation);
+      const lx = dx * cos - dz * sin;
+      const lz = dx * sin + dz * cos;
+      dx = lx;
+      dz = lz;
+    }
+    if (Math.abs(dx) <= p.halfW && Math.abs(dz) <= p.halfD) return p;
   }
   return null;
 }
@@ -190,6 +295,64 @@ export function distanceToCreek(x: number, z: number): number {
     best = Math.min(best, distanceToSegment(x, z, a.x, a.z, b.x, b.z));
   }
   return best;
+}
+
+export interface CreekProjection {
+  /** Closest point on the centreline. */
+  x: number;
+  z: number;
+  /** Distance from the queried point to it. */
+  distance: number;
+  /** 0 at the spring in the meadow, 1 where the creek meets the sea. */
+  along: number;
+}
+
+/** The point on the creek's centreline nearest a world position. */
+export function projectOntoCreek(x: number, z: number): CreekProjection {
+  const segments = CREEK.points.length - 1;
+  let best: CreekProjection = { x: CREEK.points[0].x, z: CREEK.points[0].z, distance: Infinity, along: 0 };
+  for (let i = 0; i < segments; i++) {
+    const a = CREEK.points[i];
+    const b = CREEK.points[i + 1];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lengthSq = dx * dx + dz * dz;
+    const t = lengthSq < 1e-6 ? 0 : clamp01(((x - a.x) * dx + (z - a.z) * dz) / lengthSq);
+    const cx = a.x + dx * t;
+    const cz = a.z + dz * t;
+    const distance = Math.hypot(x - cx, z - cz);
+    if (distance < best.distance) best = { x: cx, z: cz, distance, along: (i + t) / segments };
+  }
+  return best;
+}
+
+/**
+ * Height of the creek's water surface at a point, whether or not there is any
+ * water there.
+ *
+ * The stream sits `CREEK.fill` above the floor of its own channel, which the
+ * carve in `terrainHeight` has already cut, so the surface follows the island
+ * downhill in one continuous run — pooling where the meadow and the terrace
+ * flatten it, quickening where the ridge drops away. At the mouth it settles
+ * onto the sea rather than meeting it at a step.
+ */
+export function creekSurfaceHeight(x: number, z: number): number {
+  const projection = projectOntoCreek(x, z);
+  const floor = terrainHeight(projection.x, projection.z);
+  const tide = smoothstep(0.35, -0.7, floor);
+  return lerp(floor + CREEK.fill, SEA_LEVEL, tide);
+}
+
+/** Depth of creek water over the ground at a point; 0 outside the channel. */
+export function creekDepth(x: number, z: number): number {
+  // Cheap rejection first: the carve dies out well before this.
+  if (distanceToCreek(x, z) > CREEK.width * 2) return 0;
+  return Math.max(0, creekSurfaceHeight(x, z) - terrainHeight(x, z));
+}
+
+/** True where the creek stands deep enough to read — and to fish — as water. */
+export function isCreekWater(x: number, z: number): boolean {
+  return creekDepth(x, z) > 0.08;
 }
 
 /**
@@ -400,16 +563,41 @@ export function isWalkable(x: number, z: number): boolean {
   return sample.slope < 0.72;
 }
 
-/** True where the player can fish from: land next to water deep enough to hold fish. */
-export function isFishableFrom(x: number, z: number, facingX: number, facingZ: number): boolean {
-  const reach = 4.5;
-  const target = sampleSurface(x + facingX * reach, z + facingZ * reach);
-  return target.height < SEA_LEVEL - 0.35;
+/**
+ * Walkability for villagers, who — unlike the player — should never be routed
+ * through the stream. The crossings are bridged for a reason.
+ */
+export function isNavigable(x: number, z: number): boolean {
+  if (!isWalkable(x, z)) return false;
+  // The bridge and the ford are the crossings; everywhere else, stay dry.
+  if (platformAt(x, z)) return true;
+  return creekDepth(x, z) < 0.25;
 }
 
-/** Approximate water depth at a point; 0 on land. */
+/** True where the player can fish from: water ahead deep enough to hold fish. */
+export function isFishableFrom(x: number, z: number, facingX: number, facingZ: number): boolean {
+  const reach = 4.5;
+  const tx = x + facingX * reach;
+  const tz = z + facingZ * reach;
+  if (creekDepth(tx, tz) > 0.35) return true;
+  return sampleSurface(tx, tz).height < SEA_LEVEL - 0.35;
+}
+
+/** Approximate sea depth at a point; 0 on land and in the creek. */
 export function waterDepth(x: number, z: number): number {
   return Math.max(0, SEA_LEVEL - terrainHeight(x, z));
+}
+
+/**
+ * Depth of whatever water stands at a point — sea or creek.
+ *
+ * `waterDepth` stays sea-only because the ocean mesh, its baked depth texture
+ * and the sea's own fish all reason about the shelf, and a stream running
+ * twenty metres above sea level is not part of it. Anything that only cares
+ * whether it is looking at water calls this instead.
+ */
+export function anyWaterDepth(x: number, z: number): number {
+  return Math.max(waterDepth(x, z), creekDepth(x, z));
 }
 
 /** Named anchors used by NPC schedules, warps and the map. */
@@ -430,8 +618,14 @@ export const LANDMARKS: Record<string, { x: number; z: number; label: string }> 
   'beach.log': { x: BEACH_LOG.x, z: BEACH_LOG.z, label: 'Driftwood Log' },
   'beach.dunes': { x: BEACH_DUNES.x, z: BEACH_DUNES.z, label: 'Dunes' },
   'lighthouse.point': { x: 42, z: -46, label: 'Lighthouse Point' },
-  'meadow.high': { x: -44, z: -38, label: 'High Meadow' },
-  'farm.terrace': { x: -34, z: 20, label: 'Garden Terrace' },
-  'grove.west': { x: -56, z: 6, label: 'West Grove' },
-  'orchard.secret': { x: 50, z: 22, label: 'Secret Orchard' },
+  'point.keeper': { x: 35, z: -43, label: "Keeper's Camp" },
+  'meadow.high': { x: -41, z: -43, label: 'High Meadow' },
+  'meadow.spring': { x: -38.5, z: -31, label: 'Meadow Spring' },
+  'farm.terrace': { x: -37.5, z: 20, label: 'Garden Terrace' },
+  'garden.shed': { x: -40, z: 17, label: 'Garden Shed' },
+  'creek.stones': { x: FORD.x, z: FORD.z, label: 'Stepping Stones' },
+  'grove.west': { x: -56, z: 4, label: 'West Grove' },
+  'grove.elder': { x: -57, z: 1, label: 'The Elder Tree' },
+  'orchard.gate': { x: 46, z: -7.6, label: 'Orchard Gate' },
+  'orchard.secret': { x: 46, z: -16, label: 'Secret Orchard' },
 };

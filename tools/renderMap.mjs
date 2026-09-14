@@ -28,11 +28,12 @@
  * One honest caveat: the foliage scatter is a **replay** of the rules in
  * `world/Foliage.ts` (same seed, same constants, same order), not a call into
  * it — `Foliage` imports three, so it cannot run here. If those rules change,
- * this replay drifts until it is updated.
+ * this replay drifts until it is updated. The creek's water surface, by
+ * contrast, is read straight from the heightfield and cannot drift.
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ISLAND_HALF, PATHS, sampleSurface, terrainHeight } from '../src/world/heightfield.ts';
+import { ISLAND_HALF, PATHS, creekDepth, creekSurfaceHeight, sampleSurface, terrainHeight } from '../src/world/heightfield.ts';
 import { Rng } from '../src/util/rng.ts';
 import { loadNodes, writePng, drawText, hexToRgb, frameCamera, render } from './lib/raster.mjs';
 
@@ -65,6 +66,8 @@ const KEEP_OUT = [
   { x: -6, z: -40, r: 16 }, { x: 30, z: -34, r: 10 }, { x: -46, z: -8, r: 10 },
   { x: 44, z: 6, r: 10 }, { x: 0, z: -54, r: 13 }, { x: 42, z: -46, r: 13 },
   { x: -34, z: 20, r: 13 }, { x: 12, z: 52, r: 11 },
+  { x: -56, z: 4, r: 5.5 }, { x: -57, z: 1, r: 5 },
+  { x: -41, z: -43, r: 9 }, { x: 35, z: -43, r: 6 },
 ];
 
 /**
@@ -96,30 +99,58 @@ const blockedByStructure = (x, z, clearance) =>
  */
 function scatterFoliage(density = 1) {
   const rng = new Rng(90210);
+  const ORCHARD = { x: 46, z: -16, radius: 7.4, innerRadius: 3.0 };
+  const GROVE = { x: -56, z: 4, radius: 16 };
   const plans = [
     { kind: 'broadleaf', count: Math.round(120 * density), minHeight: 2.2, maxHeight: 16, maxSlope: 0.45, clearance: 2 },
     { kind: 'pine', count: Math.round(70 * density), minHeight: 6.5, maxHeight: 26, maxSlope: 0.58, clearance: 2 },
+    {
+      kind: 'pine', count: Math.round(30 * density), minHeight: 2.4, maxHeight: 26, maxSlope: 0.6,
+      clearance: 2, areas: [GROVE], spacing: 2.4,
+    },
     { kind: 'palm', count: Math.round(34 * density), minHeight: 0.9, maxHeight: 3.0, maxSlope: 0.34, clearance: 3 },
-    { kind: 'fruit', count: Math.round(26 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.3, clearance: 4 },
+    {
+      kind: 'fruit', count: Math.round(12 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.4,
+      clearance: 1.6, areas: [ORCHARD], spacing: 3.4, ignoreStructures: true,
+    },
+    {
+      kind: 'fruit', count: Math.round(9 * density), minHeight: 2.0, maxHeight: 11, maxSlope: 0.3,
+      clearance: 2.2, areas: [{ x: -34, z: 20, radius: 18 }], spacing: 4,
+    },
   ];
 
   const trees = [];
   for (const plan of plans) {
+    const planStart = trees.length;
     let placed = 0;
     let attempts = 0;
-    while (placed < plan.count && attempts < plan.count * 40) {
+    while (placed < plan.count && attempts < plan.count * 60) {
       attempts++;
-      const x = rng.spread(ISLAND_HALF - 8);
-      const z = rng.spread(ISLAND_HALF - 8);
+      let x;
+      let z;
+      if (plan.areas) {
+        const area = plan.areas[Math.min(plan.areas.length - 1, Math.floor(rng.range(0, plan.areas.length)))];
+        const angle = rng.range(0, Math.PI * 2);
+        const inner = area.innerRadius ?? 0;
+        const radius = Math.sqrt(rng.range((inner / area.radius) ** 2, 1)) * area.radius;
+        x = area.x + Math.cos(angle) * radius;
+        z = area.z + Math.sin(angle) * radius;
+      } else {
+        x = rng.spread(ISLAND_HALF - 8);
+        z = rng.spread(ISLAND_HALF - 8);
+      }
       const sample = sampleSurface(x, z);
       if (sample.height < plan.minHeight || sample.height > plan.maxHeight) continue;
       if (sample.slope > plan.maxSlope) continue;
       if (sample.surface === 'path' || sample.surface === 'plaza' || sample.surface === 'water') continue;
       if (distanceToPaths(x, z) < plan.clearance) continue;
-      if (blockedByStructure(x, z, plan.clearance)) continue;
-      if (plan.kind === 'fruit') {
-        const nearOrchard = Math.hypot(x - 50, z - 22) < 22 || Math.hypot(x + 34, z - 20) < 18;
-        if (!nearOrchard) continue;
+      if (!plan.ignoreStructures && blockedByStructure(x, z, plan.clearance)) continue;
+      if (plan.spacing !== undefined) {
+        let crowded = false;
+        for (let i = planStart; i < trees.length; i++) {
+          if (Math.hypot(trees[i].x - x, trees[i].z - z) < plan.spacing) { crowded = true; break; }
+        }
+        if (crowded) continue;
       }
       if (plan.kind === 'palm') {
         const coastal = [[9, 0], [-9, 0], [0, 9], [0, -9]].some(
@@ -207,14 +238,25 @@ function buildTerrain(step) {
   for (let z = -ISLAND_HALF; z < ISLAND_HALF; z += step) {
     for (let x = -ISLAND_HALF; x < ISLAND_HALF; x += step) {
       const corners = [[x, z], [x + step, z], [x + step, z + step], [x, z + step]];
-      const h = corners.map(([cx, cz]) => Math.max(0, terrainHeight(cx, cz)));
+      // The creek stands above its own bed, so where there is water in the
+      // channel the surface drawn is the water's, not the streambed's. Without
+      // this the creek renders as a dry ditch, which is exactly the thing this
+      // picture exists to catch.
+      const h = corners.map(([cx, cz]) => Math.max(
+        0,
+        creekDepth(cx, cz) > 0.05 ? creekSurfaceHeight(cx, cz) : terrainHeight(cx, cz),
+      ));
       for (let i = 0; i < 4; i++) positions.push(corners[i][0], h[i], corners[i][1]);
       indices.push(n, n + 1, n + 2, n, n + 2, n + 3);
       n += 4;
 
-      const sample = sampleSurface(x + step / 2, z + step / 2);
+      const mx = x + step / 2;
+      const mz = z + step / 2;
+      const sample = sampleSurface(mx, mz);
+      const creek = creekDepth(mx, mz);
       let c = C.grass;
-      if (sample.surface === 'sand') c = C.sand;
+      if (creek > 0.05) c = creek > 0.45 ? C.waterMid : C.waterShallow;
+      else if (sample.surface === 'sand') c = C.sand;
       else if (sample.surface === 'path') c = C.path;
       else if (sample.surface === 'plaza') c = C.plaza;
       else if (sample.surface === 'water') c = C.waterMid;

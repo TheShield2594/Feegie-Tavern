@@ -75,7 +75,7 @@ export const STORY_BEATS: StoryBeat[] = [
   },
   {
     stage: 1,
-    text: 'Pip remembers a sealed path above High Meadow. Build the public stairs and reach 3 stars.',
+    text: 'The key fits the padlock on the old hedge gate east of Bruno\u2019s. Pip also remembers a sealed path above High Meadow — build the public stairs and reach 3 stars.',
   },
   {
     stage: 2,

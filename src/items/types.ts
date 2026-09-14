@@ -1,3 +1,5 @@
+import type { RegionId } from '@/world/regions';
+
 export type ItemCategory =
   | 'fish'
   | 'bug'
@@ -5,6 +7,7 @@ export type ItemCategory =
   | 'sea'
   | 'crop'
   | 'fruit'
+  | 'forage'
   | 'material'
   | 'meal'
   | 'furniture'
@@ -60,6 +63,7 @@ export interface ItemVisual {
     | 'log'
     | 'stone'
     | 'fiber'
+    | 'mushroom'
     | 'dish'
     | 'seed'
     | 'furniture'
@@ -92,6 +96,12 @@ export interface SpeciesExtras {
   seasons?: string[];
   /** Where it can be found. */
   habitat?: 'shallow' | 'deep' | 'river' | 'shore' | 'meadow' | 'forest' | 'beach' | 'reef';
+  /**
+   * Pins a species to exactly one region. `habitat` says what kind of ground
+   * suits it; this says it lives in one named place and nowhere else, which is
+   * what gives a region a reason to be walked to.
+   */
+  region?: RegionId;
   /** How the fish behaves around a lure, 0 = timid, 1 = aggressive. */
   boldness?: number;
 }
