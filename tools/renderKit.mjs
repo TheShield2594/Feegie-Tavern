@@ -55,9 +55,14 @@ function readAccessor(json, bin, index) {
     if (accessor.componentType === 5126) out.push(bin.readFloatLE(base + i * 4));
     else if (accessor.componentType === 5123) out.push(bin.readUInt16LE(base + i * 2));
     else if (accessor.componentType === 5125) out.push(bin.readUInt32LE(base + i * 4));
-    // COLOR_0 ships as normalised unsigned bytes; keep them as 0-255 since that
-    // is the range the rasteriser shades in.
-    else if (accessor.componentType === 5121) out.push(bin.readUInt8(base + i));
+    // COLOR_0 ships as normalised unsigned bytes holding *linear* values, per
+    // the glTF spec. The rasteriser shades in sRGB bytes, so encode on the way
+    // in — otherwise the preview shows the file darker than the game will.
+    else if (accessor.componentType === 5121) {
+      const v = bin.readUInt8(base + i) / 255;
+      const encoded = v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055;
+      out.push(Math.round(encoded * 255));
+    }
   }
   return out;
 }

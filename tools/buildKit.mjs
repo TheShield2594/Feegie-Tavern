@@ -92,6 +92,11 @@ const NATURE_SOURCES = [
  *  - `split-by-material` — the source has one flat `baseColorFactor` per
  *    material, so each material becomes its own node and the game binds a
  *    palette material to it. Trunk and canopy stay independently tintable.
+ *  - `bake-materials` — the source uses flat `baseColorFactor` materials but a
+ *    model mixes several of them (a cabinet is wood + woodDark + metal), and the
+ *    object is one thing the game places as a unit. Each primitive's colour is
+ *    written to its vertices, giving one node per model rather than one per
+ *    material.
  *  - `bake-atlas` — the source shares one textured atlas across every model,
  *    with no discrete material roles to split on, so the atlas is sampled into
  *    COLOR_0 per vertex and dropped. The manifest entry sets
@@ -127,6 +132,31 @@ const KITS = {
       'wall-wood', 'wall-wood-corner',
       'roof-gable', 'roof-gable-end', 'roof-gable-top', 'roof-corner', 'roof-flat',
       'chimney', 'fence', 'fence-gate', 'hedge', 'hedge-gate', 'stairs-stone', 'lantern',
+    ].map((file) => ({ file, roles: ['whole'] })),
+  },
+
+  furniture: {
+    dir: 'Models/GLTF format',
+    out: 'public/assets/models/furniture/furniture.glb',
+    // Flat materials like the Nature Kit, but split-by-material is wrong here:
+    // a tree wants its trunk and canopy tinted independently, whereas a cabinet
+    // is one object the player places and rotates as a unit. Baking wood /
+    // woodDark / metal into its vertices keeps it one node.
+    mode: 'bake-materials',
+    // One per kind in `housing/FurnitureModels.ts` — sofa, table, lamp, rug,
+    // music, plant, shelf, bed, chair — plus a second option for the kinds a
+    // room wants more than one of.
+    sources: [
+      'loungeSofa', 'loungeSofaLong',
+      'table', 'tableCoffee',
+      'lampRoundTable', 'lampRoundFloor',
+      'rugRectangle', 'rugRound',
+      'radio', 'televisionVintage',
+      'pottedPlant', 'plantSmall1',
+      'bookcaseOpen', 'bookcaseClosedWide',
+      'bedSingle', 'bedDouble',
+      'chair', 'chairCushion',
+      'stoolBar', 'desk',
     ].map((file) => ({ file, roles: ['whole'] })),
   },
 
@@ -232,6 +262,21 @@ function readAccessor(json, bin, index) {
 // result is exactly what `NormalizeOptions.keepVertexColors` was written for:
 // "Kits that bake several colours into one mesh need this".
 
+/**
+ * sRGB byte to linear float.
+ *
+ * glTF is explicit that `COLOR_0` holds **linear** values, while a
+ * `baseColorTexture` holds **sRGB** ones. Baking a texture into vertex colours
+ * therefore has to decode: copying the raw bytes across skips the sRGB→linear
+ * step the renderer would have done when sampling the texture, and every
+ * surface comes out washed out and too bright. `baseColorFactor`, by contrast,
+ * is already linear and goes straight through.
+ */
+function srgbToLinear(byte) {
+  const c = byte / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
 /** Decodes an 8-bit RGB/RGBA PNG. Enough for Kenney's colormap. */
 function decodePng(path) {
   const d = readFileSync(path);
@@ -296,12 +341,15 @@ function decodePng(path) {
   return { width, height, rgb: out };
 }
 
-/** Nearest-neighbour sample. The ramps are smooth, so filtering buys nothing. */
+/**
+ * Nearest-neighbour sample, returned linear. The ramps are smooth, so filtering
+ * buys nothing.
+ */
 function sampleAtlas(image, u, v) {
   const x = Math.min(image.width - 1, Math.max(0, Math.floor(u * image.width)));
   const y = Math.min(image.height - 1, Math.max(0, Math.floor(v * image.height)));
   const at = (y * image.width + x) * 3;
-  return [image.rgb[at], image.rgb[at + 1], image.rgb[at + 2]];
+  return [srgbToLinear(image.rgb[at]), srgbToLinear(image.rgb[at + 1]), srgbToLinear(image.rgb[at + 2])];
 }
 
 function roleOf(materialName) {
@@ -409,7 +457,7 @@ const transformNormal = (n, x, y, z) => {
  * Pulls one model out of a source GLB as `{ role -> { positions, normals,
  * indices } }`, compacted so each role carries only its own vertices.
  */
-function extractParts(path, wantedRoles, atlas = null) {
+function extractParts(path, wantedRoles, atlas = null, bakeMaterials = false) {
   const { json, bin } = readGlb(path);
   const parts = new Map();
   const matrices = meshMatrices(json);
@@ -424,7 +472,7 @@ function extractParts(path, wantedRoles, atlas = null) {
       // A baked-atlas kit has one material for everything, so there is no role
       // to read off it — the whole model is one part.
       const material = json.materials?.[primitive.material]?.name ?? '';
-      const role = atlas ? 'whole' : roleOf(material);
+      const role = atlas || bakeMaterials ? 'whole' : roleOf(material);
       if (!role || !wantedRoles.includes(role)) continue;
 
       const srcPos = readAccessor(json, bin, primitive.attributes.POSITION);
@@ -433,6 +481,11 @@ function extractParts(path, wantedRoles, atlas = null) {
         : null;
       const srcUv = atlas && primitive.attributes.TEXCOORD_0 !== undefined
         ? readAccessor(json, bin, primitive.attributes.TEXCOORD_0)
+        : null;
+      // `baseColorFactor` is already linear, so unlike the atlas it needs no
+      // decode — it is the value COLOR_0 wants.
+      const flat = bakeMaterials
+        ? (json.materials?.[primitive.material]?.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1])
         : null;
       const srcIdx = readAccessor(json, bin, primitive.indices);
 
@@ -482,6 +535,7 @@ function extractParts(path, wantedRoles, atlas = null) {
           // lookup would return there; interpolation across the triangle then
           // reproduces the ramp.
           if (srcUv) colors.push(...sampleAtlas(atlas, srcUv[oldIndex * 2], srcUv[oldIndex * 2 + 1]));
+          else if (flat) colors.push(flat[0], flat[1], flat[2]);
         }
         indices.push(next);
       }
@@ -651,10 +705,11 @@ function writeGlb(models, outPath) {
     let colAccessor = null;
     if (colors && colors.length === positions.length) {
       const colBuf = Buffer.alloc(count * 4);
+      const quantise = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
       for (let i = 0; i < count; i++) {
-        colBuf[i * 4] = colors[i * 3];
-        colBuf[i * 4 + 1] = colors[i * 3 + 1];
-        colBuf[i * 4 + 2] = colors[i * 3 + 2];
+        colBuf[i * 4] = quantise(colors[i * 3]);
+        colBuf[i * 4 + 1] = quantise(colors[i * 3 + 1]);
+        colBuf[i * 4 + 2] = quantise(colors[i * 3 + 2]);
         colBuf[i * 4 + 3] = 255;
       }
       colAccessor = json.accessors.length;
@@ -710,7 +765,7 @@ if (atlas) console.log(`atlas ${kit.atlas} — ${atlas.width}x${atlas.height}, b
 
 const models = [];
 for (const source of kit.sources) {
-  const parts = extractParts(join(sourceDir, `${source.file}.glb`), source.roles, atlas);
+  const parts = extractParts(join(sourceDir, `${source.file}.glb`), source.roles, atlas, kit.mode === 'bake-materials');
   for (const role of source.roles) {
     if (!parts.has(role)) throw new Error(`${source.file}: no primitive with role "${role}"`);
   }

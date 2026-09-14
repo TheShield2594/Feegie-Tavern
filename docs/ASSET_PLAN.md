@@ -345,10 +345,11 @@ in its archive.
 | RPG Audio | `kenney.nl/assets/rpg-audio` | `License (Creative Commons Zero, CC0)` — "You may use these assets in personal and commercial projects. Credit (Kenney or www.kenney.nl) would be nice but is not mandatory." |
 | Interface Sounds 1.0 | `kenney.nl/assets/interface-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Impact Sounds 1.0 | `kenney.nl/assets/impact-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| Furniture Kit 2.0 | `kenney.nl/assets/furniture-kit` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Survival Kit 2.0 | `kenney.nl/assets/survival-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 | Fantasy Town Kit 2.0 | `kenney.nl/assets/fantasy-town-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 
-All six match §8 decision 4 (strict CC0). Nothing was committed on the strength
+All seven match §8 decision 4 (strict CC0). Nothing was committed on the strength
 of a download page alone.
 
 Kenney ships a separate `License.txt` per pack, identical in grant but differing
@@ -766,6 +767,46 @@ The tools are worth a note for later: the kit also ships `-upgraded` variants of
 all four, which map onto the tool levels the game already tracks in its save
 schema. They are not carried yet because nothing reads them.
 
+### 9.5i Furniture — and a colour-space bug in the two kits before it
+
+Kenney Furniture Kit 2.0, CC0 read in-archive and quoted in §9.2. 20 of its 140
+models, **191740 bytes**, 5,498 verts, 3,592 tris — one per kind
+ builds (sofa, table, lamp, rug, music, plant,
+shelf, bed, chair), plus a second option where a room wants more than one.
+
+**A third colour mode.** This kit has flat  materials like the
+Nature Kit, but splitting by material is wrong here: a tree wants its trunk and
+canopy tinted independently, whereas a cabinet is one object the player places
+and rotates as a unit — and it is wood + woodDark + metal, which under
+split-by-material would become three nodes to reassemble. So 
+writes each primitive's own colour to its vertices, giving one node per model.
+The pipeline now has three strategies, one per kind of source it has met:
+split-by-material, bake-atlas, bake-materials.
+
+**The bug this turned up, in kits already shipped.** Deciding where the flat
+colours go meant checking what  actually holds, and the glTF spec is
+explicit: ** is linear**, while a  is **sRGB**. The
+atlas bake for  and  copied raw sRGB bytes straight
+into , skipping the sRGB→linear decode the renderer would have done
+when sampling the texture. Every surface in both kits would have rendered washed
+out and too bright.
+
+Both are rebuilt with the decode applied.  needs no conversion
+— it is already linear — so the furniture kit was correct from the start, and
+only the two atlas kits changed. The previews are unchanged, because
+ now encodes back to sRGB for display: that round trip landing where
+it started is the check that both directions agree.
+
+Stated plainly: this is a **spec-correct change that has not been confirmed
+visually in three**. It cannot be, from an environment with no npm. If the
+colours look wrong when someone next runs the game, this is the change to look
+at first.
+
+Colours are stored as normalised , so linear values give up some
+precision in the darks compared with sRGB encoding. For flat, mid-tone palette
+art that is a fair trade against tripling the attribute to float32; if banding
+ever shows in dark surfaces, that is the knob.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed
@@ -783,10 +824,11 @@ SHA-256 against the committed file. It is, at every stage and at the end.
 | `nature.glb` | 58,984 |
 | `buildings.glb` | 138,124 |
 | `props.glb` | 153,948 |
+| `furniture.glb` | 191740 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **411,131 (401.4 KB)** |
+| **Total** | **602871 (588.7 KB)** |
 
-Against the ≤ 8 MB first-load budget in §5 that is **4.9%**. Neither group is in
+Against the ≤ 8 MB first-load budget in §5 that is **7.1%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
 `nature.glb` is not fetched at all yet (see below).
 
@@ -896,7 +938,7 @@ Recording the honest state so the gap is tracked rather than assumed.
 | SFX + UI audio | Kenney RPG / Interface / Impact | ✅ | ✅ 8 sounds via `sounds.ts` |
 | Buildings, houses | Kenney Fantasy Town Kit | ✅ | ❌ `BuildingKit.ts`, `Buildings.ts` — 23 models in `MODELS`, see §9.5f |
 | Interiors | Kenney Fantasy Town / Furniture | ❌ | ❌ `InteriorKit.ts`, `Interiors.ts` |
-| Furniture | Kenney Furniture Kit | ❌ | ❌ `housing/FurnitureModels.ts` |
+| Furniture | Kenney Furniture Kit | ✅ | ❌ `housing/FurnitureModels.ts` — 20 models, see §9.5i |
 | Props | Kenney Survival Kit | ✅ | ❌ `world/Props.ts` — 18 models, see §9.5h |
 | Items | Kenney Food Kit | ❌ | ❌ `items/ItemModels.ts` |
 | Paths / paving | Kenney Fantasy Town Kit (`road-*`) | ✅ | ❌ terrain path surfaces — 5 road pieces, see §9.5f |

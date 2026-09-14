@@ -203,6 +203,34 @@ export const MODELS: ModelDef[] = [
   // per-species art lands. The kit's `fish-large` is this same mesh at 1.5x, so
   // a bigger catch is a scale rather than a second model. See §9.5h.
   { id: 'fish.generic',    kit: 'props', node: 'fish',           normalize: prop(2.0) },
+
+  // --- Furniture Kit --------------------------------------------------------
+  //
+  // One entry per kind `housing/FurnitureModels.ts` builds — sofa, table, lamp,
+  // rug, music, plant, shelf, bed, chair — plus a second option where a room
+  // wants more than one. Colours are baked from the kit's flat materials
+  // (wood / woodDark / metal per primitive), so a cabinet stays one node
+  // instead of three.
+  { id: 'furniture.sofa',      kit: 'furniture', node: 'loungeSofa',         normalize: prop(2.0) },
+  { id: 'furniture.sofaLong',  kit: 'furniture', node: 'loungeSofaLong',     normalize: prop(2.0) },
+  { id: 'furniture.table',     kit: 'furniture', node: 'table',              normalize: prop(2.0) },
+  { id: 'furniture.tableLow',  kit: 'furniture', node: 'tableCoffee',        normalize: prop(2.0) },
+  { id: 'furniture.lamp',      kit: 'furniture', node: 'lampRoundTable',     normalize: prop(2.0) },
+  { id: 'furniture.lampFloor', kit: 'furniture', node: 'lampRoundFloor',     normalize: prop(2.0) },
+  { id: 'furniture.rug',       kit: 'furniture', node: 'rugRectangle',       normalize: prop(2.0) },
+  { id: 'furniture.rugRound',  kit: 'furniture', node: 'rugRound',           normalize: prop(2.0) },
+  { id: 'furniture.music',     kit: 'furniture', node: 'radio',              normalize: prop(2.0) },
+  { id: 'furniture.tv',        kit: 'furniture', node: 'televisionVintage',  normalize: prop(2.0) },
+  { id: 'furniture.plant',     kit: 'furniture', node: 'pottedPlant',        normalize: prop(2.0) },
+  { id: 'furniture.plantSmall',kit: 'furniture', node: 'plantSmall1',        normalize: prop(2.0) },
+  { id: 'furniture.shelf',     kit: 'furniture', node: 'bookcaseOpen',       normalize: prop(2.0) },
+  { id: 'furniture.cabinet',   kit: 'furniture', node: 'bookcaseClosedWide', normalize: prop(2.0) },
+  { id: 'furniture.bed',       kit: 'furniture', node: 'bedSingle',          normalize: prop(2.0) },
+  { id: 'furniture.bedDouble', kit: 'furniture', node: 'bedDouble',          normalize: prop(2.0) },
+  { id: 'furniture.chair',     kit: 'furniture', node: 'chair',              normalize: prop(2.0) },
+  { id: 'furniture.chairSoft', kit: 'furniture', node: 'chairCushion',       normalize: prop(2.0) },
+  { id: 'furniture.stool',     kit: 'furniture', node: 'stoolBar',           normalize: prop(2.0) },
+  { id: 'furniture.desk',      kit: 'furniture', node: 'desk',               normalize: prop(2.0) },
 ];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));
