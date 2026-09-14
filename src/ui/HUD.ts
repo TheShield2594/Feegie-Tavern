@@ -269,6 +269,10 @@ export class HUD {
    */
   showAirMeter(): void {
     if (this.airMeter) return;
+    // The previous gauge may still be on screen playing its exit. Surfacing
+    // and ducking straight back under is quick enough to catch it, and two
+    // nodes under one id overlap rather than replace.
+    this.ui.layers.hud.querySelector('#air-meter')?.remove();
     const bar = el('i', { style: 'width:100%' });
     this.airMeter = el('div', { id: 'air-meter' }, [
       el('div', { class: 'cc-air-bar' }, [bar]),
@@ -307,6 +311,9 @@ export class HUD {
   /** The landscaping cursor's readout: what is selected, and what it costs. */
   showBuildBar(): void {
     if (this.buildBar) return;
+    // As with the air gauge: leaving and re-entering build mode inside the
+    // exit animation would otherwise stack two readouts on top of each other.
+    this.ui.layers.hud.querySelector('#build-bar')?.remove();
     this.buildBar = el('div', { id: 'build-bar' }, [
       el('div', { class: 'cc-build-name' }),
       el('div', { class: 'cc-build-note' }),

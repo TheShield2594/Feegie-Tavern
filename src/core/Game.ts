@@ -441,8 +441,27 @@ export class Game {
     this.cameraRig.snapTo(new Vector3(0, 4, 8), Math.PI * 0.75);
     this.player.teleport(0, 6, Math.PI);
     this.player.group.visible = false;
+    this.resetDiveState();
     this.villagers.snapToSchedule(17);
     this.audio.playMusic('music.title');
+  }
+
+  /**
+   * Puts the dive back to rest without playing the surfacing transition.
+   *
+   * Quitting to the title teleports the player, which ends a dive silently, so
+   * `updateDiving` never sees the change and the next session inherits the
+   * leftovers: the camera's underwater ceiling, the blue-green blend over the
+   * title vista, and — worst — the deferred catch cards, which would otherwise
+   * be revealed on whichever island is loaded next.
+   */
+  private resetDiveState(): void {
+    this.wasDiving = false;
+    this.pendingDiveCards = [];
+    this.underwater = 0;
+    this.cameraRig.terrainClamp = true;
+    this.cameraRig.heightCeiling = null;
+    this.hud.hideAirMeter();
   }
 
   private async beginGame(slot: number, fresh: boolean): Promise<void> {

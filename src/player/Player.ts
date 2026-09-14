@@ -261,6 +261,13 @@ export class Player {
 
   /** Moves the player instantly, grounding them on the deck or terrain unless a height is given. */
   teleport(x: number, z: number, facing = this.facing, height?: number): void {
+    // A teleport ends a dive silently, so the pose has to be put back by hand:
+    // `endDive` is not called, and the wet/dry transition that would otherwise
+    // normalise it only fires when the destination differs from the origin.
+    // Warping from one patch of water to another would leave the player stuck
+    // in `diving` with nothing to bring them out of it, and every action that
+    // wants a free pair of hands would refuse.
+    if (this.state === 'diving') this.state = 'free';
     this.diving = false;
     this.air = DIVE_AIR_SECONDS;
     this.position.set(x, height ?? walkHeight(x, z), z);
