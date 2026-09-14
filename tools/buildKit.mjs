@@ -160,6 +160,23 @@ const KITS = {
     ].map((file) => ({ file, roles: ['whole'] })),
   },
 
+  items: {
+    dir: 'Models/GLB format',
+    out: 'public/assets/models/items/items.glb',
+    mode: 'bake-atlas',
+    atlas: 'Models/GLB format/Textures/colormap.png',
+    // Mapped onto the kinds `items/ItemModels.ts` draws by hand. The Food Kit
+    // covers the edible half — berry, gourd, root, dish, seed — and nothing
+    // else: the insects, shells, bones and rays in that switch have no source
+    // in §3 at all, which §9.5j records rather than papering over.
+    sources: [
+      'carrot', 'cabbage', 'corn', 'tomato', 'pumpkin',
+      'apple', 'strawberry',
+      'bread', 'cheese', 'egg-cooked', 'sandwich', 'pie', 'cake',
+      'bowl-soup', 'plate-dinner', 'sushi-salmon',
+    ].map((file) => ({ file, roles: ['whole'] })),
+  },
+
   props: {
     dir: 'Models/GLB format',
     out: 'public/assets/models/props/props.glb',

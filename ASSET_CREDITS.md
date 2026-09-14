@@ -20,6 +20,7 @@ condition — its `OFL.txt` ships in `licenses/`.
 | `buildings` | Kenney — Fantasy Town Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 23 |
 | `furniture` | Kenney — Furniture Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 20 |
 | `props` | Kenney — Survival Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 18 |
+| `items` | Kenney — Food Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 16 |
 | `fish` | Quaternius — LowPoly Animated Fish | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `animals` | Quaternius — Animated Animals | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `characters` | KayKit — Characters | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |

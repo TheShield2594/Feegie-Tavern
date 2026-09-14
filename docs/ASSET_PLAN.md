@@ -345,11 +345,12 @@ in its archive.
 | RPG Audio | `kenney.nl/assets/rpg-audio` | `License (Creative Commons Zero, CC0)` — "You may use these assets in personal and commercial projects. Credit (Kenney or www.kenney.nl) would be nice but is not mandatory." |
 | Interface Sounds 1.0 | `kenney.nl/assets/interface-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Impact Sounds 1.0 | `kenney.nl/assets/impact-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| Food Kit 2.0 | `kenney.nl/assets/food-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 | Furniture Kit 2.0 | `kenney.nl/assets/furniture-kit` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Survival Kit 2.0 | `kenney.nl/assets/survival-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 | Fantasy Town Kit 2.0 | `kenney.nl/assets/fantasy-town-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 
-All seven match §8 decision 4 (strict CC0). Nothing was committed on the strength
+All eight match §8 decision 4 (strict CC0). Nothing was committed on the strength
 of a download page alone.
 
 Kenney ships a separate `License.txt` per pack, identical in grant but differing
@@ -807,6 +808,32 @@ precision in the darks compared with sRGB encoding. For flat, mid-tone palette
 art that is a fair trade against tripling the attribute to float32; if banding
 ever shows in dark surfaces, that is the knob.
 
+### 9.5j Items — and the half of the item table that has no source
+
+Kenney Food Kit 2.0, CC0 read in-archive and quoted in §9.2. 16 of its 200
+models, **199040 bytes**, 5,876 verts, 3,580 tris: carrot, cabbage, corn, tomato,
+pumpkin, apple, strawberry, bread, cheese, egg, sandwich, pie, cake, soup,
+dinner plate and sushi. Same baked-atlas path as the town and survival kits;
+`items` is a new `KitId`, since `KITS` had no entry for the Food Kit.
+
+**What it does not cover, which matters more than what it does.**
+`items/ItemModels.ts` draws twenty kinds, and the Food Kit answers five of
+them — root, leaf, gourd, berry, dish. The other fifteen are:
+
+| Kind | Status |
+| --- | --- |
+| `fish`, `flatfish`, `ray` | Quaternius blocked (§9.4); one static Kenney fish carried in `props.glb` as a partial answer (§9.5h) |
+| `butterfly`, `beetle`, `dragonfly` | **no source in §3 at all** |
+| `shell`, `ammonite`, `star`, `jelly`, `bone` | **no source in §3 at all** |
+| `log`, `stone`, `fiber`, `seed` | `props.glb` has `tree-log`, `resource-stone` and `resource-wood`; `fiber` and `seed` have none |
+
+So the museum's insect and sea-life wings have no art path, and nothing in the
+approved shortlist supplies one. That is a gap in §3 rather than a gap in the
+work: filling it needs a new source, which is a plan decision and so the
+owner's, not something to quietly resolve by reaching outside the list. The
+procedural `ItemModels` geometry keeps drawing them in the meantime, which is
+exactly the fallback the manifest was built around.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed
@@ -825,10 +852,11 @@ SHA-256 against the committed file. It is, at every stage and at the end.
 | `buildings.glb` | 138,124 |
 | `props.glb` | 153,948 |
 | `furniture.glb` | 191,740 |
+| `items.glb` | 199040 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **602,871 (588.7 KB)** |
+| **Total** | **801911 (783.1 KB)** |
 
-Against the ≤ 8 MB first-load budget in §5 that is **7.1%**. Neither group is in
+Against the ≤ 8 MB first-load budget in §5 that is **9.5%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
 `nature.glb` is not fetched at all yet (see below).
 
@@ -940,7 +968,7 @@ Recording the honest state so the gap is tracked rather than assumed.
 | Interiors | Kenney Fantasy Town / Furniture | ❌ | ❌ `InteriorKit.ts`, `Interiors.ts` |
 | Furniture | Kenney Furniture Kit | ✅ | ❌ `housing/FurnitureModels.ts` — 20 models, see §9.5i |
 | Props | Kenney Survival Kit | ✅ | ❌ `world/Props.ts` — 18 models, see §9.5h |
-| Items | Kenney Food Kit | ❌ | ❌ `items/ItemModels.ts` |
+| Items | Kenney Food Kit | ✅ | ❌ `items/ItemModels.ts` — 16 models, see §9.5j |
 | Paths / paving | Kenney Fantasy Town Kit (`road-*`) | ✅ | ❌ terrain path surfaces — 5 road pieces, see §9.5f |
 | Fish | Quaternius ❌ blocked — Kenney Survival Kit ✅ instead | ✅ | ❌ `fishing/FishSchools.ts` — see §9.5h |
 | Animals | Quaternius | ❌ blocked | ❌ |

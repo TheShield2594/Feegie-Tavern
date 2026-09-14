@@ -12,7 +12,7 @@
  */
 
 /** A single downloaded pack, optimised into one GLB. */
-export type KitId = 'nature' | 'buildings' | 'furniture' | 'props' | 'fish' | 'animals' | 'characters';
+export type KitId = 'nature' | 'buildings' | 'furniture' | 'props' | 'items' | 'fish' | 'animals' | 'characters';
 
 export interface KitDef {
   id: KitId;
@@ -28,6 +28,7 @@ export const KITS: KitDef[] = [
   { id: 'buildings',  file: 'assets/models/buildings/buildings.glb',   source: 'Kenney — Fantasy Town Kit',          licence: 'CC0-1.0' },
   { id: 'furniture',  file: 'assets/models/furniture/furniture.glb',   source: 'Kenney — Furniture Kit',             licence: 'CC0-1.0' },
   { id: 'props',      file: 'assets/models/props/props.glb',           source: 'Kenney — Survival Kit',              licence: 'CC0-1.0' },
+  { id: 'items',      file: 'assets/models/items/items.glb',           source: 'Kenney — Food Kit',                  licence: 'CC0-1.0' },
   { id: 'fish',       file: 'assets/models/fish/fish.glb',             source: 'Quaternius — LowPoly Animated Fish', licence: 'CC0-1.0' },
   { id: 'animals',    file: 'assets/models/animals/animals.glb',       source: 'Quaternius — Animated Animals',      licence: 'CC0-1.0' },
   { id: 'characters', file: 'assets/models/characters/characters.glb', source: 'KayKit — Characters',                licence: 'CC0-1.0' },
@@ -231,6 +232,33 @@ export const MODELS: ModelDef[] = [
   { id: 'furniture.chairSoft', kit: 'furniture', node: 'chairCushion',       normalize: prop(2.0) },
   { id: 'furniture.stool',     kit: 'furniture', node: 'stoolBar',           normalize: prop(2.0) },
   { id: 'furniture.desk',      kit: 'furniture', node: 'desk',               normalize: prop(2.0) },
+
+  // --- Food Kit -------------------------------------------------------------
+  //
+  // Mapped onto the kinds `items/ItemModels.ts` draws: root, leaf, gourd, berry
+  // and dish. It covers the edible half of that switch and nothing else — the
+  // insects, shells, rays and bones there have no source in §3 at all, which
+  // §9.5j records rather than quietly leaving to be discovered.
+  //
+  // `scale` is a starting point, not a fitted value: an item is drawn in hand,
+  // as a ground drop and on a museum plinth at three different sizes, so the
+  // display scale belongs to whichever system draws it.
+  { id: 'item.carrot',     kit: 'items', node: 'carrot',        normalize: prop(2.0) },
+  { id: 'item.cabbage',    kit: 'items', node: 'cabbage',       normalize: prop(2.0) },
+  { id: 'item.corn',       kit: 'items', node: 'corn',          normalize: prop(2.0) },
+  { id: 'item.tomato',     kit: 'items', node: 'tomato',        normalize: prop(2.0) },
+  { id: 'item.pumpkin',    kit: 'items', node: 'pumpkin',       normalize: prop(2.0) },
+  { id: 'item.apple',      kit: 'items', node: 'apple',         normalize: prop(2.0) },
+  { id: 'item.strawberry', kit: 'items', node: 'strawberry',    normalize: prop(2.0) },
+  { id: 'item.bread',      kit: 'items', node: 'bread',         normalize: prop(2.0) },
+  { id: 'item.cheese',     kit: 'items', node: 'cheese',        normalize: prop(2.0) },
+  { id: 'item.egg',        kit: 'items', node: 'egg-cooked',    normalize: prop(2.0) },
+  { id: 'item.sandwich',   kit: 'items', node: 'sandwich',      normalize: prop(2.0) },
+  { id: 'item.pie',        kit: 'items', node: 'pie',           normalize: prop(2.0) },
+  { id: 'item.cake',       kit: 'items', node: 'cake',          normalize: prop(2.0) },
+  { id: 'item.soup',       kit: 'items', node: 'bowl-soup',     normalize: prop(2.0) },
+  { id: 'item.dinner',     kit: 'items', node: 'plate-dinner',  normalize: prop(2.0) },
+  { id: 'item.sushi',      kit: 'items', node: 'sushi-salmon',  normalize: prop(2.0) },
 ];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));
