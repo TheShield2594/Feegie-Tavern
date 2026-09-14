@@ -3,6 +3,7 @@ import {
   DoubleSide,
   MeshStandardMaterial,
   ShaderChunk,
+  Vector3,
   type IUniform,
   type Texture,
   type WebGLProgramParametersWithUniforms,
@@ -60,6 +61,26 @@ float cozyFbm(vec2 p) {
 }
 `;
 
+/**
+ * Controls for `distanceFade`. The uniform objects are created with the
+ * material and shared by reference, so writing to them takes effect whether or
+ * not the shader has compiled yet. Reached through `material.userData.distanceFade`.
+ */
+export interface DistanceFadeUniforms {
+  /** Where the draw radius is measured from, in world space. */
+  origin: IUniform<Vector3>;
+  /** Radius at which instances have shrunk to nothing, in metres. */
+  distance: IUniform<number>;
+  /** How much of that radius the shrink is spread over, in metres. */
+  band: IUniform<number>;
+}
+
+const FADE_PARS = /* glsl */ `
+uniform vec3 uFadeOrigin;
+uniform float uFadeDistance;
+uniform float uFadeBand;
+`;
+
 export interface StylizedMaterialOptions {
   color?: string | Color;
   roughness?: number;
@@ -88,6 +109,12 @@ export interface StylizedMaterialOptions {
   map?: Texture;
   /** Texture repeats per metre, when `map` is set. */
   mapRepeat?: number;
+  /**
+   * Shrinks instanced geometry into the ground as it approaches the draw
+   * radius, so a scatter layer grows in over several metres of walking instead
+   * of appearing whole. Drive it through `material.userData.distanceFade`.
+   */
+  distanceFade?: boolean;
 }
 
 /**
@@ -114,6 +141,7 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
     groundDetail = 0,
     map,
     mapRepeat,
+    distanceFade = false,
   } = options;
 
   const material = new MeshStandardMaterial({
@@ -133,6 +161,11 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
   // Textures are shared between materials, so the tiling density is applied
   // in the shader per material rather than by mutating the texture's repeat.
   const uvRepeat = map && mapRepeat !== undefined ? mapRepeat : 0;
+
+  const fade: DistanceFadeUniforms | null = distanceFade
+    ? { origin: { value: new Vector3() }, distance: { value: 1e6 }, band: { value: 1 } }
+    : null;
+  if (fade) material.userData.distanceFade = fade;
 
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     shader.uniforms.uTime = sharedUniforms.uTime;
@@ -202,6 +235,32 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
       );
     }
 
+    if (fade) {
+      shader.uniforms.uFadeOrigin = fade.origin;
+      shader.uniforms.uFadeDistance = fade.distance;
+      shader.uniforms.uFadeBand = fade.band;
+
+      // Anchored at `project_vertex` rather than `begin_vertex` so the scale
+      // lands after the wind displacement: shrinking first would leave a
+      // thumbnail-sized tuft swinging through a full-sized arc.
+      shader.vertexShader = `${FADE_PARS}\n${shader.vertexShader}`.replace(
+        '#include <project_vertex>',
+        /* glsl */ `
+        #ifdef USE_INSTANCING
+        {
+          // Scale, not alpha: this path is used by alpha-tested foliage, where
+          // a fading alpha would hold full size and then cut out the frame it
+          // crossed the threshold — the pop this exists to remove.
+          vec3 fadeAnchor = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+          float fadeDist = distance(fadeAnchor.xz, uFadeOrigin.xz);
+          transformed *= 1.0 - smoothstep(uFadeDistance - uFadeBand, uFadeDistance, fadeDist);
+        }
+        #endif
+        #include <project_vertex>
+        `,
+      );
+    }
+
     shader.fragmentShader = `uniform float uWetness;\nuniform float uWetResponse;\n${shader.fragmentShader}`;
     if (groundDetail > 0) {
       shader.fragmentShader = `varying vec3 vCozyWorld;\n${DETAIL_PARS}\n${shader.fragmentShader}`.replace(
@@ -240,7 +299,8 @@ export function createStylizedMaterial(options: StylizedMaterialOptions = {}): M
   };
 
   // Distinct keys keep three's program cache from merging incompatible patches.
-  material.customProgramCacheKey = () => `cozy:${wind}:${windScale}:${wetResponse}:${groundDetail}:${uvRepeat}`;
+  material.customProgramCacheKey = () =>
+    `cozy:${wind}:${windScale}:${wetResponse}:${groundDetail}:${uvRepeat}:${distanceFade ? 1 : 0}`;
 
   return material;
 }
