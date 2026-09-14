@@ -210,6 +210,7 @@ const KITS = {
   },
 };
 
+/** Splits a GLB into its JSON chunk and its binary chunk. */
 function readGlb(path) {
   const buf = readFileSync(path);
   if (buf.readUInt32LE(0) !== GLB_MAGIC) throw new Error(`not a GLB: ${path}`);
@@ -370,6 +371,13 @@ function sampleAtlas(image, u, v) {
   return [srgbToLinear(image.rgb[at]), srgbToLinear(image.rgb[at + 1]), srgbToLinear(image.rgb[at + 2])];
 }
 
+/**
+ * Which part of a model a material belongs to — trunk, canopy and so on.
+ *
+ * Keyed on the material name rather than the primitive index because Kenney's
+ * ordering is not consistent between models, and indexing by position silently
+ * swapped bark for leaves on some trees.
+ */
 function roleOf(materialName) {
   for (const [prefix, role] of ROLE_BY_MATERIAL) {
     if (materialName.startsWith(prefix)) return role;
@@ -388,6 +396,7 @@ function roleOf(materialName) {
 /** Column-major 4x4, glTF's convention. */
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
+/** Column-major 4x4 product, so a node's transform chain composes correctly. */
 function multiply(a, b) {
   const out = new Array(16).fill(0);
   for (let c = 0; c < 4; c++) {
@@ -435,6 +444,7 @@ function meshMatrices(json) {
   return out;
 }
 
+/** Applies a 4x4 to a position, translation included. */
 const transformPoint = (m, x, y, z) => [
   m[0] * x + m[4] * y + m[8] * z + m[12],
   m[1] * x + m[5] * y + m[9] * z + m[13],
@@ -465,6 +475,7 @@ function normalMatrix(m) {
   ];
 }
 
+/** Applies a normal matrix to a normal and renormalises it. */
 const transformNormal = (n, x, y, z) => {
   const out = [n[0] * x + n[3] * y + n[6] * z, n[1] * x + n[4] * y + n[7] * z, n[2] * x + n[5] * y + n[8] * z];
   const len = Math.hypot(out[0], out[1], out[2]) || 1;

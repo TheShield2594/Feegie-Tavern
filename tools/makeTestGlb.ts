@@ -37,6 +37,13 @@ export interface TestGlbOptions {
   parentScale?: number;
 }
 
+/**
+ * Builds a two-mesh GLB in memory for `assets:verify`.
+ *
+ * A trunk raised off the floor and a canopy offset in X, both under a
+ * translated and scaled parent — the arrangement that catches an importer
+ * which ignores world matrices, or which grounds every node separately.
+ */
 export function buildTestGlb(options: TestGlbOptions = {}): Buffer {
   const { parentTranslation = [10, 5, -3], parentScale = 2 } = options;
 

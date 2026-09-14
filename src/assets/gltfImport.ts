@@ -30,6 +30,11 @@ const _matrix = new Matrix4();
 /** Attributes we keep. Anything else (tangents, extra UV sets) is dead weight. */
 const KEPT_ATTRIBUTES = ['position', 'normal', 'uv', 'color'] as const;
 
+/**
+ * Drops attributes the stylised materials never read — tangents, extra UV sets,
+ * morph targets, and vertex colours when the model is not colour-baked — so a
+ * kit costs only what it actually draws.
+ */
 function stripAttributes(geometry: BufferGeometry, keepVertexColors: boolean): void {
   for (const name of Object.keys(geometry.attributes)) {
     const kept = (KEPT_ATTRIBUTES as readonly string[]).includes(name);
@@ -101,6 +106,14 @@ export interface ExtractedModel {
  */
 export type NormalizeFor = NormalizeOptions | ((node: string) => NormalizeOptions);
 
+/**
+ * Every named mesh in a loaded glTF scene, as world-space geometry.
+ *
+ * Node transforms are baked in rather than kept on a parent, because the game
+ * instances these geometries directly and an `InstancedMesh` carries no scene
+ * graph of its own. `resolve` supplies the per-node normalisation, so one kit
+ * can hold models the manifest wants grounded, centred or left alone.
+ */
 export function extractGeometries(
   root: Object3D,
   options: NormalizeFor = {},

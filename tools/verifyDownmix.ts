@@ -16,15 +16,18 @@ import { SOUNDS } from '../src/audio/sounds';
 
 let failures = 0;
 
+/** Records one assertion and prints it, so every check reports in one run. */
 function check(label: string, condition: boolean, detail = ''): void {
   if (!condition) failures += 1;
   console.log(`${condition ? '  ok  ' : ' FAIL '} ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
+/** Float comparison, tight: these are sample values, not measurements. */
 function near(a: number, b: number, epsilon = 1e-6): boolean {
   return Math.abs(a - b) < epsilon;
 }
 
+/** Runs `mixToMono` over plain arrays, so a case reads as its numbers. */
 function mix(channels: number[][], length = channels[0]?.length ?? 0): number[] {
   const out = new Float32Array(length);
   mixToMono(channels.map((c) => new Float32Array(c)), out);

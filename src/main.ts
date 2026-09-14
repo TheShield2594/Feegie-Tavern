@@ -80,6 +80,12 @@ if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
  */
 const ASSET_DEADLINE_MS = 15_000;
 
+/**
+ * Starts the game: loads the optional asset kits, then constructs `Game`.
+ *
+ * Asset loading is bounded and never fatal — a kit that fails or stalls leaves
+ * its category on the generated art rather than holding the loading overlay.
+ */
 async function boot(root: HTMLElement): Promise<void> {
   try {
     // Kits are an enhancement, never a prerequisite: a kit that fails to load

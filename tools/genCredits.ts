@@ -52,6 +52,7 @@ const FONTS: { name: string; source: string; licence: string; note: string }[] =
 ];
 
 const shippedAudio = SOUNDS.flatMap((sound) => (sound.src ? [sound.src] : []));
+/** Last path segment — a sound's file name, as the pack tables key on. */
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
 // A shipped sound with no pack entry would appear in the game uncredited and,

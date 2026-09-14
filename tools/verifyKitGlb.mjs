@@ -29,6 +29,10 @@ const file = args.find((a) => !a.startsWith('--')) ?? 'public/assets/models/natu
 const buf = readFileSync(file);
 
 let failures = 0;
+/**
+ * Records one assertion and prints it. Every check runs, so a broken kit
+ * reports all of its faults at once instead of one per run.
+ */
 function check(label, condition, detail = '') {
   if (!condition) failures += 1;
   console.log(`${condition ? '  ok  ' : ' FAIL '} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -103,6 +107,7 @@ if (coloured.length > 0) {
 }
 check('indices narrowed to UINT16', json.meshes.every((m) => json.accessors[m.primitives[0].indices].componentType === 5123));
 
+/** Decodes an accessor to a flat array of numbers, whatever its component type. */
 function readAccessor(index) {
   const accessor = json.accessors[index];
   const view = json.bufferViews[accessor.bufferView];

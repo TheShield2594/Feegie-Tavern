@@ -40,6 +40,7 @@ const PINE = hexToRgb('#3d7a54');
 const BACKGROUND = hexToRgb('#f2e2c4'); // PALETTE.plaster.cream
 const INK = hexToRgb('#5f432c'); // PALETTE.foliage.barkDark
 
+/** The palette colour the game's materials would bind for a given node. */
 function colourFor(node) {
   if (node.endsWith('_trunk')) return BARK;
   if (node.startsWith('tree_pine')) return PINE;
@@ -68,6 +69,7 @@ for (const node of nodes) {
   byModel.get(model).push(node);
 }
 
+/** Min and max along one axis across every part of a model. */
 const extent = (parts, axis) => {
   let min = Infinity;
   let max = -Infinity;

@@ -67,6 +67,12 @@ const KEEP_OUT = [
   { x: -34, z: 20, r: 13 }, { x: 12, z: 52, r: 11 },
 ];
 
+/**
+ * Distance from a point to the nearest path edge, negative when on the path.
+ *
+ * Mirrors the same function in `world/Foliage.ts` — the map has to keep plants
+ * off the paths for the same reason and by the same rule.
+ */
 function distanceToPaths(x, z) {
   let best = Infinity;
   for (const p of PATHS) {
@@ -79,6 +85,7 @@ function distanceToPaths(x, z) {
   return best;
 }
 
+/** Whether a point falls inside a building's keep-out radius. */
 const blockedByStructure = (x, z, clearance) =>
   KEEP_OUT.some((k) => Math.hypot(x - k.x, z - k.z) < k.r + clearance);
 

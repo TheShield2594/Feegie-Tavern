@@ -101,6 +101,7 @@ function readColour(json, bin, index) {
 
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
+/** Column-major 4x4 product, matching glTF's matrix convention. */
 function multiply(a, b) {
   const out = new Array(16).fill(0);
   for (let c = 0; c < 4; c++) {
@@ -113,6 +114,13 @@ function multiply(a, b) {
   return out;
 }
 
+/**
+ * A glTF node's own transform as a 4x4 matrix.
+ *
+ * A node carries either an explicit `matrix` or a translation/rotation/scale
+ * triple, never both, so the TRS branch composes them in that fixed order and
+ * expands the rotation quaternion inline.
+ */
 function localMatrix(node) {
   if (node.matrix) return node.matrix.slice();
   const [tx, ty, tz] = node.translation ?? [0, 0, 0];
@@ -130,6 +138,7 @@ function localMatrix(node) {
   ];
 }
 
+/** Whether a matrix can be skipped rather than applied to every vertex. */
 const isIdentity = (m) => m.every((v, i) => Math.abs(v - IDENTITY[i]) < 1e-12);
 
 /**
@@ -205,12 +214,14 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
+/** CRC-32 over a buffer, as every PNG chunk must carry. */
 function crc32(buf) {
   let c = 0xffffffff;
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
+/** Wraps a payload as a PNG chunk: length, four-character type, data, CRC. */
 function chunk(type, data) {
   const head = Buffer.alloc(8);
   head.writeUInt32BE(data.length, 0);
@@ -220,6 +231,13 @@ function chunk(type, data) {
   return Buffer.concat([head, data, crc]);
 }
 
+/**
+ * Writes 8-bit truecolour RGB as a PNG, using only `node:zlib`.
+ *
+ * `rgb` is tightly packed, three bytes per pixel, top row first. Filtering is
+ * left off — the images are flat-shaded and deflate handles them well enough
+ * that choosing a filter per scanline would not pay for itself here.
+ */
 export function writePng(path, width, height, rgb) {
   const stride = width * 3;
   // PNG scanlines each carry a leading filter byte; 0 = no filtering.
@@ -269,6 +287,13 @@ const FONT = {
   '-': [0b000, 0b000, 0b111, 0b000, 0b000], ' ': [0, 0, 0, 0, 0],
 };
 
+/**
+ * Stamps a label into an RGB buffer with the built-in 3x5 font.
+ *
+ * Lower-cased, since the font has one case; unknown characters become spaces.
+ * `scale` is a whole-pixel multiplier, and glyphs are clipped at the edges
+ * rather than wrapped.
+ */
 export function drawText(target, width, height, text, x, y, scale, colour) {
   let cursor = x;
   for (const char of text.toLowerCase()) {
@@ -346,6 +371,15 @@ export function frameCamera(contentWidth, contentHeight, centre, fov, aspect, ma
   };
 }
 
+/**
+ * Rasterises flat-shaded triangles into an RGB buffer, z-buffered.
+ *
+ * Supersamples by `ss` in each axis and box-filters down, which is what keeps
+ * a low-poly silhouette from looking ragged. One fixed key light, an ambient
+ * floor so unlit faces stay readable, and face normals turned towards the eye
+ * so a surface wound the other way shades the same rather than falling to
+ * ambient and reading as shadow.
+ */
 export function render(meshes, width, height, camera, background, ss = 3) {
   const w = width * ss;
   const h = height * ss;

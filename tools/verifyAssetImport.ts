@@ -15,16 +15,19 @@ import { buildTestGlb } from './makeTestGlb';
 
 let failures = 0;
 
+/** Records one assertion and prints it, so every check reports in one run. */
 function check(label: string, condition: boolean, detail = ''): void {
   const mark = condition ? '  ok  ' : ' FAIL ';
   if (!condition) failures += 1;
   console.log(`${mark} ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
+/** Float comparison — these are geometry bounds, not exact values. */
 function near(a: number, b: number, epsilon = 1e-4): boolean {
   return Math.abs(a - b) < epsilon;
 }
 
+/** Parses an in-memory GLB through the same `GLTFLoader` the game uses. */
 async function parse(buffer: Buffer): Promise<Object3D> {
   const loader = new GLTFLoader();
   const array = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
@@ -33,6 +36,14 @@ async function parse(buffer: Buffer): Promise<Object3D> {
   });
 }
 
+/**
+ * Runs the GLB import path against a generated fixture.
+ *
+ * The fixture puts a trunk and an offset canopy under a translated, scaled
+ * parent, which is what makes the two things worth asserting visible: that
+ * world matrices are baked in, and that per-node normalisation reaches the
+ * importer instead of grounding each part to its own base.
+ */
 async function main(): Promise<void> {
   const parentTranslation: [number, number, number] = [10, 5, -3];
   const parentScale = 2;

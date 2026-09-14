@@ -39,6 +39,10 @@ export class AssetManager {
   private reports: LoadReport[] = [];
   private loaded = false;
 
+  /**
+   * Resolves a manifest path against Vite's `BASE_URL`, so the game works from
+   * a sub-path as well as from the root of a host.
+   */
   private url(file: string): string {
     const base = import.meta.env.BASE_URL ?? '/';
     return `${base.endsWith('/') ? base : `${base}/`}${file}`;
@@ -67,6 +71,12 @@ export class AssetManager {
     return this.reports;
   }
 
+  /**
+   * Fetches one kit and keeps the geometries the manifest claims.
+   *
+   * Never throws: a missing or malformed file is reported as a failed
+   * `LoadReport` so the caller can carry on with the procedural art.
+   */
   private async loadKit(id: KitId): Promise<LoadReport> {
     const def = KITS_BY_ID.get(id);
     if (!def) return { kit: id, ok: false, nodes: 0, vertices: 0, triangles: 0, error: 'not in KITS' };
@@ -122,6 +132,7 @@ export class AssetManager {
     return this.geometries.get(id) ?? null;
   }
 
+  /** Whether a manifest id resolved to real geometry. */
   has(id: string): boolean {
     return this.geometries.has(id);
   }
@@ -131,6 +142,7 @@ export class AssetManager {
     return this.loaded;
   }
 
+  /** Per-kit outcome of the last `loadAll`, including the kits that failed. */
   getReports(): readonly LoadReport[] {
     return this.reports;
   }
@@ -148,6 +160,12 @@ export class AssetManager {
     );
   }
 
+  /**
+   * Releases every retained geometry and resets to the pre-load state.
+   *
+   * The geometries are shared with the world systems that instanced them, so
+   * this belongs to teardown, not to a reload.
+   */
   dispose(): void {
     for (const geometry of this.geometries.values()) geometry.dispose();
     this.geometries.clear();

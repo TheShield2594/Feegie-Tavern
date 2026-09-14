@@ -14,6 +14,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SRC = new URL('../../src/', import.meta.url);
 
+/**
+ * Adds the extension a TypeScript import leaves off.
+ *
+ * Candidates are tried before the bare path so that an existing directory
+ * cannot shadow its own `index.ts`.
+ */
 function withExtension(path) {
   // Extension candidates come first: for `./foo` where a `foo/` directory
   // exists, an exact-path check would return the directory and the import then
@@ -24,6 +30,10 @@ function withExtension(path) {
   return path;
 }
 
+/**
+ * Node module-resolution hook: maps `@/…` onto `src/`, and retries a relative
+ * import with a TypeScript extension when node cannot resolve it as written.
+ */
 export async function resolve(specifier, context, next) {
   if (specifier.startsWith('@/')) {
     return next(pathToFileURL(withExtension(fileURLToPath(SRC) + specifier.slice(2))).href, context);
