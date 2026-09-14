@@ -41,6 +41,7 @@ npm run assets:inspect -- public/assets/models/nature/nature.glb   # node names
 npm run assets:verify                                              # GLB import path
 npm run assets:credits                                             # regenerate ASSET_CREDITS.md
 npm run assets:preview -- public/assets/models/nature/nature.glb docs/preview
+npm run assets:map                                                 # the island, offline
 npm run audio:verify                                               # positional-SFX downmix
 ```
 
@@ -49,6 +50,14 @@ using the same palette colours and flat shading the game binds and the scales
 from `src/assets/manifest.ts`. It is how you see what a kit contains before it
 is wired into a world system — and a tree whose canopy has come unstuck from
 its trunk is obvious in a picture and subtle in a bounding box.
+
+`assets:map` draws the whole island the same way: terrain and surfaces from
+`world/heightfield.ts` itself, building footprints from the `BUILDINGS` table,
+foliage from a replay of `Foliage`'s scatter at the same seed, and the shipped
+kit art. **It is not a screenshot of the game** — no water shader, sky, lighting,
+shadows, wind, season tint, post-processing or characters — and should never be
+presented as one. It answers "is the art in the right places", which is useful
+when the game itself cannot be built (see issue #21).
 
 ---
 

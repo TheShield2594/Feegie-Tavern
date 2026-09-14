@@ -925,6 +925,47 @@ unchanged and would land like the Survival Kit did. Characters (#7) and
 Character Animations (#8) should wait for the skinned path, not be forced
 through this one.
 
+### 9.5m Seeing the island — `npm run assets:map`
+
+`tools/renderMap.mjs` draws the whole island offline: terrain, surfaces, paths,
+foliage and building footprints, with the shipped kit art.
+
+**It is not a screenshot of the game and must never be presented as one.** The
+game cannot be built in this environment (no npm), so there is nothing to
+photograph. What this does instead is draw the *real layout* using the *same
+modules the game uses*:
+
+- terrain height and surface come from `world/heightfield.ts` itself, imported
+  and called directly — it is pure maths with no `three` dependency, and its own
+  docstring calls it the single source of truth for where the ground is
+- `PATHS` is that module's own table
+- the eight building footprints are read out of the `BUILDINGS` table
+- models are the shipped GLBs at their manifest scales
+
+Missing relative to the running game: water shader, sky, lighting rig, shadows,
+wind, season tint, post-processing, characters, grass and flowers. It answers
+"is the art in the right places and does it sit together", not "what does the
+game look like".
+
+**One caveat, stated in the file too:** the foliage scatter is a *replay* of
+`Foliage`'s rules — same seed, same constants, same order — not a call into it,
+because `Foliage` imports `three`. If those rules change the replay drifts until
+it is updated. The building footprints are parsed out of source for the same
+reason, with an assertion that the parse found every entry: the first attempt
+matched 5 of 8 and would have rendered a map quietly missing three buildings.
+
+Three bugs it surfaced in the shared rasteriser, all fixed:
+
+- terrain vertex colours were built at stride 3 where the rasteriser reads
+  stride 4 (as `COLOR_0` ships), which produced garbage colour
+- both ground quads were wound so the camera saw their back faces
+- and once that was fixed, every ground face shaded at the **ambient floor**,
+  because flipping the winding also flipped the face normal away from the light.
+  Back faces are already culled by screen winding, so any face still being drawn
+  is one the viewer can see; it is now lit by a normal flipped to face them.
+  This improves the kit previews too — a model wound inconsistently no longer
+  has patches that read as shadow.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed

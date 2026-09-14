@@ -15,7 +15,8 @@
     "assets:verify-kit": "node tools/verifyKitGlb.mjs",
     "assets:credits": "tsx tools/genCredits.ts",
     "audio:verify": "tsx tools/verifyDownmix.ts",
-    "assets:preview": "node tools/renderKit.mjs"
+    "assets:preview": "node tools/renderKit.mjs",
+    "assets:map": "tsx tools/renderMap.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"
