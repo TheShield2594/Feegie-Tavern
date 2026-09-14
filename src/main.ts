@@ -1,4 +1,5 @@
 import './ui/styles.css';
+import { AssetManager } from './assets/AssetManager';
 import { Game } from './core/Game';
 
 /**
@@ -41,13 +42,90 @@ function reportFailure(message: string, detail?: unknown): void {
   document.body.append(notice);
 }
 
+/**
+ * A caption over the title vista while the kits stream in. Deliberately plain:
+ * it is on screen for a fraction of a second on a warm cache, and the kits are
+ * optional, so it must never look like an error when they fail.
+ */
+function showLoading(): { progress: (done: number, total: number) => void; done: () => void } {
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position:fixed;inset:0;display:grid;place-items:center;
+    background:#141d2c;color:#f4ecdc;font:15px/1.6 system-ui,sans-serif;z-index:50;
+  `;
+  const label = document.createElement('p');
+  label.textContent = 'Loading Cozy Cove…';
+  el.append(label);
+  document.body.append(el);
+  return {
+    progress: (done, total) => {
+      label.textContent = total > 0 ? `Loading Cozy Cove… ${done}/${total}` : 'Loading Cozy Cove…';
+    },
+    done: () => el.remove(),
+  };
+}
+
 // Fail with an explanation rather than a blank canvas when WebGL is missing.
 const probe = document.createElement('canvas');
 if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
   reportFailure('Your browser did not provide a WebGL context.');
 } else {
+  void boot(container);
+}
+
+/**
+ * How long the boot waits for optional asset kits before starting without them.
+ * Generous enough for a cold cache on a slow connection, short enough that a
+ * stalled request does not read as a hung game.
+ */
+const ASSET_DEADLINE_MS = 15_000;
+
+/**
+ * Starts the game: loads the optional asset kits, then constructs `Game`.
+ *
+ * Asset loading is bounded and never fatal — a kit that fails or stalls leaves
+ * its category on the generated art rather than holding the loading overlay.
+ */
+async function boot(root: HTMLElement): Promise<void> {
   try {
-    const game = new Game(container);
+    // Kits are an enhancement, never a prerequisite: a kit that fails to load
+    // leaves that category on its generated art, so a failure here is warned
+    // about and then ignored rather than being allowed to stop the boot.
+    const assets = new AssetManager();
+    const loading = showLoading();
+    try {
+      // Bounded, because `loadAll` already swallows a *failed* kit but nothing
+      // bounds a *stalled* one: a request that never settles would hold the
+      // loading overlay forever, which is the opposite of the rule above. Past
+      // the deadline the boot continues on generated art.
+      //
+      // A kit that arrives late afterwards is inert rather than dangerous —
+      // world systems take their geometry from the manager when they are
+      // constructed, so nothing re-reads it once `Game` exists.
+      const timedOut = Symbol('assets-timed-out');
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        assets.loadAll((done, total) => loading.progress(done, total)).then(() => undefined),
+        new Promise<typeof timedOut>((resolve) => {
+          deadline = setTimeout(() => resolve(timedOut), ASSET_DEADLINE_MS);
+        }),
+      ]);
+      clearTimeout(deadline);
+
+      if (result === timedOut) {
+        console.warn(`[cozy] asset kits still loading after ${ASSET_DEADLINE_MS}ms; starting on generated art`);
+      } else {
+        for (const report of assets.getReports()) {
+          if (!report.ok) console.warn(`[cozy] kit "${report.kit}" unavailable (${report.error}); using generated art`);
+        }
+      }
+    } catch (error) {
+      console.warn('[cozy] asset kits unavailable; using generated art', error);
+    } finally {
+      loading.done();
+    }
+
+    const game = new Game(root, assets);
     game.start();
     (window as unknown as { cozy: Game }).cozy = game;
     // Panel openers, exposed for automated visual checks.

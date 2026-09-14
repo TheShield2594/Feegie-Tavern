@@ -1,7 +1,9 @@
 import { clamp01, damp } from '@/util/math';
+import { mixToMono } from './downmix';
 import {
   AMBIENCE_BY_ID,
   MUSIC_BY_ID,
+  SOUNDS,
   SOUNDS_BY_ID,
   type AmbienceDef,
   type AmbienceId,
@@ -68,6 +70,7 @@ export class AudioSystem {
 
       this.noiseBuffer = this.createNoiseBuffer();
       this.started = true;
+      void this.preloadSources();
       if (this.pendingMusic) {
         const id = this.pendingMusic;
         this.pendingMusic = null;
@@ -102,16 +105,54 @@ export class AudioSystem {
     if (this.master) this.rampTo(this.master.gain, muted ? 0 : this.volumes.master, 0.25);
   }
 
+  /**
+   * Fetches every sound that names a real file, so `playSound` finds a buffer
+   * instead of falling through to the synthesiser.
+   *
+   * This is what makes filling in `src` a pure data change: the table in
+   * `sounds.ts` decides what is real, and nothing else in the codebase has to
+   * know which sounds have been recorded yet. Loads run in the background after
+   * the audio context unlocks — a sound that has not arrived yet simply plays
+   * its placeholder, and one that fails to load keeps playing it forever, so a
+   * missing or broken file degrades to the old behaviour rather than silence.
+   */
+  private async preloadSources(): Promise<void> {
+    const base = import.meta.env.BASE_URL ?? '/';
+    const prefix = base.endsWith('/') ? base : `${base}/`;
+    await Promise.all(
+      SOUNDS.flatMap((def) => (def.src ? [this.loadBuffer(def.id, `${prefix}${def.src}`)] : [])),
+    );
+  }
+
   /** Registers a decoded file for an id, taking priority over the synth fallback. */
   async loadBuffer(id: string, url: string): Promise<void> {
     if (!this.ctx) return;
     try {
       const res = await fetch(url);
       const raw = await res.arrayBuffer();
-      this.buffers.set(id, await this.ctx.decodeAudioData(raw));
+      const decoded = await this.ctx.decodeAudioData(raw);
+      this.buffers.set(id, SOUNDS_BY_ID.get(id)?.mono ? this.toMono(decoded) : decoded);
     } catch (err) {
       console.warn(`[audio] Failed to load ${url}; keeping placeholder`, err);
     }
+  }
+
+  /**
+   * Collapses a decoded buffer to one channel, for sounds flagged `mono` in
+   * `sounds.ts` because they will be positioned in the world.
+   *
+   * Already-mono input is returned untouched rather than copied.
+   */
+  private toMono(buffer: AudioBuffer): AudioBuffer {
+    const ctx = this.ctx!;
+    if (buffer.numberOfChannels <= 1) return buffer;
+
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+
+    const mono = ctx.createBuffer(1, buffer.length, buffer.sampleRate);
+    mixToMono(channels, mono.getChannelData(0));
+    return mono;
   }
 
   playSound(id: string, options: { volume?: number; rate?: number } = {}): void {

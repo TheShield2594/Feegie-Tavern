@@ -15,6 +15,7 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
+import type { AssetManager } from '@/assets/AssetManager';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE, SEASON_TINT } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
@@ -22,6 +23,8 @@ import { clamp01, lerp, smoothstep } from '@/util/math';
 import { ISLAND_HALF, PATHS, sampleSurface } from './heightfield';
 
 export type TreeKind = 'broadleaf' | 'pine' | 'palm' | 'fruit';
+
+const TREE_KINDS: TreeKind[] = ['broadleaf', 'pine', 'palm', 'fruit'];
 
 export interface TreeRecord {
   id: string;
@@ -49,6 +52,27 @@ interface ScatterRule {
   maxSlope: number;
   /** Keep this far from paths and building pads. */
   clearance: number;
+}
+
+interface CanopyOffset {
+  dx: number;
+  dy: number;
+  dz: number;
+  scale: number;
+}
+
+/**
+ * A set of canopy meshes that shake together with one record list.
+ *
+ * The procedural canopy is three offset blobs shared by every broadleaf and
+ * fruit tree; a kit canopy is one mesh per tree kind, already positioned above
+ * its trunk in the model's own space. Grouping them lets `update` drive both
+ * through the same path instead of special-casing which art is loaded.
+ */
+interface CanopyGroup {
+  meshes: InstancedMesh[];
+  offsets: CanopyOffset[];
+  records: TreeRecord[];
 }
 
 const KEEP_OUT: { x: number; z: number; r: number }[] = [
@@ -85,6 +109,21 @@ function blockedByStructure(x: number, z: number, clearance: number): boolean {
 }
 
 /** Adds gentle per-vertex noise so a shared blob geometry still looks hand-made. */
+/**
+ * The generated trunk for a kind, base anchored at the origin so instances sit
+ * on the ground. Used wherever the nature kit has no trunk for that kind.
+ */
+function proceduralTrunk(kind: TreeKind): BufferGeometry {
+  const geometry =
+    kind === 'broadleaf' ? roughen(new CylinderGeometry(0.26, 0.42, 3.2, 7, 1), 0.1, 3)
+    : kind === 'pine' ? roughen(new CylinderGeometry(0.2, 0.4, 3.6, 6, 1), 0.08, 5)
+    : kind === 'palm' ? roughen(new CylinderGeometry(0.2, 0.32, 5.4, 6, 3), 0.12, 7)
+    : roughen(new CylinderGeometry(0.24, 0.38, 2.6, 7, 1), 0.1, 9);
+  const height = kind === 'palm' ? 5.4 : kind === 'pine' ? 3.6 : kind === 'fruit' ? 2.6 : 3.2;
+  geometry.translate(0, height / 2, 0);
+  return geometry;
+}
+
 function roughen(geometry: BufferGeometry, amount: number, seed: number): BufferGeometry {
   const position = geometry.getAttribute('position');
   const rng = new Rng(seed);
@@ -109,6 +148,10 @@ export class Foliage {
   readonly group = new Group();
 
   readonly trees: TreeRecord[] = [];
+  /** Kit geometry source. Absent, or missing a model, falls back to procedural. */
+  private assets?: AssetManager;
+  /** Every shaking canopy, kit or procedural, in one list. */
+  private canopyGroups: CanopyGroup[] = [];
   private trunkMeshes = new Map<TreeKind, InstancedMesh>();
   private canopyLayers: InstancedMesh[] = [];
   private canopyOffsets: { dx: number; dy: number; dz: number; scale: number }[] = [];
@@ -186,7 +229,8 @@ export class Foliage {
     roughness: 0.6,
   });
 
-  constructor(density = 1) {
+  constructor(density = 1, assets?: AssetManager) {
+    this.assets = assets;
     this.group.name = 'Foliage';
     const rng = new Rng(90210);
 
@@ -255,21 +299,26 @@ export class Foliage {
     this.trees.push(...records);
 
     // --- Trunks -----------------------------------------------------------
-    const trunkGeometries: Record<TreeKind, BufferGeometry> = {
-      broadleaf: roughen(new CylinderGeometry(0.26, 0.42, 3.2, 7, 1), 0.1, 3),
-      pine: roughen(new CylinderGeometry(0.2, 0.4, 3.6, 6, 1), 0.08, 5),
-      palm: roughen(new CylinderGeometry(0.2, 0.32, 5.4, 6, 3), 0.12, 7),
-      fruit: roughen(new CylinderGeometry(0.24, 0.38, 2.6, 7, 1), 0.1, 9),
-    };
-    for (const geometry of Object.values(trunkGeometries)) geometry.translate(0, 0, 0);
+    // A kind switches to kit art only when BOTH its trunk and canopy are
+    // present. The procedural blob canopy is offset and scaled for the
+    // cylinders below, so pairing it with a kit trunk would float it at the
+    // wrong height — the swap is all-or-nothing per kind.
+    const kitKinds = new Set<TreeKind>();
+    for (const kind of TREE_KINDS) {
+      if (this.kitGeometry(`tree.${kind}.trunk`) && this.kitGeometry(`tree.${kind}.canopy`)) {
+        kitKinds.add(kind);
+      }
+    }
 
-    for (const kind of ['broadleaf', 'pine', 'palm', 'fruit'] as TreeKind[]) {
+    for (const kind of TREE_KINDS) {
       const subset = records.filter((r) => r.kind === kind);
       if (subset.length === 0) continue;
-      const geometry = trunkGeometries[kind];
-      // Anchor the trunk's base at the origin so instances sit on the ground.
-      const height = kind === 'palm' ? 5.4 : kind === 'pine' ? 3.6 : kind === 'fruit' ? 2.6 : 3.2;
-      geometry.translate(0, height / 2, 0);
+      // Kit trunks already sit with their base at y=0 — the build script
+      // grounds each tree as a whole — so unlike the cylinders they are used
+      // as they arrive, with no translate.
+      const geometry = kitKinds.has(kind)
+        ? this.kitGeometry(`tree.${kind}.trunk`)!
+        : proceduralTrunk(kind);
 
       const mesh = new InstancedMesh(geometry, this.barkMaterial, subset.length);
       mesh.castShadow = true;
@@ -297,6 +346,35 @@ export class Foliage {
       { dx: 0.04, dy: 4.35, dz: 0.12, scale: 1.06 },
     ];
 
+    // A kit canopy is modelled above its own trunk, so it rides the tree's
+    // transform with no offset of its own — which is what lets the same shake
+    // path drive it. One mesh per kind, since each kind is a different model.
+    for (const kind of kitKinds) {
+      const subset = records.filter((r) => r.kind === kind);
+      if (subset.length === 0) continue;
+      const canopy = new InstancedMesh(this.kitGeometry(`tree.${kind}.canopy`)!, this.canopyMaterial, subset.length);
+      canopy.castShadow = true;
+      canopy.receiveShadow = true;
+      canopy.name = `Canopy_${kind}`;
+      canopy.userData.noFade = true;
+      const zero: CanopyOffset = { dx: 0, dy: 0, dz: 0, scale: 1 };
+      subset.forEach((record, i) => {
+        this.writeCanopyMatrix(record, zero, 0);
+        canopy.setMatrixAt(i, this.matrix);
+      });
+      canopy.instanceMatrix.needsUpdate = true;
+      this.group.add(canopy);
+      this.canopyGroups.push({ meshes: [canopy], offsets: [zero], records: subset });
+    }
+
+    // Everything below is the procedural canopy, built only for the kinds the
+    // kit did not supply.
+    const blobRecords = records.filter(
+      (r) => (r.kind === 'broadleaf' || r.kind === 'fruit') && !kitKinds.has(r.kind),
+    );
+    const pineRecords = records.filter((r) => r.kind === 'pine' && !kitKinds.has('pine'));
+    const palmRecords = records.filter((r) => r.kind === 'palm' && !kitKinds.has('palm'));
+
     const blobGeometry = roughen(new IcosahedronGeometry(1, 1), 0.13, 21);
     const pineGeometry = roughen(new ConeGeometry(1, 2.4, 7, 2), 0.14, 23);
     // A frond is a long tapered blade rather than a disc, so palms read as
@@ -305,8 +383,8 @@ export class Foliage {
     palmFrond.scale(0.34, 0.16, 1.7);
     palmFrond.translate(0, 0, 1.5);
 
-    for (let layer = 0; layer < this.canopyOffsets.length; layer++) {
-      const mesh = new InstancedMesh(blobGeometry, this.canopyMaterial, records.length);
+    for (let layer = 0; blobRecords.length > 0 && layer < this.canopyOffsets.length; layer++) {
+      const mesh = new InstancedMesh(blobGeometry, this.canopyMaterial, blobRecords.length);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.name = `Canopy_${layer}`;
@@ -316,7 +394,6 @@ export class Foliage {
     }
 
     // Pines and palms replace the blob canopy with their own silhouette.
-    const pineRecords = records.filter((r) => r.kind === 'pine');
     if (pineRecords.length > 0) {
       const pines = new InstancedMesh(pineGeometry, this.pineMaterial, pineRecords.length * 3);
       pines.castShadow = true;
@@ -336,7 +413,6 @@ export class Foliage {
       this.group.add(pines);
     }
 
-    const palmRecords = records.filter((r) => r.kind === 'palm');
     if (palmRecords.length > 0) {
       const palms = new InstancedMesh(palmFrond, this.canopyMaterial, palmRecords.length * 5);
       palms.castShadow = true;
@@ -357,7 +433,6 @@ export class Foliage {
     }
 
     // Blob canopies for broadleaf and fruit trees.
-    const blobRecords = records.filter((r) => r.kind === 'broadleaf' || r.kind === 'fruit');
     const canopyColor = new Color();
     for (let layer = 0; layer < this.canopyLayers.length; layer++) {
       const mesh = this.canopyLayers[layer];
@@ -374,6 +449,13 @@ export class Foliage {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.userData.records = blobRecords;
+    }
+    if (this.canopyLayers.length > 0) {
+      this.canopyGroups.push({
+        meshes: this.canopyLayers,
+        offsets: this.canopyOffsets,
+        records: blobRecords,
+      });
     }
 
     // --- Fruit -------------------------------------------------------------
@@ -393,6 +475,15 @@ export class Foliage {
       this.refreshFruit(1);
       this.group.add(this.fruitMesh);
     }
+  }
+
+  /**
+   * Geometry for a manifest id, or null when no kit is loaded or the kit did
+   * not contain it. Every caller must handle null — that is the fallback that
+   * keeps the world rendering when a kit is missing.
+   */
+  private kitGeometry(id: string): BufferGeometry | null {
+    return this.assets?.geometry(id) ?? null;
   }
 
   private writeCanopyMatrix(
@@ -465,7 +556,15 @@ export class Foliage {
   // --- Bushes, flowers, grass ---------------------------------------------
 
   private buildBushes(rng: Rng, density: number): void {
-    const geometry = roughen(new IcosahedronGeometry(0.75, 1), 0.32, 33);
+    // plant_bushDetailed was picked over the plainer kit bush because the
+    // generated blob it replaces is a wide mound: the sparse one left visibly
+    // thinner ground cover. bush.large stays in the manifest for the full
+    // foliage pass, where bushes are placed in more than one size class.
+    const kitBush = this.kitGeometry('bush.small');
+    const geometry = kitBush ?? roughen(new IcosahedronGeometry(0.75, 1), 0.32, 33);
+    // Kit bushes stand on their base; the generated blob is centred on the
+    // origin and has to be lifted by roughly its own radius to sit on soil.
+    const lift = kitBush ? 0 : 0.42;
     const count = Math.round(240 * density);
     const placed: { x: number; y: number; z: number; s: number; r: number; tint: number }[] = [];
 
@@ -488,9 +587,12 @@ export class Foliage {
     mesh.name = 'Bushes';
     const color = new Color();
     placed.forEach((b, i) => {
-      this.dummy.position.set(b.x, b.y + 0.42 * b.s, b.z);
+      this.dummy.position.set(b.x, b.y + lift * b.s, b.z);
       this.dummy.rotation.set(0, b.r, 0);
-      this.dummy.scale.set(b.s * 1.15, b.s * 0.85, b.s * 1.15);
+      // The blob is squashed to read as a mound; a modelled bush already has
+      // its own proportions and is scaled uniformly so it is not distorted.
+      if (kitBush) this.dummy.scale.setScalar(b.s);
+      else this.dummy.scale.set(b.s * 1.15, b.s * 0.85, b.s * 1.15);
       this.dummy.updateMatrix();
       mesh.setMatrixAt(i, this.dummy.matrix);
       color.set(PALETTE.foliage.canopyMid).lerp(new Color(PALETTE.foliage.canopyLight), b.tint * 0.7);
@@ -637,21 +739,24 @@ export class Foliage {
 
   /** Per-frame: tree shake animation and grass chunk culling. */
   update(dt: number, cameraX: number, cameraZ: number): void {
-    const blobRecords = (this.canopyLayers[0]?.userData.records ?? []) as TreeRecord[];
-    let dirty = false;
-    for (let i = 0; i < blobRecords.length; i++) {
-      const record = blobRecords[i];
-      if (record.shakeTimer <= 0) continue;
-      record.shakeTimer = Math.max(0, record.shakeTimer - dt);
-      const shake = smoothstep(0, 0.85, record.shakeTimer) * (record.shakeTimer / 0.85);
-      for (let layer = 0; layer < this.canopyLayers.length; layer++) {
-        this.writeCanopyMatrix(record, this.canopyOffsets[layer], shake);
-        this.canopyLayers[layer].setMatrixAt(i, this.matrix);
+    // Kit and procedural canopies shake through the same path; a group is one
+    // record list with the meshes that follow it.
+    for (const group of this.canopyGroups) {
+      let dirty = false;
+      for (let i = 0; i < group.records.length; i++) {
+        const record = group.records[i];
+        if (record.shakeTimer <= 0) continue;
+        record.shakeTimer = Math.max(0, record.shakeTimer - dt);
+        const shake = smoothstep(0, 0.85, record.shakeTimer) * (record.shakeTimer / 0.85);
+        for (let layer = 0; layer < group.meshes.length; layer++) {
+          this.writeCanopyMatrix(record, group.offsets[layer], shake);
+          group.meshes[layer].setMatrixAt(i, this.matrix);
+        }
+        dirty = true;
       }
-      dirty = true;
-    }
-    if (dirty) {
-      for (const mesh of this.canopyLayers) mesh.instanceMatrix.needsUpdate = true;
+      if (dirty) {
+        for (const mesh of group.meshes) mesh.instanceMatrix.needsUpdate = true;
+      }
     }
 
     // Chunks are 20 m square, so allow for their half-diagonal before hiding

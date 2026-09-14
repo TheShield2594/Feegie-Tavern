@@ -1,4 +1,5 @@
 import { Box3, Color, Group, Vector3 } from 'three';
+import type { AssetManager } from '@/assets/AssetManager';
 import { AudioSystem } from '@/audio/AudioSystem';
 import { EventBus } from './EventBus';
 import { InputSystem } from '@/input/InputSystem';
@@ -151,7 +152,12 @@ export class Game {
   private running = false;
   private lastFrame = 0;
 
-  constructor(private container: HTMLElement) {
+  /**
+   * `assets` is optional and may be half-loaded: every system falls back to its
+   * generated art for anything the kits did not supply, so the game boots with
+   * no kits at all.
+   */
+  constructor(private container: HTMLElement, private assets?: AssetManager) {
     registerShaderChunks();
 
     this.renderer = new Renderer(container);
@@ -203,7 +209,7 @@ export class Game {
 
     this.terrain = new Terrain({ resolution: 300 });
     this.water = new Water();
-    this.foliage = new Foliage(this.renderer.profile.foliageDensity);
+    this.foliage = new Foliage(this.renderer.profile.foliageDensity, this.assets);
     this.props = new Props();
     this.buildings = new Buildings();
     this.fishSchools = new FishSchools();
