@@ -834,6 +834,46 @@ owner's, not something to quietly resolve by reaching outside the list. The
 procedural `ItemModels` geometry keeps drawing them in the meantime, which is
 exactly the fallback the manifest was built around.
 
+### 9.5k UI font (#19) — the one non-CC0 thing that ships
+
+Nunito, **SIL OFL 1.1**, self-hosted. This is the single deliberate exception in
+§8 decision 4, and it was blocked for a reason worth restating: earlier in this
+section `fonts.gstatic.com` was reachable while `fonts.google.com` was not, so
+the bytes could be fetched but the licence could not be read — and §7 step 1
+forbids committing anything whose licence has not been read. Both hosts are open
+now, so the licence came first: `OFL.txt` verbatim from Google Fonts' own
+`download/list` manifest, saved to `licenses/fonts-OFL.txt`. Shipping it is what
+OFL 1.1 asks for. Nunito declares **no Reserved Font Name**, so clause 3 — the
+part that would restrict renaming — does not apply.
+
+Not a new choice: `src/ui/styles.css` already declared
+`--font: "Nunito", "Quicksand", …` and has been falling through to `system-ui`
+all along. This just supplies the font it already asked for.
+
+**The variable font, not static weights.** The UI uses 400, 700, 800 and 900.
+Four static files would be ~132 KB each (528 KB); the variable file is 275,644
+bytes and covers 200–1000 continuously. `fonts.googleapis.com` is *not*
+allowlisted, so the usual `css2` route to a subset WOFF2 is closed — but
+`fonts.google.com/download/list` returns real `fonts.gstatic.com` URLs, which is
+how the file was fetched from Google's own distribution rather than a mirror.
+
+**It is a TTF, not a WOFF2, and that is a compromise.** §3 #19 asks for a ~30 KB
+WOFF2 subset. Converting needs `fonttools` (pip is blocked) or a WOFF2 encoder
+(npm is blocked), and hand-rolling one was not worth the risk of a silently
+malformed font. Measured instead: 275,644 raw, 126,197 gzip, **107,617 brotli**
+— so `docker/nginx.conf` now gzips `font/ttf` and declares its MIME type. A
+subset WOFF2 would still be roughly a third of that and remains worth doing from
+an environment with the tooling.
+
+**It lives in `src/assets/fonts/`, not `public/assets/fonts/` where §4 puts it**,
+and deliberately. A model GLB is fetched by path at runtime, so `public/` is
+right for it. A font referenced from CSS is resolved by Vite at *build* time, and
+`base: './'` is exactly the configuration Vite warns about for root-absolute
+`public/` references. Importing from `src/` means a wrong path fails the build
+instead of 404ing in front of a player, and the file is content-hashed, so it
+needs no cache-busting rule of its own. Recorded here as a deviation from §4
+rather than a silent one.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed

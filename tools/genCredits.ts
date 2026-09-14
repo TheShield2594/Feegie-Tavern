@@ -37,6 +37,20 @@ const AUDIO_PACKS: { pack: string; url: string; licence: string; files: string[]
   },
 ];
 
+/**
+ * Fonts. Separate from `AUDIO_PACKS` because this is the project's one licence
+ * with a condition attached: OFL 1.1 requires the licence text to travel with
+ * the font, which is why `licenses/fonts-OFL.txt` exists.
+ */
+const FONTS: { name: string; source: string; licence: string; note: string }[] = [
+  {
+    name: 'Nunito (variable, 200-1000)',
+    source: 'https://fonts.google.com/specimen/Nunito',
+    licence: 'SIL OFL 1.1',
+    note: 'ship `OFL.txt` alongside — no Reserved Font Name declared',
+  },
+];
+
 const shippedAudio = SOUNDS.flatMap((sound) => (sound.src ? [sound.src] : []));
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
@@ -117,6 +131,17 @@ for (const entry of AUDIO_PACKS) {
   const used = shippedAudio.filter((src) => entry.files.includes(basename(src))).length;
   if (used === 0) continue;
   lines.push(`| ${entry.pack} | ${entry.url} | ${entry.licence} | not required | ${used} |`);
+}
+
+lines.push(
+  '',
+  '## Fonts',
+  '',
+  '| Font | Source | Licence | Attribution |',
+  '| --- | --- | --- | --- |',
+);
+for (const font of FONTS) {
+  lines.push(`| ${font.name} | ${font.source} | ${font.licence} | ${font.note} |`);
 }
 
 lines.push(

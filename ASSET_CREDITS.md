@@ -37,6 +37,12 @@ the game actually plays a file from appear below.
 | Kenney — RPG Audio | https://kenney.nl/assets/rpg-audio | CC0 1.0 | not required | 2 |
 | Kenney — Interface Sounds | https://kenney.nl/assets/interface-sounds | CC0 1.0 | not required | 2 |
 
+## Fonts
+
+| Font | Source | Licence | Attribution |
+| --- | --- | --- | --- |
+| Nunito (variable, 200-1000) | https://fonts.google.com/specimen/Nunito | SIL OFL 1.1 | ship `OFL.txt` alongside — no Reserved Font Name declared |
+
 ## Licence files
 
 Each pack's original, unedited licence text is preserved under `licenses/`.
