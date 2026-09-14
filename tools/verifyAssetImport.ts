@@ -85,6 +85,40 @@ async function main(): Promise<void> {
   const stats = geometryStats(trunk);
   check('stats report a solid box', stats.triangles === 12, `triangles=${stats.triangles}`);
 
+  // --- per-node options ----------------------------------------------------
+  // The production path in AssetManager hands extractGeometries a resolver, so
+  // that one kit can hold models with different scales and grounding. Passing
+  // a single options object instead silently drops every manifest `normalize`:
+  // models load at the kit's authored size, and each node is grounded on its
+  // own, which puts a canopy at the foot of its trunk rather than on top.
+  const perNode = extractGeometries(scene, (node) =>
+    node === 'tree_trunk'
+      ? { groundOrigin: false, centreXZ: false, scale: 2 }
+      : { groundOrigin: false, centreXZ: false },
+  );
+  const scaledTrunk = perNode.get('tree_trunk');
+  const plainCanopy = perNode.get('tree_canopy');
+  check('resolver is asked per node', Boolean(scaledTrunk && plainCanopy));
+  if (scaledTrunk && plainCanopy) {
+    const scaledBox = new Box3().setFromBufferAttribute(scaledTrunk.getAttribute('position') as never);
+    const plainBox = new Box3().setFromBufferAttribute(plainCanopy.getAttribute('position') as never);
+    const unscaled = new Box3().setFromBufferAttribute(
+      raw.get('tree_trunk')!.getAttribute('position') as never,
+    );
+    check(
+      'per-node scale is applied',
+      near(scaledBox.max.y - scaledBox.min.y, (unscaled.max.y - unscaled.min.y) * 2),
+      `height=${(scaledBox.max.y - scaledBox.min.y).toFixed(4)}`,
+    );
+    check(
+      'a node given no scale is left alone',
+      near(plainBox.min.y, new Box3().setFromBufferAttribute(
+        raw.get('tree_canopy')!.getAttribute('position') as never,
+      ).min.y),
+      `min.y=${plainBox.min.y.toFixed(4)}`,
+    );
+  }
+
   console.log(failures === 0 ? '\nAll asset-import checks passed.' : `\n${failures} check(s) failed.`);
   process.exit(failures === 0 ? 0 : 1);
 }

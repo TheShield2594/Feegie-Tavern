@@ -1,4 +1,5 @@
 import './ui/styles.css';
+import { AssetManager } from './assets/AssetManager';
 import { Game } from './core/Game';
 
 /**
@@ -41,13 +42,56 @@ function reportFailure(message: string, detail?: unknown): void {
   document.body.append(notice);
 }
 
+/**
+ * A caption over the title vista while the kits stream in. Deliberately plain:
+ * it is on screen for a fraction of a second on a warm cache, and the kits are
+ * optional, so it must never look like an error when they fail.
+ */
+function showLoading(): { progress: (done: number, total: number) => void; done: () => void } {
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position:fixed;inset:0;display:grid;place-items:center;
+    background:#141d2c;color:#f4ecdc;font:15px/1.6 system-ui,sans-serif;z-index:50;
+  `;
+  const label = document.createElement('p');
+  label.textContent = 'Loading Cozy Cove…';
+  el.append(label);
+  document.body.append(el);
+  return {
+    progress: (done, total) => {
+      label.textContent = total > 0 ? `Loading Cozy Cove… ${done}/${total}` : 'Loading Cozy Cove…';
+    },
+    done: () => el.remove(),
+  };
+}
+
 // Fail with an explanation rather than a blank canvas when WebGL is missing.
 const probe = document.createElement('canvas');
 if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
   reportFailure('Your browser did not provide a WebGL context.');
 } else {
+  void boot(container);
+}
+
+async function boot(root: HTMLElement): Promise<void> {
   try {
-    const game = new Game(container);
+    // Kits are an enhancement, never a prerequisite: a kit that fails to load
+    // leaves that category on its generated art, so a failure here is warned
+    // about and then ignored rather than being allowed to stop the boot.
+    const assets = new AssetManager();
+    const loading = showLoading();
+    try {
+      await assets.loadAll((done, total) => loading.progress(done, total));
+      for (const report of assets.getReports()) {
+        if (!report.ok) console.warn(`[cozy] kit "${report.kit}" unavailable (${report.error}); using generated art`);
+      }
+    } catch (error) {
+      console.warn('[cozy] asset kits unavailable; using generated art', error);
+    } finally {
+      loading.done();
+    }
+
+    const game = new Game(root, assets);
     game.start();
     (window as unknown as { cozy: Game }).cozy = game;
     // Panel openers, exposed for automated visual checks.

@@ -679,6 +679,72 @@ the JS bundle: the OGGs are fetched after the audio context unlocks, and
 - **§7 step 6 (the wholesale category-by-category swap) was not started**, as
   intended: it is separate commits and separate review.
 
+### Model half of the slice wired and verified in a browser, 2026-09-14
+
+§7 step 4b is done: `nature.glb` now drives `world/Foliage.ts` for all four
+tree kinds and for bushes. `AssetManager` is constructed in `main.ts` before
+`Game`, behind a small loading caption, and passed down to `Foliage`.
+
+Kept intact per §7.1: geometry is swapped, nothing else. Imported meshes keep
+`createStylizedMaterial` — the importer hands back bare geometry, so the pack's
+own materials never enter the scene and season tint, wind and wetness keep
+working. Every mesh stays an `InstancedMesh`.
+
+Two design points worth recording:
+
+- **The kit swap is all-or-nothing per tree kind.** A kind uses kit art only
+  when both its trunk *and* canopy are present, because the procedural blob
+  canopy is offset and scaled for the generated cylinders and would float at
+  the wrong height above a kit trunk.
+- **Kit and procedural canopies shake through one path.** A kit canopy is
+  modelled above its own trunk, so it rides the tree's transform with a zero
+  offset; grouping both kinds of canopy lets `update` drive them identically
+  rather than branching on which art is loaded.
+
+### A bug the checks could not have caught, found by running the game
+
+`AssetManager` called `extractGeometries(gltf.scene)` with **no options**, so
+every model's `normalize` in the manifest was silently discarded:
+
+- `scale` was never applied, so trees loaded at the kit's authored ~1.7 units
+  instead of the 3.2-4.2 the manifest asks for — roughly a third of the height
+  of the procedural trees they replace.
+- `groundOrigin` and `centreXZ` fell back to their defaults of `true`, which
+  grounds each node *individually*. That put every canopy at the foot of its
+  own trunk — the exact failure the manifest's `groundOrigin: false` comment
+  warns about, since the build script grounds each tree as a whole.
+
+`assets:verify` passed throughout, because it calls `extractGeometries` with
+explicit options against a synthetic fixture; the production path never passed
+the manifest's. The fix makes `extractGeometries` accept a per-node resolver
+and has `AssetManager` supply each model's own `normalize`. Three checks were
+added covering the resolver, so the production path is now exercised — 13
+checks, all passing.
+
+**Verified in a real browser** (headless Chromium against `vite preview`), not
+only by type-checking: `nature.glb` fetches 200, the scene graph shows
+`Trunks_*`/`Canopy_*` carrying kit triangle counts (74/50/36/130 trunk,
+40/180/300/64 canopy) rather than the generated ones, bushes at 104 triangles
+are `plant_bushDetailed`, no procedural `Canopy_0..2`/`PineCanopy`/`PalmCanopy`
+remain, and there are no page errors.
+
+The one console failure is pre-existing and unrelated: the page hot-links
+`fonts.googleapis.com`, which fails on a restricted network. Self-hosting it is
+exactly asset #19, still blocked on reading `OFL.txt`.
+
+### Bundle after the model slice (`npm run build`)
+
+| Chunk | Raw | Gzip | vs baseline |
+| --- | --- | --- | --- |
+| `three` | 566.32 kB | 145.15 kB | +43.95 / +11.94 |
+| app | 453.46 kB | 138.38 kB | +74.12 / +21.24 |
+| CSS | 25.80 kB | 6.36 kB | — |
+| **Total** | **1045.58 kB** | **289.89 kB** | **+118.07 / +33.18** |
+
+The growth is `GLTFLoader` plus the meshopt decoder, which the baseline note
+predicted would arrive with the first kit. On top of that sits 116.3 KB of
+assets, so first load is ~1.16 MB against the §5 budget of <= 8 MB.
+
 ### Bundle baseline (pre-asset, `npm run build`)
 
 Unchanged and **not re-measured this session** — `vite` is unavailable, so this

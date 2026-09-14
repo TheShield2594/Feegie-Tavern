@@ -73,7 +73,16 @@ export class AssetManager {
 
     try {
       const gltf = await this.loader.loadAsync(this.url(def.file));
-      const extracted = extractGeometries(gltf.scene);
+
+      // Each model carries its own normalisation, so the manifest's entries
+      // must reach the importer. Passing none left every model at the kit's
+      // authored size and grounded node-by-node, which drops a canopy to the
+      // foot of its own trunk instead of keeping it atop the tree.
+      const wanted = new Map<string, ModelDef>();
+      for (const model of MODELS_BY_ID.values()) {
+        if (model.kit === id) wanted.set(model.node, model);
+      }
+      const extracted = extractGeometries(gltf.scene, (node) => wanted.get(node)?.normalize ?? {});
       this.nodesByKit.set(id, [...extracted.keys()]);
 
       let vertices = 0;

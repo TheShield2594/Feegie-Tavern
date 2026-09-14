@@ -93,9 +93,17 @@ export interface ExtractedModel {
  * yields one entry per primitive, suffixed, because three splits multi-material
  * primitives into sibling meshes on import.
  */
+/**
+ * Per-node normalisation. A plain object applies to every node; a function is
+ * asked for each node by name, which is what lets one kit hold models that need
+ * different scales and grounding — the common case, since a kit is authored at
+ * its own size and each model is fitted to what it replaces.
+ */
+export type NormalizeFor = NormalizeOptions | ((node: string) => NormalizeOptions);
+
 export function extractGeometries(
   root: Object3D,
-  options: NormalizeOptions = {},
+  options: NormalizeFor = {},
 ): Map<string, BufferGeometry> {
   root.updateWorldMatrix(true, true);
 
@@ -111,7 +119,8 @@ export function extractGeometries(
     seen.set(base, count + 1);
     const key = count === 0 ? base : `${base}_${count}`;
 
-    out.set(key, normalizeGeometry(mesh.geometry, mesh.matrixWorld, options));
+    const nodeOptions = typeof options === 'function' ? options(key) : options;
+    out.set(key, normalizeGeometry(mesh.geometry, mesh.matrixWorld, nodeOptions));
   });
 
   return out;
