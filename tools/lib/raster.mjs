@@ -31,43 +31,166 @@ export function readGlb(path) {
   return { json, bin };
 }
 
+const COMPONENT_BYTES = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+
+/**
+ * Reads an accessor as raw numbers.
+ *
+ * Honours `bufferView.byteStride`, so interleaved attributes are read from
+ * their own slots rather than from padding or a neighbouring attribute, and
+ * returns values untouched — an earlier version converted *every* unsigned-byte
+ * accessor from linear to sRGB, which silently corrupted UNSIGNED_BYTE indices
+ * (the Kenney town and survival kits index their small meshes that way).
+ * Colour conversion belongs with the caller that knows the semantic.
+ */
 export function readAccessor(json, bin, index) {
   const accessor = json.accessors[index];
   const view = json.bufferViews[accessor.bufferView];
   const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[accessor.type];
+  const size = COMPONENT_BYTES[accessor.componentType];
+  if (!size) throw new Error(`unsupported componentType ${accessor.componentType}`);
   const base = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-  const out = [];
-  for (let i = 0; i < accessor.count * components; i++) {
-    if (accessor.componentType === 5126) out.push(bin.readFloatLE(base + i * 4));
-    else if (accessor.componentType === 5123) out.push(bin.readUInt16LE(base + i * 2));
-    else if (accessor.componentType === 5125) out.push(bin.readUInt32LE(base + i * 4));
-    // COLOR_0 ships as normalised unsigned bytes holding *linear* values, per
-    // the glTF spec. The rasteriser shades in sRGB bytes, so encode on the way
-    // in — otherwise the preview shows the file darker than the game will.
-    else if (accessor.componentType === 5121) {
-      const v = bin.readUInt8(base + i) / 255;
-      const encoded = v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055;
-      out.push(Math.round(encoded * 255));
+  const stride = view.byteStride || components * size;
+
+  const out = new Array(accessor.count * components);
+  for (let i = 0; i < accessor.count; i++) {
+    for (let c = 0; c < components; c++) {
+      const at = base + i * stride + c * size;
+      out[i * components + c] =
+        accessor.componentType === 5126 ? bin.readFloatLE(at)
+        : accessor.componentType === 5125 ? bin.readUInt32LE(at)
+        : accessor.componentType === 5123 ? bin.readUInt16LE(at)
+        : accessor.componentType === 5121 ? bin.readUInt8(at)
+        : accessor.componentType === 5122 ? bin.readInt16LE(at)
+        : bin.readInt8(at);
     }
   }
   return out;
 }
 
+/** Linear 0..1 to an sRGB byte, for display. */
+const linearToSrgbByte = (v) =>
+  Math.round((v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055) * 255);
+
+/**
+ * Reads COLOR_0 as sRGB bytes, four per vertex.
+ *
+ * glTF holds `COLOR_0` linear, while the rasteriser shades in sRGB bytes, so
+ * the encode happens here — where the semantic is known — rather than inside
+ * the generic reader. Handles both VEC3 and VEC4, and both the normalised
+ * integer forms and float.
+ */
+function readColour(json, bin, index) {
+  const accessor = json.accessors[index];
+  const raw = readAccessor(json, bin, index);
+  const components = accessor.type === 'VEC3' ? 3 : 4;
+  const scale =
+    accessor.componentType === 5126 ? 1
+    : accessor.componentType === 5123 ? 1 / 65535
+    : 1 / 255;
+
+  const out = new Array(accessor.count * 4);
+  for (let i = 0; i < accessor.count; i++) {
+    for (let c = 0; c < 3; c++) out[i * 4 + c] = linearToSrgbByte(raw[i * components + c] * scale);
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}
+
+// --- scene graph -------------------------------------------------------------
+
+const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function multiply(a, b) {
+  const out = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = sum;
+    }
+  }
+  return out;
+}
+
+function localMatrix(node) {
+  if (node.matrix) return node.matrix.slice();
+  const [tx, ty, tz] = node.translation ?? [0, 0, 0];
+  const [qx, qy, qz, qw] = node.rotation ?? [0, 0, 0, 1];
+  const [sx, sy, sz] = node.scale ?? [1, 1, 1];
+  const x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+  const xx = qx * x2, xy = qx * y2, xz = qx * z2;
+  const yy = qy * y2, yz = qy * z2, zz = qz * z2;
+  const wx = qw * x2, wy = qw * y2, wz = qw * z2;
+  return [
+    (1 - (yy + zz)) * sx, (xy + wz) * sx, (xz - wy) * sx, 0,
+    (xy - wz) * sy, (1 - (xx + zz)) * sy, (yz + wx) * sy, 0,
+    (xz + wy) * sz, (yz - wx) * sz, (1 - (xx + yy)) * sz, 0,
+    tx, ty, tz, 1,
+  ];
+}
+
+const isIdentity = (m) => m.every((v, i) => Math.abs(v - IDENTITY[i]) < 1e-12);
+
+/**
+ * Every drawable primitive in a GLB, with node transforms baked into positions.
+ *
+ * Walks the scene graph rather than mapping over `json.nodes`: a glTF node may
+ * carry a transform and no mesh at all (grouping nodes are ordinary), a mesh may
+ * hold several primitives, and a node's placement comes from its whole parent
+ * chain. Mapping the flat node list assumed one mesh per node and one primitive
+ * per mesh, which holds for the kits this repo builds but not for the source
+ * packs they are built from — pointing the previewer at one of those produced
+ * missing or mislocated geometry.
+ *
+ * A mesh with several primitives yields one entry each, suffixed, which is how
+ * `src/assets/gltfImport.ts` names them too.
+ */
 export function loadNodes(path) {
   const { json, bin } = readGlb(path);
-  return json.nodes.map((node) => {
-    const primitive = json.meshes[node.mesh].primitives[0];
-    return {
-      name: node.name,
-      positions: readAccessor(json, bin, primitive.attributes.POSITION),
-      indices: readAccessor(json, bin, primitive.indices),
-      // A baked-atlas kit carries its colour here instead of in a material, so
-      // the preview has to read it or every building renders one flat green.
-      colors: primitive.attributes.COLOR_0 !== undefined
-        ? readAccessor(json, bin, primitive.attributes.COLOR_0)
-        : null,
-    };
-  });
+  const out = [];
+  const seen = new Map();
+
+  const visit = (index, parent) => {
+    const node = json.nodes[index];
+    const world = multiply(parent, localMatrix(node));
+
+    if (node.mesh !== undefined) {
+      const mesh = json.meshes[node.mesh];
+      for (const primitive of mesh.primitives) {
+        const base = node.name ?? mesh.name ?? `node${index}`;
+        const count = seen.get(base) ?? 0;
+        seen.set(base, count + 1);
+
+        const positions = readAccessor(json, bin, primitive.attributes.POSITION);
+        if (!isIdentity(world)) {
+          for (let i = 0; i < positions.length; i += 3) {
+            const [x, y, z] = [positions[i], positions[i + 1], positions[i + 2]];
+            positions[i] = world[0] * x + world[4] * y + world[8] * z + world[12];
+            positions[i + 1] = world[1] * x + world[5] * y + world[9] * z + world[13];
+            positions[i + 2] = world[2] * x + world[6] * y + world[10] * z + world[14];
+          }
+        }
+
+        out.push({
+          name: count === 0 ? base : `${base}_${count}`,
+          positions,
+          indices: readAccessor(json, bin, primitive.indices),
+          // A baked-atlas kit carries its colour here instead of in a material,
+          // so the preview has to read it or every building renders flat green.
+          colors: primitive.attributes.COLOR_0 !== undefined
+            ? readColour(json, bin, primitive.attributes.COLOR_0)
+            : null,
+        });
+      }
+    }
+
+    for (const child of node.children ?? []) visit(child, world);
+  };
+
+  const roots = json.scenes?.[json.scene ?? 0]?.nodes ?? json.nodes.map((_, i) => i);
+  for (const root of roots) visit(root, IDENTITY);
+  return out;
 }
 
 // --- PNG writing -----------------------------------------------------------

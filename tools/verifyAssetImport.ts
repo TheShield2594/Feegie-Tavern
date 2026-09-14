@@ -73,10 +73,19 @@ async function main(): Promise<void> {
       near(rawBox.min.y, 0.5 * parentScale + parentTranslation[1]),
       `min.y=${rawBox.min.y.toFixed(4)} expected=${(0.5 * parentScale + parentTranslation[1]).toFixed(4)}`,
     );
+  }
+
+  // The canopy is the one that proves `centreXZ: false` preserves an authored
+  // offset: the fixture puts it at x 0.6..2.6 while the trunk straddles the
+  // origin, so checking the trunk here only repeated the test above.
+  const rawCanopy = raw.get('tree_canopy');
+  check('raw canopy present', Boolean(rawCanopy));
+  if (rawCanopy) {
+    const rawCanopyBox = new Box3().setFromBufferAttribute(rawCanopy.getAttribute('position') as never);
     check(
       'canopy X offset survives when not recentred',
-      near(rawBox.min.x, -0.2 * parentScale + parentTranslation[0]),
-      `min.x=${rawBox.min.x.toFixed(4)}`,
+      near(rawCanopyBox.min.x, 0.6 * parentScale + parentTranslation[0]),
+      `min.x=${rawCanopyBox.min.x.toFixed(4)} expected=${(0.6 * parentScale + parentTranslation[0]).toFixed(4)}`,
     );
   }
 

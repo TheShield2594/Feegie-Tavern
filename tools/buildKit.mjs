@@ -1,7 +1,8 @@
 /**
  * Builds `public/assets/models/nature/nature.glb` from the Kenney Nature Kit.
  *
- *   node tools/buildNatureKit.mjs <path-to-kenney_nature-kit/Models/GLTF format>
+ *   node tools/buildKit.mjs <kit> <unzipped-kit-root> [out.glb]
+ *   npm run assets:build-kit -- nature ./kenney_nature-kit
  *
  * Why this exists rather than a `gltf-transform` invocation: the §5 pipeline
  * calls for prune → weld → merge → one GLB per category, and this session could
@@ -686,6 +687,13 @@ function writeGlb(models, outPath) {
   for (const { name, positions, normals, colors, indices } of models) {
     const count = positions.length / 3;
     if (count > 65535) throw new Error(`${name} needs 32-bit indices`);
+    // A source primitive with no NORMAL leaves `normals` empty, but the
+    // accessor below is still declared at the full vertex count — that writes a
+    // structurally invalid GLB which only fails later, in the validator. Stop
+    // at the source model instead.
+    if (normals.length !== positions.length) {
+      throw new Error(`${name}: missing NORMAL data (${normals.length / 3} of ${count} vertices)`);
+    }
 
     const posBuf = Buffer.alloc(positions.length * 4);
     positions.forEach((v, i) => posBuf.writeFloatLE(v, i * 4));

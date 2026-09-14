@@ -223,10 +223,15 @@ for (const [model, parts] of models) {
     const canopy = boxes.get(`${model}_canopy`);
     // Grounding each part separately would drop the canopy to y=0 and take the
     // tree apart; this is the check that catches it.
+    // The detail string is an argument, so it is built before `check` runs: a
+    // two-part group that is not a trunk/canopy pair would throw a TypeError
+    // here instead of reporting a failed check.
     check(
       `${model}: canopy rides above the trunk base`,
-      canopy && trunk && canopy.max[1] > trunk.max[1] * 0.9 && canopy.min[1] > 1e-4,
-      `canopy y=[${canopy.min[1].toFixed(2)}, ${canopy.max[1].toFixed(2)}] trunk top=${trunk.max[1].toFixed(2)}`,
+      Boolean(canopy && trunk && canopy.max[1] > trunk.max[1] * 0.9 && canopy.min[1] > 1e-4),
+      canopy && trunk
+        ? `canopy y=[${canopy.min[1].toFixed(2)}, ${canopy.max[1].toFixed(2)}] trunk top=${trunk.max[1].toFixed(2)}`
+        : `expected ${model}_trunk and ${model}_canopy, got ${parts.join(', ')}`,
     );
   }
 }

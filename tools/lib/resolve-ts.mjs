@@ -15,7 +15,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SRC = new URL('../../src/', import.meta.url);
 
 function withExtension(path) {
-  if (existsSync(path)) return path;
+  // Extension candidates come first: for `./foo` where a `foo/` directory
+  // exists, an exact-path check would return the directory and the import then
+  // fails, never reaching `foo/index.ts`.
   for (const extension of ['.ts', '/index.ts']) {
     if (existsSync(path + extension)) return path + extension;
   }

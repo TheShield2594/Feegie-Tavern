@@ -73,6 +73,13 @@ if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
   void boot(container);
 }
 
+/**
+ * How long the boot waits for optional asset kits before starting without them.
+ * Generous enough for a cold cache on a slow connection, short enough that a
+ * stalled request does not read as a hung game.
+ */
+const ASSET_DEADLINE_MS = 15_000;
+
 async function boot(root: HTMLElement): Promise<void> {
   try {
     // Kits are an enhancement, never a prerequisite: a kit that fails to load
@@ -81,9 +88,30 @@ async function boot(root: HTMLElement): Promise<void> {
     const assets = new AssetManager();
     const loading = showLoading();
     try {
-      await assets.loadAll((done, total) => loading.progress(done, total));
-      for (const report of assets.getReports()) {
-        if (!report.ok) console.warn(`[cozy] kit "${report.kit}" unavailable (${report.error}); using generated art`);
+      // Bounded, because `loadAll` already swallows a *failed* kit but nothing
+      // bounds a *stalled* one: a request that never settles would hold the
+      // loading overlay forever, which is the opposite of the rule above. Past
+      // the deadline the boot continues on generated art.
+      //
+      // A kit that arrives late afterwards is inert rather than dangerous —
+      // world systems take their geometry from the manager when they are
+      // constructed, so nothing re-reads it once `Game` exists.
+      const timedOut = Symbol('assets-timed-out');
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        assets.loadAll((done, total) => loading.progress(done, total)).then(() => undefined),
+        new Promise<typeof timedOut>((resolve) => {
+          deadline = setTimeout(() => resolve(timedOut), ASSET_DEADLINE_MS);
+        }),
+      ]);
+      clearTimeout(deadline);
+
+      if (result === timedOut) {
+        console.warn(`[cozy] asset kits still loading after ${ASSET_DEADLINE_MS}ms; starting on generated art`);
+      } else {
+        for (const report of assets.getReports()) {
+          if (!report.ok) console.warn(`[cozy] kit "${report.kit}" unavailable (${report.error}); using generated art`);
+        }
       }
     } catch (error) {
       console.warn('[cozy] asset kits unavailable; using generated art', error);
