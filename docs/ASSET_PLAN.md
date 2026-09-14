@@ -345,9 +345,10 @@ in its archive.
 | RPG Audio | `kenney.nl/assets/rpg-audio` | `License (Creative Commons Zero, CC0)` — "You may use these assets in personal and commercial projects. Credit (Kenney or www.kenney.nl) would be nice but is not mandatory." |
 | Interface Sounds 1.0 | `kenney.nl/assets/interface-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Impact Sounds 1.0 | `kenney.nl/assets/impact-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| Survival Kit 2.0 | `kenney.nl/assets/survival-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 | Fantasy Town Kit 2.0 | `kenney.nl/assets/fantasy-town-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 
-All five match §8 decision 4 (strict CC0). Nothing was committed on the strength
+All six match §8 decision 4 (strict CC0). Nothing was committed on the strength
 of a download page alone.
 
 Kenney ships a separate `License.txt` per pack, identical in grant but differing
@@ -719,6 +720,52 @@ flag on `KitDef`, skipped by `loadAll` and loaded on demand) and measure it,
 from an environment that can actually run `vite build`. Flagging it here so the
 next person finds it deliberately rather than discovering an unexplained 138 KB.
 
+### 9.5h Props, tools — and a way round the fish blocker (`props.glb`)
+
+Kenney Survival Kit 2.0, CC0 read in-archive and quoted in §9.2. 18 of its 80
+models, **153,948 bytes**, 4,438 verts, 2,525 tris:
+
+| Group | Models |
+| --- | --- |
+| Scatter rocks | `rock-a`, `rock-b`, `rock-c` |
+| Dressing | `barrel`, `box`, `chest`, `bucket`, `campfire-pit`, `signpost`, `tent`, `tree-log` |
+| Resource drops | `resource-wood`, `resource-stone` |
+| Tools | `tool-axe`, `tool-pickaxe`, `tool-shovel`, `tool-hoe` |
+| Fish | `fish` |
+
+Standalone props rather than grid modules, so unlike the town kit these take the
+default grounding and centring — which is why `prop()` exists alongside
+`BUILDING_PIECE` in the manifest rather than one preset serving both.
+
+**The fish blocker has a way round it, and it was sitting in an already-approved
+pack.** §7 step 4's third slice item — one fish through `FishSchools` to
+`CatchCard` — has been blocked throughout on Quaternius' download host (§9.4).
+The Survival Kit ships `fish.glb`, and §3 #4 already approves that pack: this is
+not a new source, it is a different model from a pack whose licence is verified
+and whose art is already shipping. What it is *not* is a like-for-like
+substitute — Quaternius' pack is seven rigged, animated species, and this is one
+static mesh. It suits `CatchCard` exactly (a caught fish held up is a still
+pose) and would need procedural motion for `FishSchools`. Carried in `props.glb`
+as `fish.generic` so the option is real rather than theoretical; whether to take
+it or keep waiting for Quaternius is the owner's call, since it trades seven
+animated species for one static one.
+
+`fish-large` is deliberately excluded: it is the same mesh at exactly 1.5x, so
+shipping it would have duplicated 593 vertices to express what
+`normalize.scale` already expresses for nothing.
+
+**Two things this kit exposed in the pipeline:**
+
+- **Indexed-palette PNG.** Its colormap is colour type 3 (palette + PLTE) where
+  the Fantasy Town Kit's is truecolour. The decoder handled 2 and 6 only and
+  refused the file outright — loudly, which is what a strict decoder is for. It
+  now resolves palette entries too.
+- **Ten more degenerate triangles**, in `bucket` and `tool-shovel`.
+
+The tools are worth a note for later: the kit also ships `-upgraded` variants of
+all four, which map onto the tool levels the game already tracks in its save
+schema. They are not carried yet because nothing reads them.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed
@@ -735,10 +782,11 @@ SHA-256 against the committed file. It is, at every stage and at the end.
 | --- | --- |
 | `nature.glb` | 58,984 |
 | `buildings.glb` | 138,124 |
+| `props.glb` | 153,948 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **257,183 (251.2 KB)** |
+| **Total** | **411,131 (401.4 KB)** |
 
-Against the ≤ 8 MB first-load budget in §5 that is **3.1%**. Neither group is in
+Against the ≤ 8 MB first-load budget in §5 that is **4.9%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
 `nature.glb` is not fetched at all yet (see below).
 
@@ -849,10 +897,10 @@ Recording the honest state so the gap is tracked rather than assumed.
 | Buildings, houses | Kenney Fantasy Town Kit | ✅ | ❌ `BuildingKit.ts`, `Buildings.ts` — 23 models in `MODELS`, see §9.5f |
 | Interiors | Kenney Fantasy Town / Furniture | ❌ | ❌ `InteriorKit.ts`, `Interiors.ts` |
 | Furniture | Kenney Furniture Kit | ❌ | ❌ `housing/FurnitureModels.ts` |
-| Props | Kenney Survival Kit | ❌ | ❌ `world/Props.ts` |
+| Props | Kenney Survival Kit | ✅ | ❌ `world/Props.ts` — 18 models, see §9.5h |
 | Items | Kenney Food Kit | ❌ | ❌ `items/ItemModels.ts` |
 | Paths / paving | Kenney Fantasy Town Kit (`road-*`) | ✅ | ❌ terrain path surfaces — 5 road pieces, see §9.5f |
-| Fish | Quaternius | ❌ blocked | ❌ `fishing/FishSchools.ts` |
+| Fish | Quaternius ❌ blocked — Kenney Survival Kit ✅ instead | ✅ | ❌ `fishing/FishSchools.ts` — see §9.5h |
 | Animals | Quaternius | ❌ blocked | ❌ |
 | Characters | KayKit | ❌ | ❌ `player/CharacterRig.ts` |
 

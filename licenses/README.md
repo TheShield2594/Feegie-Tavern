@@ -38,6 +38,7 @@ least one of them, which the rule above forbids.
 | `kenney-interface-sounds-CC0.txt` | Kenney — Interface Sounds 1.0 | CC0, read in-archive 2026-09-14 |
 | `kenney-impact-sounds-CC0.txt` | Kenney — Impact Sounds 1.0 | CC0, read in-archive 2026-09-14 |
 | `kenney-fantasy-town-kit-CC0.txt` | Kenney — Fantasy Town Kit 2.0 | CC0, read in-archive 2026-09-14 |
+| `kenney-survival-kit-CC0.txt` | Kenney — Survival Kit 2.0 | CC0, read in-archive 2026-09-14 |
 
 ### Not yet present
 

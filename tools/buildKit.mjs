@@ -129,6 +129,37 @@ const KITS = {
       'chimney', 'fence', 'fence-gate', 'hedge', 'hedge-gate', 'stairs-stone', 'lantern',
     ].map((file) => ({ file, roles: ['whole'] })),
   },
+
+  props: {
+    dir: 'Models/GLB format',
+    out: 'public/assets/models/props/props.glb',
+    mode: 'bake-atlas',
+    atlas: 'Models/GLB format/Textures/colormap.png',
+    // Standalone objects rather than grid modules, so unlike the town kit these
+    // *do* want grounding and centring: each is placed on its own by
+    // `world/Props.ts` or held by `player/Tools.ts`, and nothing snaps to
+    // anything. (They ship grounded already; centring nudges the asymmetric
+    // rocks onto their own axis.)
+    sources: [
+      // Scatter rocks — Props.buildRocks instances these across the meadows.
+      'rock-a', 'rock-b', 'rock-c',
+      // Town, harbour and beach dressing.
+      'barrel', 'box', 'chest', 'bucket', 'campfire-pit', 'signpost', 'tent', 'tree-log',
+      // Gatherable resource drops.
+      'resource-wood', 'resource-stone',
+      // player/Tools.ts — the kit also ships `-upgraded` variants, which map
+      // onto the game's existing tool levels whenever that is wired.
+      'tool-axe', 'tool-pickaxe', 'tool-shovel', 'tool-hoe',
+      // Kenney's own fish. See ASSET_PLAN §9.5h: the fish slice item is blocked
+      // on Quaternius' download host, and this comes from a pack §3 already
+      // approves, so it is carried here as the unblocking option.
+      //
+      // `fish-large` is deliberately NOT included: it is the same mesh at
+      // exactly 1.5x, so shipping it would duplicate 593 vertices to express
+      // what `normalize.scale` already expresses for free.
+      'fish',
+    ].map((file) => ({ file, roles: ['whole'] })),
+  },
 };
 
 function readGlb(path) {
@@ -207,20 +238,26 @@ function decodePng(path) {
   let i = 8;
   let width = 0, height = 0, depth = 0, colourType = 0;
   const idat = [];
+  let palette = null;
   while (i < d.length) {
     const length = d.readUInt32BE(i);
     const type = d.toString('ascii', i + 4, i + 8);
     if (type === 'IHDR') {
       width = d.readUInt32BE(i + 8); height = d.readUInt32BE(i + 12);
       depth = d[i + 16]; colourType = d[i + 17];
-    } else if (type === 'IDAT') idat.push(d.subarray(i + 8, i + 8 + length));
+    } else if (type === 'PLTE') palette = Buffer.from(d.subarray(i + 8, i + 8 + length));
+    else if (type === 'IDAT') idat.push(d.subarray(i + 8, i + 8 + length));
     i += 12 + length;
   }
-  if (depth !== 8 || (colourType !== 2 && colourType !== 6)) {
+  // Colour type 3 is an indexed palette — which is how the Survival Kit ships
+  // its colormap, where the Fantasy Town Kit ships truecolour. Both are flat
+  // palettes; only the encoding differs.
+  if (depth !== 8 || ![2, 3, 6].includes(colourType)) {
     throw new Error(`unsupported PNG (depth ${depth}, colour type ${colourType}): ${path}`);
   }
+  if (colourType === 3 && !palette) throw new Error(`indexed PNG with no PLTE chunk: ${path}`);
 
-  const channels = colourType === 6 ? 4 : 3;
+  const channels = colourType === 6 ? 4 : colourType === 3 ? 1 : 3;
   const raw = inflateSync(Buffer.concat(idat));
   const stride = width * channels;
   const out = Buffer.alloc(width * height * 3);
@@ -243,9 +280,16 @@ function decodePng(path) {
       }
     }
     for (let x = 0; x < width; x++) {
-      out[(y * width + x) * 3] = line[x * channels];
-      out[(y * width + x) * 3 + 1] = line[x * channels + 1];
-      out[(y * width + x) * 3 + 2] = line[x * channels + 2];
+      if (colourType === 3) {
+        const entry = line[x] * 3;
+        out[(y * width + x) * 3] = palette[entry];
+        out[(y * width + x) * 3 + 1] = palette[entry + 1];
+        out[(y * width + x) * 3 + 2] = palette[entry + 2];
+      } else {
+        out[(y * width + x) * 3] = line[x * channels];
+        out[(y * width + x) * 3 + 1] = line[x * channels + 1];
+        out[(y * width + x) * 3 + 2] = line[x * channels + 2];
+      }
     }
     prev = line;
   }

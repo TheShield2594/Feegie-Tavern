@@ -70,6 +70,13 @@ export interface ModelDef {
 }
 
 /**
+ * A standalone prop: keep the baked vertex colours, take the defaults for
+ * grounding and centring (unlike a building piece, nothing snaps to it), and
+ * scale the kit up to the size of the geometry it replaces.
+ */
+const prop = (scale: number): NormalizeOptions => ({ keepVertexColors: true, scale });
+
+/**
  * Shared settings for a modular building piece: keep the authored origin, keep
  * the baked vertex colours, keep the grid-cell size.
  */
@@ -158,6 +165,44 @@ export const MODELS: ModelDef[] = [
   { id: 'yard.hedgeGate',  kit: 'buildings', node: 'hedge-gate',           normalize: BUILDING_PIECE },
   { id: 'yard.steps',      kit: 'buildings', node: 'stairs-stone',         normalize: BUILDING_PIECE },
   { id: 'yard.lamp',       kit: 'buildings', node: 'lantern',              normalize: BUILDING_PIECE },
+
+  // --- Survival Kit ---------------------------------------------------------
+  //
+  // Standalone props, so these take the default grounding and centring — the
+  // opposite of the building pieces above, and the reason `prop()` exists
+  // separately from `BUILDING_PIECE`.
+  //
+  // Scales are matched to the procedural geometry each replaces: the rocks to
+  // `Props.buildRocks`, which instances an `IcosahedronGeometry(1)` (so roughly
+  // two units across) at 0.8-1.6x, and the tools to the ~1 m handles
+  // `player/Tools.ts` builds.
+  { id: 'props.rock.a',    kit: 'props', node: 'rock-a',         normalize: prop(3.3) },
+  { id: 'props.rock.b',    kit: 'props', node: 'rock-b',         normalize: prop(3.3) },
+  { id: 'props.rock.c',    kit: 'props', node: 'rock-c',         normalize: prop(3.3) },
+
+  { id: 'props.barrel',    kit: 'props', node: 'barrel',         normalize: prop(2.8) },
+  { id: 'props.crate',     kit: 'props', node: 'box',            normalize: prop(2.8) },
+  { id: 'props.chest',     kit: 'props', node: 'chest',          normalize: prop(2.8) },
+  { id: 'props.bucket',    kit: 'props', node: 'bucket',         normalize: prop(2.8) },
+  { id: 'props.campfire',  kit: 'props', node: 'campfire-pit',   normalize: prop(2.8) },
+  { id: 'props.signpost',  kit: 'props', node: 'signpost',       normalize: prop(2.8) },
+  { id: 'props.tent',      kit: 'props', node: 'tent',           normalize: prop(2.8) },
+  { id: 'props.log',       kit: 'props', node: 'tree-log',       normalize: prop(2.8) },
+
+  { id: 'drop.wood',       kit: 'props', node: 'resource-wood',  normalize: prop(2.8) },
+  { id: 'drop.stone',      kit: 'props', node: 'resource-stone', normalize: prop(2.8) },
+
+  // Named `tools.*` rather than `tool.*` on purpose: `tool.axe` is already a
+  // sound id in `audio/sounds.ts`, and the two tables are read side by side.
+  { id: 'tools.axe',       kit: 'props', node: 'tool-axe',       normalize: prop(4.0) },
+  { id: 'tools.pickaxe',   kit: 'props', node: 'tool-pickaxe',   normalize: prop(4.0) },
+  { id: 'tools.shovel',    kit: 'props', node: 'tool-shovel',    normalize: prop(4.0) },
+  { id: 'tools.hoe',       kit: 'props', node: 'tool-hoe',       normalize: prop(4.0) },
+
+  // One generic fish mesh, standing in for every species until (or unless)
+  // per-species art lands. The kit's `fish-large` is this same mesh at 1.5x, so
+  // a bigger catch is a scale rather than a second model. See §9.5h.
+  { id: 'fish.generic',    kit: 'props', node: 'fish',           normalize: prop(2.0) },
 ];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));
