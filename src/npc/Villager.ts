@@ -5,9 +5,20 @@ import { dampAngle, lerp } from '@/util/math';
 import { EmoteBubble, Nameplate } from '@/rendering/WorldLabel';
 import { LANDMARKS, terrainHeight, walkHeight } from '@/world/heightfield';
 import type { ScheduleEntry, VillagerDef } from '@/data/villagers';
+import type { BuildingId } from '@/world/Buildings';
 import type { Navigation, NavPoint } from './Navigation';
 
 export type VillagerActivity = ScheduleEntry['activity'];
+
+/**
+ * A walk to a door that is not finished when the walking stops. `in` carries
+ * the room and the spot inside it the villager is heading for; `out` puts them
+ * back on the island. The manager reads it off `doorArrival` and completes it,
+ * because only the manager knows where doors lead.
+ */
+export type DoorTrip =
+  | { kind: 'in'; building: BuildingId; anchor: string }
+  | { kind: 'out' };
 
 const WALK_SPEED = 2.5;
 const ARRIVE_RADIUS = 0.9;
@@ -44,6 +55,27 @@ export class Villager {
   /** Set while the player is talking to them. */
   talking = false;
   private lastEntryIndex = -1;
+
+  /**
+   * The building whose interior they are standing in, or null for outdoors.
+   *
+   * Interiors are laid out around their own origin far from the island, so a
+   * villager who is inside is at a world position the terrain knows nothing
+   * about: grounding, wandering and the navigation grid are all suspended
+   * while this is set. The manager owns the value — it is the only thing that
+   * knows where the doors are.
+   */
+  indoors: BuildingId | null = null;
+  /** Floor height of the interior they are in, in world space. */
+  private floorY = 0;
+  /** Which room of which building they stand in, by the room's anchor name. */
+  indoorAnchor: string | null = null;
+  /**
+   * Set while they are walking to a door on their way somewhere else. The
+   * manager polls `doorArrival` and performs the step through.
+   */
+  private doorTrip: DoorTrip | null = null;
+  private atDoor = false;
 
   /** Villagers with an unmet request show a marker. */
   hasRequest = false;
@@ -87,7 +119,7 @@ export class Villager {
   }
 
   /** Chooses the schedule entry in force at this hour. */
-  private entryFor(hour: number): { entry: ScheduleEntry; index: number } {
+  entryFor(hour: number): { entry: ScheduleEntry; index: number } {
     const schedule = this.def.schedule;
     let chosen = schedule[0];
     let index = 0;
@@ -100,23 +132,85 @@ export class Villager {
     return { entry: chosen, index };
   }
 
-  /** Re-evaluates the schedule; call on the hour or after a warp. */
-  applySchedule(hour: number, force = false): void {
-    const { entry, index } = this.entryFor(hour);
-    if (index === this.lastEntryIndex && !force) return;
+  /**
+   * Adopts an entry's label and activity without deciding where to stand.
+   * Routing is the manager's job: an entry can name a room rather than a point
+   * on the island, and only the manager knows where the doors are and which
+   * interior is loaded. Returns false when the entry has not changed.
+   */
+  beginEntry(entry: ScheduleEntry, index: number, force: boolean): boolean {
+    if (index === this.lastEntryIndex && !force) return false;
     this.lastEntryIndex = index;
     this.scheduleLabel = entry.label;
     this.activity = entry.activity;
-
-    const target = LANDMARKS[entry.at] ?? LANDMARKS['square.center'];
-    const x = target.x + this.anchorOffset.x;
-    const z = target.z + this.anchorOffset.z;
-    this.anchor.set(x, terrainHeight(x, z), z);
-    this.repath();
+    return true;
   }
 
+  /** The outdoor point this villager takes when an entry names a landmark. */
+  outdoorAnchorFor(entry: ScheduleEntry): { x: number; z: number } {
+    const target = LANDMARKS[entry.at] ?? LANDMARKS['square.center'];
+    return { x: target.x + this.anchorOffset.x, z: target.z + this.anchorOffset.z };
+  }
+
+  /**
+   * Walks to a door and waits there for the manager to take them through.
+   * Works in both directions: a door reached from the island is stepped
+   * through into a room, and one reached from inside leads back out.
+   */
+  headForDoor(x: number, z: number, trip: DoorTrip): void {
+    this.doorTrip = trip;
+    this.atDoor = false;
+    this.activity = 'walk';
+    if (this.indoors !== null) this.moveWithinInterior(x, z);
+    else this.goTo(x, z, 'walk');
+  }
+
+  /** Set for the frame the villager reaches a door it was sent to. */
+  get doorArrival(): DoorTrip | null {
+    return this.atDoor ? this.doorTrip : null;
+  }
+
+  /**
+   * Puts the villager inside a room, at a world position within it. Their
+   * outdoor route is dropped: the island's navigation grid does not describe
+   * this space, and they are not on it any more.
+   */
+  enterInterior(building: BuildingId, anchor: string, x: number, y: number, z: number, facing: number): void {
+    this.indoors = building;
+    this.indoorAnchor = anchor;
+    this.floorY = y;
+    this.doorTrip = null;
+    this.atDoor = false;
+    this.anchor.set(x, y, z);
+    this.position.set(x, y, z);
+    this.group.position.copy(this.position);
+    this.facing = facing;
+    this.path = [];
+    this.pathIndex = 0;
+    this.activityTimer = 0;
+  }
+
+  /** Walks to a point in the room they are already standing in. */
+  moveWithinInterior(x: number, z: number): void {
+    if (this.indoors === null) return;
+    this.anchor.set(x, this.floorY, z);
+    this.path = [{ x, z }];
+    this.pathIndex = 0;
+  }
+
+  /** Steps back out onto the island at a doorway, ready to walk somewhere. */
+  leaveInterior(x: number, z: number, facing: number): void {
+    this.indoors = null;
+    this.indoorAnchor = null;
+    this.doorTrip = null;
+    this.atDoor = false;
+    this.snapTo(x, z, this.activity);
+    this.facing = facing;
+  }
+
+  /** Routes to a point on the island, through the navigation grid. */
   private repath(): void {
-    if (this.talking) return;
+    if (this.talking || this.indoors !== null) return;
     this.path = this.nav.findPath(this.position.x, this.position.z, this.anchor.x, this.anchor.z);
     this.pathIndex = 0;
     this.repathTimer = 0;
@@ -155,6 +249,12 @@ export class Villager {
     this.anchor.set(x, terrainHeight(x, z), z);
     this.activity = activity;
     this.repath();
+  }
+
+  /** Drops any pending trip through a door — they are wanted elsewhere. */
+  clearDoorTrip(): void {
+    this.doorTrip = null;
+    this.atDoor = false;
   }
 
   startTalking(playerX: number, playerZ: number): void {
@@ -215,8 +315,10 @@ export class Villager {
       }
     }
 
-    // Ground and orient.
-    this.position.y = lerp(this.position.y, walkHeight(this.position.x, this.position.z), 1 - Math.exp(-14 * dt));
+    // Ground and orient. Indoors the room is a flat floor at a known height,
+    // and the terrain heightfield does not describe where they are standing.
+    const ground = this.indoors === null ? walkHeight(this.position.x, this.position.z) : this.floorY;
+    this.position.y = lerp(this.position.y, ground, 1 - Math.exp(-14 * dt));
     this.group.position.copy(this.position);
     this.group.rotation.y = this.facing;
 
@@ -279,6 +381,9 @@ export class Villager {
       if (this.pathIndex >= this.path.length) {
         this.path = [];
         this.activityTimer = 0;
+        // Reaching a door is the end of the walk but not of the errand; the
+        // manager takes it from here on the next tick.
+        if (this.doorTrip) this.atDoor = true;
       }
       return;
     }
@@ -331,7 +436,12 @@ export class Villager {
         break;
 
       case 'walk':
-        // Wander in a small circle around the anchor.
+        // Wander in a small circle around the anchor — outdoors only, since
+        // the navigation grid covers the island and not the rooms on it.
+        if (this.indoors !== null) {
+          this.animator.play('idle');
+          break;
+        }
         this.wanderTimer -= dt;
         if (this.wanderTimer <= 0) {
           this.wanderTimer = 4 + Math.random() * 5;

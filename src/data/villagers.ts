@@ -1,3 +1,5 @@
+import type { BuildingId } from '@/world/Buildings';
+
 export type VillagerSpecies = 'squirrel' | 'rabbit' | 'bear' | 'owl' | 'fox' | 'otter';
 
 export interface VillagerLook {
@@ -20,12 +22,24 @@ export interface VillagerLook {
 export interface ScheduleEntry {
   /** Hour the villager starts heading here. */
   from: number;
-  /** Named anchor in the world (see world/Landmarks). */
+  /**
+   * Named anchor in the world (see world/Landmarks). With `inside` set this is
+   * only the journal's and the map's idea of where they are: the anchor itself
+   * is the building's outdoor footprint, which is inside a navigation obstacle
+   * and not somewhere anyone can stand.
+   */
   at: string;
   /** Short label shown in the journal. */
   label: string;
   /** What they do once they arrive. */
   activity: 'idle' | 'walk' | 'fish' | 'sit' | 'browse' | 'tend' | 'sleep' | 'talk';
+  /**
+   * Marks the block as spent indoors: the building whose door they use, and
+   * the anchor to stand at within that building's interior scene. Villagers
+   * route to the doorway and step through it rather than appearing inside, and
+   * they are only drawn while the player is in the same room.
+   */
+  inside?: { building: BuildingId; anchor: string };
 }
 
 export interface VillagerDef {
@@ -67,13 +81,13 @@ export const VILLAGERS: VillagerDef[] = [
       accessory: 'satchel',
     },
     schedule: [
-      { from: 0, at: 'home.pip', label: 'Asleep', activity: 'sleep' },
+      { from: 0, at: 'home.pip', label: 'Asleep', activity: 'sleep', inside: { building: 'home.pip', anchor: 'bedside' } },
       { from: 6, at: 'beach.pier', label: 'Morning cast', activity: 'fish' },
       { from: 11, at: 'square.center', label: 'Town square', activity: 'idle' },
       { from: 14, at: 'creek.stones', label: 'Trying the creek', activity: 'fish' },
       { from: 16, at: 'beach.log', label: 'Sitting by the water', activity: 'sit' },
       { from: 19, at: 'home.pip', label: 'Home for the evening', activity: 'idle' },
-      { from: 22, at: 'home.pip', label: 'Asleep', activity: 'sleep' },
+      { from: 22, at: 'home.pip', label: 'Asleep', activity: 'sleep', inside: { building: 'home.pip', anchor: 'bedside' } },
     ],
     greetings: ['Oh — morning!', 'There you are.', 'Perfect timing, actually.'],
     lines: [
@@ -112,13 +126,13 @@ export const VILLAGERS: VillagerDef[] = [
       accessory: 'sunhat',
     },
     schedule: [
-      { from: 0, at: 'home.mallow', label: 'Asleep', activity: 'sleep' },
+      { from: 0, at: 'home.mallow', label: 'Asleep', activity: 'sleep', inside: { building: 'home.mallow', anchor: 'bedside' } },
       { from: 7, at: 'square.flowerbed', label: 'Tending the beds', activity: 'tend' },
       { from: 11, at: 'square.center', label: 'Town square', activity: 'talk' },
       { from: 13, at: 'garden.shed', label: 'Up at the terrace', activity: 'tend' },
       { from: 16, at: 'square.bench', label: 'Reading on the bench', activity: 'sit' },
       { from: 19, at: 'home.mallow', label: 'Home', activity: 'idle' },
-      { from: 22, at: 'home.mallow', label: 'Asleep', activity: 'sleep' },
+      { from: 22, at: 'home.mallow', label: 'Asleep', activity: 'sleep', inside: { building: 'home.mallow', anchor: 'bedside' } },
     ],
     greetings: ['Hello you.', 'Look at this light!', 'I was hoping you would come by.'],
     lines: [
@@ -157,12 +171,12 @@ export const VILLAGERS: VillagerDef[] = [
       accessory: 'apron',
     },
     schedule: [
-      { from: 0, at: 'home.bruno', label: 'Asleep', activity: 'sleep' },
+      { from: 0, at: 'home.bruno', label: 'Asleep', activity: 'sleep', inside: { building: 'home.bruno', anchor: 'bedside' } },
       { from: 7, at: 'beach.pier', label: 'Checking the boats', activity: 'walk' },
-      { from: 9, at: 'shop.counter', label: 'Behind the counter', activity: 'idle' },
+      { from: 9, at: 'shop.counter', label: 'Behind the counter', activity: 'idle', inside: { building: 'store', anchor: 'keeper' } },
       { from: 18, at: 'square.center', label: 'Closing up', activity: 'walk' },
       { from: 20, at: 'home.bruno', label: 'Home', activity: 'idle' },
-      { from: 22, at: 'home.bruno', label: 'Asleep', activity: 'sleep' },
+      { from: 22, at: 'home.bruno', label: 'Asleep', activity: 'sleep', inside: { building: 'home.bruno', anchor: 'bedside' } },
     ],
     greetings: ['Welcome in!', 'Ah, my best customer.', 'Come in, come in.'],
     lines: [
@@ -201,11 +215,11 @@ export const VILLAGERS: VillagerDef[] = [
       accessory: 'spectacles',
     },
     schedule: [
-      { from: 0, at: 'museum.desk', label: 'Dozing at the desk', activity: 'sleep' },
-      { from: 8, at: 'museum.desk', label: 'Curator desk', activity: 'idle' },
+      { from: 0, at: 'museum.desk', label: 'Dozing at the desk', activity: 'sleep', inside: { building: 'museum', anchor: 'keeper' } },
+      { from: 8, at: 'museum.desk', label: 'Curator desk', activity: 'idle', inside: { building: 'museum', anchor: 'keeper' } },
       { from: 13, at: 'meadow.high', label: 'Up at the stones', activity: 'walk' },
-      { from: 15, at: 'museum.desk', label: 'Curator desk', activity: 'idle' },
-      { from: 21, at: 'museum.desk', label: 'Cataloguing late', activity: 'idle' },
+      { from: 15, at: 'museum.desk', label: 'Curator desk', activity: 'idle', inside: { building: 'museum', anchor: 'keeper' } },
+      { from: 21, at: 'museum.desk', label: 'Cataloguing late', activity: 'idle', inside: { building: 'museum', anchor: 'keeper' } },
     ],
     greetings: ['Ah. You.', 'Come in, mind the case.', 'Something for me?'],
     lines: [

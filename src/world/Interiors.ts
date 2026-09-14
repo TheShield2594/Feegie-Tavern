@@ -337,6 +337,9 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
   const anchors: Record<string, Vector3> = {
     exit: room.exit.clone(),
     curator: new Vector3(0, 0, 4.6),
+    // Behind the desk, on the far side from the door: where the curator
+    // stands when her schedule has her at work.
+    keeper: new Vector3(0, 0, 5.4),
   };
 
   // --- Wings -------------------------------------------------------------
@@ -759,7 +762,12 @@ export function createShopInterior(): InteriorScene {
     group,
     room,
     colliders,
-    anchors: { exit: room.exit.clone(), counter: new Vector3(0, 0, -1.3) },
+    anchors: {
+      exit: room.exit.clone(),
+      counter: new Vector3(0, 0, -1.3),
+      // The serving side of the counter, where the shopkeeper stands.
+      keeper: new Vector3(0, 0, -3.8),
+    },
     ambience: 'interior',
     music: 'music.shop',
     title: 'General Store',
@@ -836,6 +844,13 @@ export function createTownHallInterior(): InteriorScene {
   };
 }
 
+/**
+ * Where a sleeping villager stands, clear of the bed's collider on its open
+ * side. Both the kit-furnished and the fallback build put the bed in the same
+ * place, so the anchor is shared rather than derived twice.
+ */
+const BEDSIDE = new Vector3(-1.2, 0, -1.8);
+
 export function createVillagerHomeInterior(villagerId: string, accent: string): InteriorScene {
   const room = buildRoom({
     name: `Home_${villagerId}`,
@@ -897,7 +912,7 @@ export function createVillagerHomeInterior(villagerId: string, accent: string): 
       group,
       room,
       colliders,
-      anchors: { exit: room.exit.clone() },
+      anchors: { exit: room.exit.clone(), bedside: BEDSIDE.clone() },
       ambience: 'interior',
       music: 'music.home',
       title: 'A Neighbour’s Home',
@@ -936,7 +951,7 @@ export function createVillagerHomeInterior(villagerId: string, accent: string): 
     group,
     room,
     colliders,
-    anchors: { exit: room.exit.clone() },
+    anchors: { exit: room.exit.clone(), bedside: BEDSIDE.clone() },
     ambience: 'interior',
     music: 'music.home',
     title: 'A Neighbour’s Home',
