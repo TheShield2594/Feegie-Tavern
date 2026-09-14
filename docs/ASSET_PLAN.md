@@ -874,6 +874,57 @@ instead of 404ing in front of a player, and the file is content-hashed, so it
 needs no cache-busting rule of its own. Recorded here as a deviation from §4
 rather than a silent one.
 
+### 9.5l KayKit characters (#7, #8, #11) — two blockers, and the second is the real one
+
+Investigated, **nothing downloaded, nothing shipped.** Two separate problems,
+and they are not equally important.
+
+**Blocker 1: the same permission gate as Tallbeard.** `kaylousberg.com` is
+reachable and each asset page confirms "CC0 Licensed", but the site is a gallery
+— it hosts no files. Every pack routes to `kaylousberg.itch.io`, and that page is
+"Name your own price" with a `buy_btn`, i.e. the checkout flow this session's
+permission layer blocked for asset #15 (§9.4). It was not retried: that denial
+was reported once and working around it on a second pack would be worse than
+reporting it again. itch.io's own licence metadata reads "Creative Commons Zero
+v1.0 Universal", which agrees with the creator's page — but agreeing download
+pages are not a licence read *inside the archive*, which is what §7 step 1
+requires, so this could not ship even if the bytes were in hand.
+
+**Blocker 2: the loading path cannot carry a rigged character at all.** This is
+the one that matters, and it is not about KayKit or about egress.
+
+Verified in the code rather than assumed:
+
+| Stage | What it does with rig data |
+| --- | --- |
+| `tools/buildKit.mjs` | emits `POSITION`, `NORMAL`, optional `COLOR_0` — nothing else |
+| `gltfImport.ts` | `KEPT_ATTRIBUTES` is position/normal/uv/color; `JOINTS_0` and `WEIGHTS_0` are deleted, `morphAttributes` wiped |
+| `AssetManager` | hands out `BufferGeometry` |
+
+There is no `SkinnedMesh`, `skeleton` or `animations` handling anywhere in
+`src/assets/`. A KayKit character through this path arrives as a **static mesh
+frozen in its bind pose** — not a character, a statue. That is not a bug: the
+importer was built deliberately to return bare geometry so imported meshes
+re-bind to `createStylizedMaterial` (§7.1), and for foliage, buildings, props,
+furniture and items that is exactly right.
+
+So "download KayKit" was never the blocking step. Characters need a **second
+import path** that does not exist: keep `JOINTS_0`/`WEIGHTS_0`, build a
+`SkinnedMesh` with its skeleton, load animation clips, and then retarget
+KayKit's bone names onto the existing `JointName` union in
+`player/CharacterRig.ts` — which the animator drives by name (`earL`, `elbowR`,
+`kneeL`, `tail`…) and which has no counterpart in a humanoid RPG rig for the
+ears and tail. §7.1 already put characters last and called them the riskiest
+swap; this is the concrete reason, and it is a substantial piece of work rather
+than another kit build.
+
+**What is worth doing first, when the gate opens:** KayKit **Resource Bits**
+(#11) is ore, logs, crops and gatherables — *static* props feeding
+`gathering/DropSystem.ts` and `farming/Farm.ts`. Those fit the existing pipeline
+unchanged and would land like the Survival Kit did. Characters (#7) and
+Character Animations (#8) should wait for the skinned path, not be forced
+through this one.
+
 ### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
 
 Generalised to build any kit from a config table, because the second kit needed
@@ -1012,7 +1063,7 @@ Recording the honest state so the gap is tracked rather than assumed.
 | Paths / paving | Kenney Fantasy Town Kit (`road-*`) | ✅ | ❌ terrain path surfaces — 5 road pieces, see §9.5f |
 | Fish | Quaternius ❌ blocked — Kenney Survival Kit ✅ instead | ✅ | ❌ `fishing/FishSchools.ts` — see §9.5h |
 | Animals | Quaternius | ❌ blocked | ❌ |
-| Characters | KayKit | ❌ | ❌ `player/CharacterRig.ts` |
+| Characters | KayKit | ❌ blocked (itch.io checkout) | ❌ `player/CharacterRig.ts` — and the importer cannot carry a rig at all, see §9.5l |
 
 `KITS` in `src/assets/manifest.ts` declares furniture, props, fish, animals and
 characters with no file on disk and no `MODELS` entries; `nature.glb` and
@@ -1059,9 +1110,16 @@ addition is built, and the JS bundle is otherwise untouched by this commit; the
    numbers cannot be produced, and no code touching `three` can be verified.
 2. **`drive.google.com` on the allowlist**, for every Quaternius pack — the fish
    (#10) and therefore the third slice item depend on it.
-3. **A decision on Tallbeard (#15):** either permission for itch.io's
-   "name your own price" download flow, or a different CC0 music source, which
-   would be a change to §3 and so is the owner's call.
+3. **A decision on itch.io's "name your own price" flow**, which now blocks two
+   items rather than one: Tallbeard's music (#15) and every KayKit pack (#7, #8,
+   #11). Either permission for that checkout flow, or different CC0 sources —
+   a change to §3, and so the owner's call.
+4. **A skinned-mesh import path**, before any character work. §9.5l: the current
+   importer returns bare geometry by design, so a rigged character cannot
+   survive it. This is independent of egress and of KayKit — it would block any
+   character source.
+5. **A source for the insect and sea-life items** (§9.5j): ten of the twenty
+   kinds `ItemModels.ts` draws have no source anywhere in §3.
 
 ### 9.9 Open for the self-hosted multiplayer build
 
