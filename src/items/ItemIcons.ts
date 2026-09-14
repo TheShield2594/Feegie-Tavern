@@ -84,11 +84,18 @@ function resolve(defId: string): ItemDef | undefined {
   return undefined;
 }
 
+/** A 1×1 transparent PNG, for when canvas is unavailable entirely. */
+const BLANK_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 function fallbackIcon(size: number): string {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d');
+  // The caller reaches here precisely because a context could not be had, so
+  // this one can fail too; returning a blank beats throwing out of the UI.
+  if (!ctx) return BLANK_PNG;
   ctx.fillStyle = '#c9c2b4';
   ctx.beginPath();
   ctx.arc(size / 2, size / 2, size * 0.3, 0, Math.PI * 2);

@@ -76,6 +76,8 @@ export class CharacterRig {
   private hairGroup = new Group();
   private hatGroup = new Group();
   private lowerGroup = new Group();
+  /** Straps, hoods and anything else an outfit hangs on the torso. */
+  private outfitGroup = new Group();
   private eyeL!: Mesh;
   private eyeR!: Mesh;
   private pupilL!: Mesh;
@@ -150,6 +152,8 @@ export class CharacterRig {
     torso.add(torsoMesh);
 
     // A collar band breaks up the torso silhouette.
+    torso.add(this.outfitGroup);
+
     const collar = new Mesh(
       new CylinderGeometry(h * 0.075 * girth * scale, h * 0.085 * girth * scale, h * 0.028, 12),
       this.shirtMaterial,
@@ -549,6 +553,9 @@ export class CharacterRig {
   setOutfit(outfit: OutfitId): void {
     const def = OUTFITS.find((o) => o.id === outfit);
     this.clearGroup(this.lowerGroup);
+    // setLook runs setOutfit on every change, so the torso extras have to be
+    // cleared too or overall straps pile up one pair per wardrobe click.
+    this.clearGroup(this.outfitGroup);
     if (!def) return;
     const h = this.height;
 
@@ -582,7 +589,7 @@ export class CharacterRig {
         const strap = new Mesh(roundedBoxGeometry(h * 0.035, h * 0.24, h * 0.02, h * 0.008), this.lowerMaterial);
         strap.position.set(side * h * 0.055, h * 0.14, h * 0.075);
         this.dress(strap);
-        this.joints.torso.add(strap);
+        this.outfitGroup.add(strap);
       }
     }
     if (outfit === 'raincoat') {
@@ -590,7 +597,7 @@ export class CharacterRig {
       hood.position.set(0, h * 0.24, -h * 0.045);
       hood.scale.set(1.1, 1, 1.15);
       this.dress(hood);
-      this.joints.torso.add(hood);
+      this.outfitGroup.add(hood);
     }
   }
 

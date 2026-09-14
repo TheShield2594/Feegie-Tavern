@@ -59,14 +59,14 @@ export class InputSystem {
       // Tab and the arrows would otherwise scroll or move focus off the canvas.
       if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       this.lastDevice = 'keyboard';
-      for (const action of actions) this.setDown(action, true);
+      for (const action of actions) this.setSource(action, `key:${e.code}`, true);
     };
 
     const onKeyUp = (event: Event) => {
       const e = event as KeyboardEvent;
       const actions = KEYBOARD_BINDINGS[e.code];
       if (!actions) return;
-      for (const action of actions) this.setDown(action, false);
+      for (const action of actions) this.setSource(action, `key:${e.code}`, false);
     };
 
     // Losing focus mid-hold would otherwise leave the player walking forever.
@@ -104,26 +104,51 @@ export class InputSystem {
     return this.states.get(action)!;
   }
 
-  private setDown(action: GameAction, down: boolean): void {
+  /**
+   * Records that one physical input holds (or has released) an action.
+   *
+   * The source key matters: two keys, a gamepad button and a touch button can
+   * all be bound to the same action, and releasing one of them must not clear
+   * the action while another is still held — which is what happens if the
+   * state is a single boolean. Both Shift keys mapping to `run` is the case
+   * that shows it up first.
+   */
+  private setSource(action: GameAction, source: string, down: boolean): void {
+    let held = this.heldSources.get(action);
+    if (!held) {
+      held = new Set();
+      this.heldSources.set(action, held);
+    }
+
+    const wasDown = held.size > 0;
+    if (down) held.add(source);
+    else held.delete(source);
+    const isDown = held.size > 0;
+    if (wasDown === isDown) return;
+
     const s = this.state(action);
-    if (s.down === down) return;
-    s.down = down;
-    if (down) {
+    s.down = isDown;
+    if (isDown) {
       s.pressedThisFrame = true;
       s.heldFor = 0;
       this.repeatTimers.set(action, REPEAT_DELAY);
     } else {
       s.releasedThisFrame = true;
       this.repeatTimers.delete(action);
+      this.repeatEdge.delete(action);
     }
   }
+
+  private heldSources = new Map<GameAction, Set<string>>();
+  /** Actions whose auto-repeat fired this frame, consumed by `repeated`. */
+  private repeatEdge = new Set<GameAction>();
 
   /** Used by the on-screen touch buttons. */
   setTouch(action: GameAction, down: boolean): void {
     this.lastDevice = 'touch';
     if (down) this.touchHeld.add(action);
     else this.touchHeld.delete(action);
-    this.setDown(action, down);
+    this.setSource(action, 'touch', down);
   }
 
   /** Virtual joystick output from the touch layer, in [-1, 1]. */
@@ -157,8 +182,7 @@ export class InputSystem {
     const s = this.state(action);
     if (s.pressedThisFrame) return true;
     if (!s.down) return false;
-    const timer = this.repeatTimers.get(action) ?? REPEAT_DELAY;
-    return timer <= 0;
+    return this.repeatEdge.has(action);
   }
 
   glyph(action: GameAction): string {
@@ -199,7 +223,15 @@ export class InputSystem {
 
     for (const [action, timer] of this.repeatTimers) {
       const next = timer - dt;
-      this.repeatTimers.set(action, next <= 0 ? REPEAT_RATE : next);
+      if (next <= 0) {
+        // Record the edge instead of relying on the timer still reading <= 0
+        // when a consumer asks: it is reset in the same pass, so the old test
+        // never saw an expiry and held directions never auto-repeated.
+        this.repeatEdge.add(action);
+        this.repeatTimers.set(action, REPEAT_RATE);
+      } else {
+        this.repeatTimers.set(action, next);
+      }
     }
     for (const s of this.states.values()) {
       if (s.down) s.heldFor += dt;
@@ -212,6 +244,7 @@ export class InputSystem {
       s.pressedThisFrame = false;
       s.releasedThisFrame = false;
     }
+    this.repeatEdge.clear();
   }
 
   private padMove = { x: 0, y: 0 };
@@ -231,7 +264,7 @@ export class InputSystem {
         for (const [index, wasDown] of this.padButtonState) {
           if (!wasDown) continue;
           for (const action of GAMEPAD_BUTTON_BINDINGS[index] ?? []) {
-            if (!this.touchHeld.has(action)) this.setDown(action, false);
+            this.setSource(action, `pad:${index}`, false);
           }
         }
         this.padButtonState.clear();
@@ -263,11 +296,7 @@ export class InputSystem {
       if (down !== was) {
         this.padButtonState.set(index, down);
         if (down) this.lastDevice = 'gamepad';
-        for (const action of actions) {
-          // Do not cancel a touch hold on the same action.
-          if (!down && this.touchHeld.has(action)) continue;
-          this.setDown(action, down);
-        }
+        for (const action of actions) this.setSource(action, `pad:${index}`, down);
       }
     }
 
@@ -288,13 +317,22 @@ export class InputSystem {
   private setStickUi(action: GameAction, down: boolean): void {
     if ((this.stickUiState.get(action) ?? false) === down) return;
     this.stickUiState.set(action, down);
-    // Only drive the action from the stick when no key is already holding it.
-    if (!down && this.touchHeld.has(action)) return;
-    this.setDown(action, down);
+    this.setSource(action, 'stick', down);
   }
 
   private releaseAll(): void {
-    for (const action of ALL_ACTIONS) this.setDown(action, false);
+    for (const action of ALL_ACTIONS) {
+      this.heldSources.get(action)?.clear();
+      const s = this.state(action);
+      if (s.down) {
+        s.down = false;
+        s.releasedThisFrame = true;
+      }
+      this.repeatTimers.delete(action);
+      this.repeatEdge.delete(action);
+    }
+    this.stickUiState.clear();
+    this.padButtonState.clear();
     this.touchHeld.clear();
     this.touchStick.x = 0;
     this.touchStick.y = 0;

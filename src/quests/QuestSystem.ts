@@ -99,8 +99,12 @@ export class QuestSystem {
   }
 
   load(data: { activeId: string; progress: number; issuedDay: number; completedIds: string[] }, storyStage: number): void {
-    this.activeId = DAILY_QUESTS.some((q) => q.id === data.activeId) ? data.activeId : 'museum';
-    this.progress = data.progress;
+    // Progress belongs to the quest it was earned against. Carrying it onto
+    // the fallback would leave a one-step goal already satisfied, so the
+    // player could never complete it or claim the reward.
+    const known = DAILY_QUESTS.some((q) => q.id === data.activeId);
+    this.activeId = known ? data.activeId : 'museum';
+    this.progress = known ? data.progress : 0;
     this.issuedDay = data.issuedDay;
     this.completedIds = data.completedIds ?? [];
     this.storyStage = storyStage;

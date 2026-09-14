@@ -1,4 +1,5 @@
 import type { EventBus } from '@/core/EventBus';
+import type { GameAction } from '@/input/actions';
 import type { InteractionContext, InteractionOption } from './types';
 
 export type InteractionProvider = (context: InteractionContext) => InteractionOption | InteractionOption[] | null;
@@ -42,10 +43,16 @@ export class InteractionSystem {
     return this.current;
   }
 
-  /** Runs the highest-priority interaction. Returns false when there is none. */
-  trigger(): boolean {
-    const option = this.current[0];
-    if (!option || option.disabledReason) return false;
+  /**
+   * Runs the highest-priority enabled interaction bound to `action`.
+   *
+   * The prompt tells the player which button does what, so the button they
+   * press has to pick the matching prompt — running whatever happens to be
+   * first would let A fire an option the HUD has labelled X.
+   */
+  trigger(action: GameAction): boolean {
+    const option = this.current.find((o) => o.action === action && !o.disabledReason);
+    if (!option) return false;
     option.perform();
     return true;
   }

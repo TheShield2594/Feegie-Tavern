@@ -417,6 +417,10 @@ export class Game {
       cameraShake: data.settings.cameraShake,
     });
     this.cameraRig.shakeEnabled = this.settings.cameraShake;
+    // The renderer keeps its startup profile unless it is told; without this a
+    // player who chose "low" and reloaded silently runs at the default.
+    this.renderer.autoQuality = this.settings.autoQuality;
+    this.renderer.applyQuality(this.settings.quality);
 
     // Furniture needs the home interior's bounds, which depend on the level.
     const layout = homeLayoutFor(this.homeLevel);
@@ -700,7 +704,11 @@ export class Game {
     if (this.input.justPressed('cancel') && !this.uiRoot.isPanelOpen) {
       if (this.dialogue.isOpen) this.dialogue.close();
       else if (this.fishing.isActive) this.fishing.reelIn(this.player);
-      else if (this.mode === 'decorating') this.exitDecorating();
+      else if (this.mode === 'decorating') {
+        // Escape puts down what you are carrying; press it again to finish.
+        if (this.furnishing.editing) this.furnishing.cancelEdit();
+        else this.exitDecorating();
+      }
     }
   }
 
@@ -746,12 +754,14 @@ export class Game {
     }
 
     if (this.input.justPressed('interact')) {
-      if (!this.interactions.trigger()) {
-        // Nothing to interact with; if the player is holding a rod at water, cast.
+      if (!this.interactions.trigger('interact')) {
+        // Nothing bound to A here; if the player is at water with a rod, cast.
         this.tryUseTool();
       }
     }
-    if (this.input.justPressed('useTool')) this.tryUseTool();
+    if (this.input.justPressed('useTool')) {
+      if (!this.interactions.trigger('useTool')) this.tryUseTool();
+    }
   }
 
   // --- Actions -------------------------------------------------------------
@@ -863,6 +873,7 @@ export class Game {
           this.materials.wood += 1;
           this.quests.record('gather', 1);
           this.save.markDirty();
+          return true;
         });
       }
       return;
@@ -880,6 +891,7 @@ export class Game {
           this.materials.stone += 1;
           this.quests.record('gather', 1);
           this.save.markDirty();
+          return true;
         });
       }
       return;
@@ -1392,7 +1404,10 @@ export class Game {
           id: 'museum.collection',
           kind: 'read',
           label: 'Collection',
-          action: 'inventory',
+          // Shares the tool button with donating, which outranks it — so the
+          // same press donates when you are carrying something new and opens
+          // the ledger when you are not.
+          action: 'useTool',
           priority: 20,
           worldX: curator.x,
           worldY: 2.4,
@@ -1440,14 +1455,15 @@ export class Game {
         tree.harvestedOnDay = this.time.day;
         this.foliage.refreshFruit(this.time.day);
         for (let i = 0; i < 2; i++) {
-          this.drops.spawn('fruit.orchardPear', new Vector3(tree.x, tree.y + 3.4, tree.z), () => {
-            this.inventory.addById('fruit.orchardPear', { day: this.time.day });
-          });
+          this.drops.spawn('fruit.orchardPear', new Vector3(tree.x, tree.y + 3.4, tree.z), () =>
+            !!this.inventory.addById('fruit.orchardPear', { day: this.time.day }),
+          );
         }
       } else if (Math.random() < 0.45) {
         this.drops.spawn('mat.wood', new Vector3(tree.x, tree.y + 3, tree.z), () => {
           this.materials.wood += 1;
           this.quests.record('gather', 1);
+          return true;
         });
       } else if (Math.random() < 0.25 && this.time.hour >= 6 && this.time.hour < 20) {
         // A bug sometimes falls out — the reason to shake trees you have already stripped.
@@ -1500,9 +1516,10 @@ export class Game {
     this.player.performAction('pick', 1.0, false);
     this.particles.burst('sparkle', new Vector3(plot.x, plot.y + 0.6, plot.z), 0.7);
     this.drops.spawn(cropId, new Vector3(plot.x, plot.y + 0.6, plot.z), () => {
-      this.inventory.addById(cropId, { day: this.time.day });
+      if (!this.inventory.addById(cropId, { day: this.time.day })) return false;
       this.stats.harvested += 1;
       this.quests.record('harvest', 1);
+      return true;
     });
     this.save.markDirty();
   }
@@ -1705,11 +1722,10 @@ export class Game {
         this.save.markDirty();
       },
       saveNow: () => {
-        this.save.write(this.snapshot());
-        this.uiRoot.toast('Island saved.', 'good');
+        if (this.saveIfPlaying()) this.uiRoot.toast('Island saved.', 'good');
       },
       quitToTitle: () => {
-        this.save.write(this.snapshot());
+        this.saveIfPlaying();
         this.uiRoot.closeAll();
         this.mode = 'title';
         this.hud.setVisible(false);
@@ -2016,6 +2032,23 @@ export class Game {
   }
 
   // --- Utilities -----------------------------------------------------------
+
+  /**
+   * True once a slot has actually been loaded or started. Everything that
+   * writes to storage checks this: at the title screen the game still holds a
+   * default state pointed at slot 1, and persisting that would erase whatever
+   * save is already in that slot.
+   */
+  get hasActiveSession(): boolean {
+    return this.mode !== 'title';
+  }
+
+  /** Writes the current slot, unless the game is still on the title screen. */
+  saveIfPlaying(): boolean {
+    if (!this.hasActiveSession) return false;
+    this.save.write(this.snapshot());
+    return true;
+  }
 
   /** Named world anchors, exposed for tooling and the map. */
   get landmarks(): typeof LANDMARKS {

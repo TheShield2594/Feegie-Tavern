@@ -3,6 +3,7 @@ import type { EventBus } from '@/core/EventBus';
 import { FURNITURE_BY_ID, type FurnitureDef } from '@/data/furniture';
 import type { PlacedFurnitureData } from '@/save/schema';
 import { clamp } from '@/util/math';
+import { disposeObject } from '@/util/three';
 import { makeFurniture } from './FurnitureModels';
 
 export interface PlacedPiece extends PlacedFurnitureData {
@@ -86,11 +87,9 @@ export class HomeFurnishing {
     const index = this.pieces.findIndex((p) => p.uid === uid);
     if (index < 0) return null;
     const [piece] = this.pieces.splice(index, 1);
+    if (this.editing === piece) this.editing = null;
     this.group.remove(piece.group);
-    piece.group.traverse((child) => {
-      const mesh = child as Mesh;
-      if (mesh.isMesh) mesh.geometry.dispose();
-    });
+    disposeObject(piece.group);
     return piece.defId;
   }
 
@@ -112,6 +111,9 @@ export class HomeFurnishing {
 
   beginEdit(piece: PlacedPiece): void {
     this.editing = piece;
+    // Remembered so a cancelled edit puts the piece back where it started
+    // rather than leaving the half-finished move committed.
+    this.editOrigin = { x: piece.x, z: piece.z, rotation: piece.rotation };
     if (this.ghost) {
       const size = this.footprintMetres(piece.def);
       this.ghost.scale.set(size.w, size.d, 1);
@@ -178,17 +180,29 @@ export class HomeFurnishing {
     }
     piece.group.position.y = 0;
     this.editing = null;
+    this.editOrigin = null;
     if (this.ghost) this.ghost.visible = false;
     this.bus.emit('audio:sfx', { id: 'ui.select' });
     return true;
   }
 
   cancelEdit(): void {
-    if (!this.editing) return;
-    this.editing.group.position.y = 0;
+    const piece = this.editing;
+    if (!piece) return;
+    if (this.editOrigin) {
+      piece.x = this.editOrigin.x;
+      piece.z = this.editOrigin.z;
+      piece.rotation = this.editOrigin.rotation;
+    }
+    piece.group.position.set(piece.x, 0, piece.z);
+    piece.group.rotation.y = piece.rotation;
     this.editing = null;
+    this.editOrigin = null;
     if (this.ghost) this.ghost.visible = false;
+    this.bus.emit('audio:sfx', { id: 'ui.back' });
   }
+
+  private editOrigin: { x: number; z: number; rotation: number } | null = null;
 
   private footprintMetres(def: FurnitureDef): { w: number; d: number } {
     return { w: def.footprint.w * GRID, d: def.footprint.d * GRID };

@@ -4,6 +4,7 @@ import type { CharacterLook } from '@/data/clothing';
 import { clamp, dampAngle, lerp } from '@/util/math';
 import { CharacterAnimator, type ClipName } from './CharacterAnimator';
 import { CharacterRig } from './CharacterRig';
+import { disposeObject } from '@/util/three';
 import { makeTool, TOOLS, type ToolId } from './Tools';
 import { SEA_LEVEL, isWalkable, sampleSurface, terrainHeight, type Surface } from '@/world/heightfield';
 
@@ -81,10 +82,7 @@ export class Player {
     this.tool = id;
     if (this.toolModel) {
       this.rig.toolAnchor.remove(this.toolModel);
-      this.toolModel.traverse((child) => {
-        const mesh = child as { geometry?: { dispose(): void } };
-        mesh.geometry?.dispose();
-      });
+      disposeObject(this.toolModel);
       this.toolModel = null;
     }
     if (id !== 'none') {

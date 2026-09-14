@@ -73,6 +73,7 @@ export class CharacterAnimator {
   private scratchQuat = new Quaternion();
   private targetQuat = new Quaternion();
   private restPose: Partial<Record<JointName, Vector3>> = {};
+  private jointNames: JointName[] = [];
 
   constructor(private rig: CharacterRig) {
     this.clips = buildClips();
@@ -80,6 +81,7 @@ export class CharacterAnimator {
     for (const name of Object.keys(rig.joints) as JointName[]) {
       const joint = rig.joints[name];
       this.restPose[name] = new Vector3(joint.rotation.x, joint.rotation.y, joint.rotation.z);
+      this.jointNames.push(name);
     }
   }
 
@@ -163,12 +165,11 @@ export class CharacterAnimator {
   }
 
   private applyBlended(from: Pose | null, to: Pose, weight: number): void {
-    const names = new Set<JointName>([
-      ...(from ? (Object.keys(from) as JointName[]) : []),
-      ...(Object.keys(to) as JointName[]),
-    ]);
-
-    for (const name of names) {
+    // Every joint is written every frame, with an absent entry meaning "rest".
+    // Blending only the joints the two clips happen to name leaves anything
+    // else frozen at its last value — which is how a character who had been
+    // asleep would keep walking around with its legs folded.
+    for (const name of this.jointNames) {
       const joint = this.rig.joints[name];
       if (!joint) continue;
       const rest = this.restPose[name] ?? new Vector3();

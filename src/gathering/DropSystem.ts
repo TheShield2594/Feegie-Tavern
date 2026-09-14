@@ -8,12 +8,16 @@ interface Drop {
   model: Group;
   position: Vector3;
   velocity: Vector3;
+  /** Seconds since this attempt began; reset when a pickup is refused. */
   age: number;
+  /** Seconds since the drop spawned; governs expiry. */
+  totalAge: number;
   /** Seconds before the drop starts homing on the player. */
   delay: number;
   spin: number;
   collected: boolean;
-  onCollect: () => void;
+  /** Returns false when the item could not be taken, e.g. the bag is full. */
+  onCollect: () => boolean;
 }
 
 const GRAVITY = -16;
@@ -36,9 +40,10 @@ export class DropSystem {
 
   /**
    * @param onCollect Runs when the drop reaches the player — this is where the
-   * item actually enters the inventory, so a full bag can reject it there.
+   * item actually enters the inventory. Return false to refuse the pickup (a
+   * full bag); the drop stays in the world and tries again shortly.
    */
-  spawn(defId: string, at: Vector3, onCollect: () => void, options: { spread?: number; upward?: number } = {}): void {
+  spawn(defId: string, at: Vector3, onCollect: () => boolean, options: { spread?: number; upward?: number } = {}): void {
     const model = this.acquire(defId);
     model.position.copy(at);
     model.visible = true;
@@ -55,6 +60,7 @@ export class DropSystem {
         (Math.random() * 2 - 1) * spread,
       ),
       age: 0,
+      totalAge: 0,
       delay: 0.42 + Math.random() * 0.2,
       spin: (Math.random() * 2 - 1) * 5,
       collected: false,
@@ -85,6 +91,16 @@ export class DropSystem {
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const drop = this.drops[i];
       drop.age += dt;
+      drop.totalAge += dt;
+
+      if (drop.totalAge > MAX_LIFETIME) {
+        // Time is up. The item is not granted: silently adding it would hand
+        // the player something they never picked up, and it may be the very
+        // thing the bag refused a moment ago.
+        this.release(drop);
+        this.drops.splice(i, 1);
+        continue;
+      }
 
       if (drop.age < drop.delay) {
         // Ballistic phase: arc out of whatever produced it and settle.
@@ -104,11 +120,17 @@ export class DropSystem {
         const toTarget = target.clone().sub(drop.position);
         const distance = toTarget.length();
         if (distance < 0.45 && !drop.collected) {
-          drop.collected = true;
-          drop.onCollect();
-          this.bus.emit('audio:sfx', { id: 'item.pickup', rate: 0.94 + Math.random() * 0.16 });
-          this.release(drop);
-          this.drops.splice(i, 1);
+          if (drop.onCollect()) {
+            drop.collected = true;
+            this.bus.emit('audio:sfx', { id: 'item.pickup', rate: 0.94 + Math.random() * 0.16 });
+            this.release(drop);
+            this.drops.splice(i, 1);
+            continue;
+          }
+          // Refused. Bounce it back onto the ground and let it try again, so a
+          // full bag costs the player a trip rather than the item.
+          drop.age = 0;
+          drop.velocity.set((Math.random() * 2 - 1) * 1.6, 3.4, (Math.random() * 2 - 1) * 1.6);
           continue;
         }
         const ease = clamp01((drop.age - drop.delay) / 0.35);
@@ -122,11 +144,6 @@ export class DropSystem {
       const pulse = 1 + Math.sin(drop.age * 9) * 0.06;
       drop.model.scale.setScalar(pulse);
 
-      if (drop.age > MAX_LIFETIME) {
-        if (!drop.collected) drop.onCollect();
-        this.release(drop);
-        this.drops.splice(i, 1);
-      }
     }
   }
 

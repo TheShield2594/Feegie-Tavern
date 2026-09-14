@@ -170,9 +170,13 @@ export class Inventory {
       case 'name':
         stacks.sort((a, b) => a.name.localeCompare(b.name));
         break;
-      case 'recent':
-        stacks.sort((a, b) => (b.items[0].acquiredDay ?? 0) - (a.items[0].acquiredDay ?? 0));
+      case 'recent': {
+        // Items are appended, so index 0 is the oldest; a stack should sort by
+        // its newest member or adding to it never moves it up the list.
+        const newest = (s: Stack) => s.items.reduce((max, i) => Math.max(max, i.acquiredDay ?? 0), 0);
+        stacks.sort((a, b) => newest(b) - newest(a));
         break;
+      }
       case 'category':
       default:
         stacks.sort((a, b) => {

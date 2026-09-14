@@ -18,12 +18,26 @@ function reportFailure(message: string, detail?: unknown): void {
     position:fixed;inset:0;display:grid;place-items:center;padding:32px;
     background:#141d2c;color:#f4ecdc;font:16px/1.6 system-ui,sans-serif;text-align:center;z-index:99;
   `;
-  notice.innerHTML = `
-    <div style="max-width:520px">
-      <h1 style="font-size:26px;margin:0 0 10px">Cozy Cove could not start</h1>
-      <p style="opacity:.8;margin:0 0 14px">${message}</p>
-      <p style="opacity:.6;font-size:13px">This build needs WebGL 2. Try a recent desktop browser with hardware acceleration enabled.</p>
-    </div>`;
+
+  const panel = document.createElement('div');
+  panel.style.maxWidth = '520px';
+
+  const heading = document.createElement('h1');
+  heading.style.cssText = 'font-size:26px;margin:0 0 10px';
+  heading.textContent = 'Cozy Cove could not start';
+
+  // textContent, not innerHTML: `message` can carry an exception string we do
+  // not control, and this path runs before anything else has rendered.
+  const reason = document.createElement('p');
+  reason.style.cssText = 'opacity:.8;margin:0 0 14px';
+  reason.textContent = message;
+
+  const hint = document.createElement('p');
+  hint.style.cssText = 'opacity:.6;font-size:13px';
+  hint.textContent = 'This build needs WebGL 2. Try a recent desktop browser with hardware acceleration enabled.';
+
+  panel.append(heading, reason, hint);
+  notice.append(panel);
   document.body.append(notice);
 }
 
@@ -47,22 +61,20 @@ if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
     });
 
     // Save on the way out so a closed tab does not lose the last few minutes.
-    window.addEventListener('beforeunload', () => {
+    // `saveIfPlaying` is a no-op at the title screen: the game is still holding
+    // a default state aimed at slot 1 there, and writing it would erase that
+    // slot for anyone who opened the page and changed their mind.
+    const persist = () => {
       try {
-        game.save.write(game.snapshot());
+        game.saveIfPlaying();
       } catch {
         // Never block unload on a storage failure.
       }
-    });
+    };
 
+    window.addEventListener('beforeunload', persist);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        try {
-          game.save.write(game.snapshot());
-        } catch {
-          /* ignore */
-        }
-      }
+      if (document.visibilityState === 'hidden') persist();
     });
 
     // F3 toggles the performance readout.
