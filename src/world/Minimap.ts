@@ -1,6 +1,7 @@
 import { PALETTE } from '@/rendering/palette';
 import { BUILDINGS } from './Buildings';
 import { BRIDGES, CREEK, FORD, ISLAND_HALF, LANDMARKS, PATHS, SEA_LEVEL, creekDepth, sampleSurface } from './heightfield';
+import { REGIONS, regionAnchor } from './regions';
 
 export interface MapPin {
   x: number;
@@ -136,17 +137,18 @@ export function drawIslandMap(
     });
   }
 
-  // Every region gets a pin. They are the reason the map is worth opening.
-  for (const key of [
-    'beach.pier',
-    'meadow.high',
-    'meadow.spring',
-    'farm.terrace',
-    'grove.west',
-    'orchard.secret',
-    'point.keeper',
-    'creek.stones',
-  ]) {
+  // Every region gets a pin, read from `REGIONS` rather than from a list kept
+  // here: a hand-maintained list is a list that goes stale, and a new region
+  // whose pin someone forgot is a region nobody finds.
+  for (const region of REGIONS) {
+    if (!region.named) continue;
+    const anchor = regionAnchor(region.id);
+    if (!anchor) continue;
+    pins.push({ x: toCanvasX(anchor.x), y: toCanvasY(anchor.z), label: region.label, color: '#5c6a6b' });
+  }
+
+  // Landmarks worth their own pin inside a region that already has one.
+  for (const key of ['beach.pier', 'meadow.spring']) {
     const landmark = LANDMARKS[key];
     if (!landmark) continue;
     pins.push({ x: toCanvasX(landmark.x), y: toCanvasY(landmark.z), label: landmark.label, color: '#5c6a6b' });

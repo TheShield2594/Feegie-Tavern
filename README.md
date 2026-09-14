@@ -134,8 +134,10 @@ island moves them with it.
 places — the town, the beach, the cove, the creek, the High Meadow, the West
 Grove, the Secret Orchard, the Garden Terrace and Lighthouse Point — and says
 which habitats each one holds. One lookup, `regionAt(x, z)`, decides what the
-bug net catches, what the creek's fish pool contains, where forage grows, what
-the banner says when you walk in and which pins the map draws.
+bug net catches, what the creek's fish pool contains, where forage grows, and
+what the banner says when you walk in. The six regions flagged `named` also
+earn a pin on the island map, drawn from the same table — so a region added to
+`REGIONS` appears on the map without anyone remembering to list it there.
 
 That gives each region something only it has:
 

@@ -32,7 +32,15 @@ import {
 } from '@/world/Interiors';
 import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, walkHeight, waterDepth } from '@/world/heightfield';
 import { CreekWater } from '@/world/CreekWater';
-import { isInRegion, regionAt, regionLabel, speciesBelongsIn, REGIONS_BY_ID, type RegionId } from '@/world/regions';
+import {
+  isInRegion,
+  isNamedPlace,
+  regionAt,
+  regionLabel,
+  speciesBelongsIn,
+  REGIONS_BY_ID,
+  type RegionId,
+} from '@/world/regions';
 import { drawIslandMap } from '@/world/Minimap';
 import { Player } from '@/player/Player';
 import { TOOLS, type ToolId } from '@/player/Tools';
@@ -58,6 +66,7 @@ import { PUBLIC_WORKS } from '@/data/quests';
 import { VILLAGERS, VILLAGERS_BY_ID } from '@/data/villagers';
 import { ALL_SPECIES, BUGS, FOSSILS, SEA_CREATURES, SPECIES_BY_ID } from '@/data/species';
 import { getItemDef } from '@/data/items';
+import type { SpeciesDef } from '@/items/types';
 import { iconFor } from '@/items/ItemIcons';
 import { UIRoot } from '@/ui/UIRoot';
 import { HUD } from '@/ui/HUD';
@@ -87,13 +96,6 @@ import { disposeObject } from '@/util/three';
 const INTERIOR_ORIGIN = new Vector3(1000, 0, 0);
 
 type Mode = 'title' | 'exterior' | 'interior' | 'decorating';
-
-/**
- * Regions that announce themselves. The town, the beach and the open sea are
- * where the player already spends their time; a title card for walking onto
- * the sand would be noise rather than arrival.
- */
-const ANNOUNCED_REGIONS = new Set<RegionId>(['meadow', 'grove', 'orchard', 'garden', 'point', 'creek']);
 
 export class Game {
   readonly bus = new EventBus();
@@ -458,6 +460,13 @@ export class Game {
     this.foliage.refreshFruit(this.time.day);
     this.townWorks = { ...data.world.townWorks };
     this.props.setOrchardOpen(data.world.orchardOpen, true);
+    // Banner state belongs to the island being loaded, not to the session. Two
+    // slots on the same day in the same place would otherwise inherit each
+    // other's suppressed arrivals.
+    this.currentRegion = regionAt(data.player.position.x, data.player.position.z);
+    this.regionSettleTimer = 0;
+    this.pendingRegion = this.currentRegion;
+    this.announcedOnDay.clear();
     this.gardens = data.world.gardens.map((g) => ({ ...g }));
 
     Object.assign(this.settings, {
@@ -494,6 +503,8 @@ export class Game {
   private townWorks = { bridge: false, stairs: false, lighthouse: false };
   /** Where the player is standing, for the region banner. */
   private currentRegion: RegionId = 'town';
+  /** The region being settled into, which is not yet `currentRegion`. */
+  private pendingRegion: RegionId = 'town';
   private regionSettleTimer = 0;
   /** The day each region was last announced, so arriving is once a day rather than once ever. */
   private announcedOnDay = new Map<RegionId, number>();
@@ -610,17 +621,25 @@ export class Game {
   private updateRegionBanner(dt: number): void {
     const here = regionAt(this.player.position.x, this.player.position.z);
     if (here === this.currentRegion) {
+      this.pendingRegion = here;
       this.regionSettleTimer = 0;
       return;
+    }
+    // The timer measures continuous time in *this* candidate, not total time
+    // away from the last one. Someone crossing three regions in a second would
+    // otherwise have the third announced the instant they stepped into it.
+    if (here !== this.pendingRegion) {
+      this.pendingRegion = here;
+      this.regionSettleTimer = 0;
     }
     this.regionSettleTimer += dt;
     if (this.regionSettleTimer < 1.1) return;
 
     this.regionSettleTimer = 0;
     this.currentRegion = here;
-    // Only the places worth naming: crossing from the square onto the sand is
-    // not an arrival, and the title card would wear out fast if it were.
-    if (!ANNOUNCED_REGIONS.has(here)) return;
+    // Only the places worth naming, per the region table — the same flag the
+    // map pins read, so the two can never disagree about what counts.
+    if (!isNamedPlace(here)) return;
     if (this.announcedOnDay.get(here) === this.time.day) return;
     this.announcedOnDay.set(here, this.time.day);
     this.uiRoot.showLocation(regionLabel(here), REGIONS_BY_ID.get(here)?.blurb ?? '');
@@ -1021,6 +1040,25 @@ export class Game {
     }
   }
 
+  /**
+   * Which bugs are out, here, now.
+   *
+   * Shared by the net and by what falls out of a shaken tree, because those are
+   * two ways of catching the same insect and any rule one enforces and the
+   * other does not is a way around it. The tree drop used to check only the
+   * region, which made a daytime shake on the point a way to collect the
+   * Beacon Moth before the lighthouse it follows had been lit.
+   */
+  private bugsActiveIn(region: RegionId, hour: number): SpeciesDef[] {
+    return BUGS.filter((bug) => {
+      if (!speciesBelongsIn(bug, region)) return false;
+      if (bug.id === 'bug.beaconMoth' && !this.townWorks.lighthouse) return false;
+      if (!bug.activeHours) return true;
+      const [from, to] = bug.activeHours;
+      return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
+    });
+  }
+
   private resolveNetSwing(): void {
     const target = this.player.forwardPoint(1.6);
     // Bug catching is a soft-target action, but not a soft-*place* one: what is
@@ -1033,13 +1071,7 @@ export class Game {
       return;
     }
     const region = regionAt(target.x, target.z);
-    const candidates = BUGS.filter((bug) => {
-      if (!speciesBelongsIn(bug, region)) return false;
-      if (bug.id === 'bug.beaconMoth' && !this.townWorks.lighthouse) return false;
-      if (!bug.activeHours) return true;
-      const [from, to] = bug.activeHours;
-      return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
-    });
+    const candidates = this.bugsActiveIn(region, hour);
     if (candidates.length === 0 || Math.random() > 0.5) {
       this.particles.burst('leaves', target, 0.4);
       this.uiRoot.toast(
@@ -1148,7 +1180,10 @@ export class Game {
     const reeled = headline === 'Reeled in';
     if (reeled) {
       const from = this.fishing.bobberWorldPosition.clone();
-      from.y = SEA_LEVEL + 0.1;
+      // Offset the bobber's own height rather than replacing it: a fish reeled
+      // out of the creek is landed metres above sea level, and pinning the leap
+      // to SEA_LEVEL would start it underground.
+      from.y += 0.1;
       this.drops.spawn(defId, from, () => true, { upward: 6.2, spread: 0.15 });
       this.particles.burst('sparkle', from, 0.6);
     }
@@ -1758,7 +1793,7 @@ export class Game {
         // A bug sometimes falls out — the reason to shake trees you have already
         // stripped. It has to be one that lives in this tree's region, or the
         // net's whole geography could be shortcut by shaking a town broadleaf.
-        const local = BUGS.filter((b) => speciesBelongsIn(b, regionAt(tree.x, tree.z)));
+        const local = this.bugsActiveIn(regionAt(tree.x, tree.z), this.time.hour);
         if (local.length > 0) {
           const bug = local[Math.floor(Math.random() * local.length)];
           this.onCatch(bug.id, undefined, 'Fell out of the tree');

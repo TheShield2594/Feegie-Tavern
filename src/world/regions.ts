@@ -33,6 +33,15 @@ export interface RegionDef {
   habitats: Habitat[];
   /** Centre and reach of the named area, for regions that have one. */
   centre?: { x: number; z: number; radius: number };
+  /**
+   * A place you arrive at, rather than ambient ground.
+   *
+   * Drives both the banner when the player walks in and the map's pin. The
+   * town, the beach and the open sea are where the player already spends their
+   * time: a title card for stepping onto the sand would be noise, and a pin
+   * saying "Cozy Cove" on top of the town's own buildings is clutter.
+   */
+  named?: boolean;
 }
 
 /**
@@ -44,6 +53,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'meadow',
     label: 'High Meadow',
+    named: true,
     blurb: 'Above the ridge, where the creek starts',
     habitats: ['meadow', 'river'],
     centre: { x: -42, z: -40, radius: 19 },
@@ -51,6 +61,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'point',
     label: 'Lighthouse Point',
+    named: true,
     blurb: 'The headland, and the light on it',
     habitats: ['shore', 'meadow'],
     centre: { x: 42, z: -46, radius: 17 },
@@ -58,6 +69,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'orchard',
     label: 'Secret Orchard',
+    named: true,
     blurb: 'Behind the hedge on the east ridge',
     habitats: ['forest', 'meadow'],
     centre: { x: 46, z: -16, radius: 13 },
@@ -65,6 +77,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'garden',
     label: 'Garden Terrace',
+    named: true,
     blurb: 'Watered by the creek, whatever the weather',
     habitats: ['meadow', 'river'],
     centre: { x: -34, z: 20, radius: 13 },
@@ -72,6 +85,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'grove',
     label: 'West Grove',
+    named: true,
     blurb: 'Old pines, and the elder tree among them',
     habitats: ['forest'],
     centre: { x: -56, z: 4, radius: 15 },
@@ -79,6 +93,7 @@ export const REGIONS: RegionDef[] = [
   {
     id: 'creek',
     label: 'The Creek',
+    named: true,
     blurb: 'Fresh water, all the way down to the sea',
     habitats: ['river'],
   },
@@ -156,6 +171,11 @@ export function speciesBelongsIn(species: SpeciesExtras, region: RegionId): bool
   if (!species.habitat) return true;
   const def = REGIONS_BY_ID.get(region);
   return !!def && def.habitats.includes(species.habitat);
+}
+
+/** Whether a region announces itself and earns a pin on the map. */
+export function isNamedPlace(id: RegionId): boolean {
+  return REGIONS_BY_ID.get(id)?.named === true;
 }
 
 /** The label shown when the player crosses into a region. */

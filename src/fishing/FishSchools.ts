@@ -214,12 +214,16 @@ export class FishSchools {
       let nz = fish.z + Math.cos(fish.angle) * speed * dt;
 
       // Turn away from the shore — or the bank — rather than beaching.
-      const water = waterAt(fish.fresh, nx, nz);
+      let water = waterAt(fish.fresh, nx, nz);
       const minDepth = fish.fresh ? 0.35 : 0.7;
       if (water.depth < minDepth || Math.hypot(nx, nz) > 150) {
         fish.angle += Math.PI * 0.6;
         nx = fish.x;
         nz = fish.z;
+        // Re-read where the fish actually stayed. The rejected sample is from
+        // outside the channel, where a creek fish's water reads as sea level —
+        // using it would drop the fish through the streambed for a frame.
+        water = waterAt(fish.fresh, nx, nz);
       }
       fish.x = nx;
       fish.z = nz;

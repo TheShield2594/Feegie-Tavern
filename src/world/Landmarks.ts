@@ -385,8 +385,11 @@ export class OrchardGate {
       this.group.add(pivot);
       this.leaves.push(pivot);
 
+      // Inward from the pivot, so the two leaves meet across the gap. Offsetting
+      // the same way as the pivot pushed each leaf out past its own post and
+      // into the hedge, leaving the gateway itself standing open.
       const leaf = new Group();
-      leaf.position.set(0, 0, side * 0.85);
+      leaf.position.set(0, 0, -side * 0.85);
       pivot.add(leaf);
 
       for (let i = 0; i < 4; i++) {
@@ -419,10 +422,12 @@ export class OrchardGate {
     this.group.add(bar);
     this.bar = bar;
 
+    // Hung on the bar, not on the gate: the sign says the way is barred, so it
+    // has to come down with the bar rather than float over an open gateway.
     const sign = makeSign({ text: 'Private', width: 1.1, height: 0.36, boardColor: '#d8c6a0' });
     sign.position.set(0.22, 1.75, 0);
     sign.rotation.y = -Math.PI / 2;
-    this.group.add(sign);
+    bar.add(sign);
 
     return this.group;
   }
