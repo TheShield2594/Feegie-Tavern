@@ -745,6 +745,46 @@ The growth is `GLTFLoader` plus the meshopt decoder, which the baseline note
 predicted would arrive with the first kit. On top of that sits 116.3 KB of
 assets, so first load is ~1.16 MB against the §5 budget of <= 8 MB.
 
+### Coverage as it actually stands, 2026-09-14
+
+Scope confirmed by the owner: houses, buildings, paths, items and interiors are
+in scope alongside foliage — i.e. §7 step 6 proper, not just the step 4 slice.
+Recording the honest state so the gap is tracked rather than assumed.
+
+| Category | Kit | Downloaded | Wired |
+| --- | --- | --- | --- |
+| Foliage (trees, bushes) | Kenney Nature Kit | ✅ | ✅ `world/Foliage.ts`, 10 models |
+| SFX + UI audio | Kenney RPG / Interface / Impact | ✅ | ✅ 8 sounds via `sounds.ts` |
+| Buildings, houses | Kenney Fantasy Town Kit | ❌ | ❌ `BuildingKit.ts`, `Buildings.ts` |
+| Interiors | Kenney Fantasy Town / Furniture | ❌ | ❌ `InteriorKit.ts`, `Interiors.ts` |
+| Furniture | Kenney Furniture Kit | ❌ | ❌ `housing/FurnitureModels.ts` |
+| Props | Kenney Survival Kit | ❌ | ❌ `world/Props.ts` |
+| Items | Kenney Food Kit | ❌ | ❌ `items/ItemModels.ts` |
+| Paths / paving | source not yet identified | ❌ | ❌ terrain path surfaces |
+| Fish | Quaternius | ❌ blocked | ❌ `fishing/FishSchools.ts` |
+| Animals | Quaternius | ❌ blocked | ❌ |
+| Characters | KayKit | ❌ | ❌ `player/CharacterRig.ts` |
+
+`KITS` in `src/assets/manifest.ts` already declares buildings, furniture, props,
+fish, animals and characters, but only `nature.glb` exists on disk and only
+nature has `MODELS` entries. A declared kit with no file is not an error — the
+loader treats a missing kit as "keep the procedural path" — so the game runs
+correctly today; those categories simply have not been replaced yet.
+
+**Paths are an open question, not an assumption.** Nothing in the plan's §3
+shortlist was chosen for path or paving geometry, and the terrain currently
+draws path surfaces itself. Whether Fantasy Town supplies usable paving pieces
+has to be checked against the real kit; if it does not, that gets reported
+rather than filled from a source outside §3.
+
+**A note on process, after losing work.** The download session was archived by
+the parent session while mid-inventory of the Fantasy Town Kit, and everything
+it had not pushed went with its container. Downloads happen in an environment
+where the asset hosts are reachable but npm is not, so that session cannot run
+the toolchain: work must be pushed per category as it completes, and verified
+from an environment that has npm. Nothing should sit uncommitted across
+categories again.
+
 ### Bundle baseline (pre-asset, `npm run build`)
 
 Unchanged and **not re-measured this session** — `vite` is unavailable, so this
