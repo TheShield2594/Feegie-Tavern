@@ -22,7 +22,7 @@ import { Rng } from '@/util/rng';
 import { smoothstep } from '@/util/math';
 import { makeSign, makeStreetLamp, roundedBoxGeometry, surfaces } from './BuildingKit';
 import { flagstoneTexture } from '@/rendering/textures';
-import { BRIDGES, ISLAND_HALF, LANDMARKS, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
+import { BRIDGES, ISLAND_HALF, LANDMARKS, PIER_DECK_HEIGHT, PIER_START, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
 
 export interface GatherNode {
   id: string;
@@ -281,11 +281,13 @@ export class Props {
     const plank = surfaces.plank('#c9a06f', 0.75);
     const post = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.95 });
 
-    // Decking starts on the sand and marches out over the water.
-    const deckY = 1.7;
+    // Decking starts on the sand and marches out over the water. Its extent
+    // and height come from the heightfield's platform so the player walks on
+    // exactly what is drawn.
+    const deckY = PIER_DECK_HEIGHT;
     const bays = 9;
     for (let i = 0; i < bays; i++) {
-      const z = pier.z - 3 + i * 3.0;
+      const z = pier.z + PIER_START + 1.5 + i * 3.0;
       const deck = new Mesh(roundedBoxGeometry(5.2, 0.24, 3.0, 0.06), plank);
       deck.position.set(pier.x, deckY, z);
       deck.castShadow = true;
@@ -312,6 +314,18 @@ export class Props {
           group.add(beam);
         }
       }
+    }
+
+    // A step up onto the deck at the landward end, so the half-metre rise
+    // reads as a threshold rather than a floating slab.
+    for (let i = 0; i < 2; i++) {
+      const stepZ = pier.z + PIER_START - 0.35 - i * 0.55;
+      const stepY = terrainHeight(pier.x, stepZ) + (deckY - terrainHeight(pier.x, stepZ)) * (i === 0 ? 0.62 : 0.3);
+      const step = new Mesh(roundedBoxGeometry(4.4, 0.18, 0.6, 0.05), plank);
+      step.position.set(pier.x, stepY, stepZ);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      group.add(step);
     }
 
     // Mooring bollards and a rowboat.

@@ -3,7 +3,7 @@ import { CharacterAnimator } from '@/player/CharacterAnimator';
 import { CharacterRig } from '@/player/CharacterRig';
 import { dampAngle, lerp } from '@/util/math';
 import { EmoteBubble, Nameplate } from '@/rendering/WorldLabel';
-import { LANDMARKS, terrainHeight } from '@/world/heightfield';
+import { LANDMARKS, terrainHeight, walkHeight } from '@/world/heightfield';
 import type { ScheduleEntry, VillagerDef } from '@/data/villagers';
 import type { Navigation, NavPoint } from './Navigation';
 
@@ -187,7 +187,7 @@ export class Villager {
     }
 
     // Ground and orient.
-    this.position.y = lerp(this.position.y, terrainHeight(this.position.x, this.position.z), 1 - Math.exp(-14 * dt));
+    this.position.y = lerp(this.position.y, walkHeight(this.position.x, this.position.z), 1 - Math.exp(-14 * dt));
     this.group.position.copy(this.position);
     this.group.rotation.y = this.facing;
 

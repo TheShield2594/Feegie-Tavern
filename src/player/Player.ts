@@ -7,7 +7,7 @@ import { CharacterRig } from './CharacterRig';
 import { disposeObject } from '@/util/three';
 import { EmoteBubble, type EmoteKind } from '@/rendering/WorldLabel';
 import { makeTool, TOOLS, type ToolId } from './Tools';
-import { SEA_LEVEL, isWalkable, sampleSurface, terrainHeight, type Surface } from '@/world/heightfield';
+import { SEA_LEVEL, isWalkable, sampleWalkSurface, walkHeight, type Surface } from '@/world/heightfield';
 
 export interface MovementConstraints {
   /** Circles the player cannot walk into. */
@@ -208,7 +208,7 @@ export class Player {
   }
 
   teleport(x: number, z: number, facing = this.facing, height?: number): void {
-    this.position.set(x, height ?? terrainHeight(x, z), z);
+    this.position.set(x, height ?? walkHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.facing = facing;
     this.group.position.copy(this.position);
@@ -260,11 +260,12 @@ export class Player {
       this.inWater = false;
       this.swimDepth = 0;
     } else {
-      const sample = sampleSurface(this.position.x, this.position.z);
+      const sample = sampleWalkSurface(this.position.x, this.position.z);
       // Ease onto the new height so slopes and steps do not jolt the camera.
       this.position.y = lerp(this.position.y, sample.height, 1 - Math.exp(-18 * dt));
       this.surface = sample.surface;
-      this.swimDepth = Math.max(0, SEA_LEVEL - sample.height);
+      // Standing on decking over the sea is dry, however deep the water below.
+      this.swimDepth = sample.surface === 'wood' ? 0 : Math.max(0, SEA_LEVEL - sample.height);
       const wasInWater = this.inWater;
       this.inWater = this.swimDepth > 0.55;
       if (this.inWater !== wasInWater) {

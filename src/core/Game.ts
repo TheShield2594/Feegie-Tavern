@@ -30,7 +30,7 @@ import {
   homeLayoutFor,
   type InteriorScene,
 } from '@/world/Interiors';
-import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, waterDepth } from '@/world/heightfield';
+import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, walkHeight, waterDepth } from '@/world/heightfield';
 import { drawIslandMap } from '@/world/Minimap';
 import { Player } from '@/player/Player';
 import { TOOLS, type ToolId } from '@/player/Tools';
@@ -687,7 +687,7 @@ export class Game {
       this.fishSchools.update(dt, this.elapsed, camera.position.x, camera.position.z);
       this.farm.update(dt);
       if (advance) this.villagers.update(dt, this.time.hour, this.player.position);
-      this.drops.update(dt, this.player.position, (x, z) => terrainHeight(x, z));
+      this.drops.update(dt, this.player.position, (x, z) => walkHeight(x, z));
     } else {
       this.updateInteriorWalls(camera.position);
       this.activeInterior?.update?.(dt, this.elapsed);

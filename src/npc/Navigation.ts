@@ -1,4 +1,4 @@
-import { ISLAND_HALF, isWalkable, sampleSurface } from '@/world/heightfield';
+import { ISLAND_HALF, isWalkable, sampleWalkSurface } from '@/world/heightfield';
 
 export interface NavPoint {
   x: number;
@@ -44,7 +44,7 @@ export class Navigation {
           this.cost[gz * this.width + gx] = 0;
           continue;
         }
-        const sample = sampleSurface(x, z);
+        const sample = sampleWalkSurface(x, z);
         // Villagers prefer paved routes and avoid steep or sandy going, which
         // is what makes them look like they know the island.
         let c = 1;
