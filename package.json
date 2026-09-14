@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "assets:build-kit": "node tools/buildKit.mjs",
     "assets:inspect": "tsx tools/inspectGlb.ts",
     "assets:verify": "tsx tools/verifyAssetImport.ts",
     "assets:verify-kit": "node tools/verifyKitGlb.mjs",

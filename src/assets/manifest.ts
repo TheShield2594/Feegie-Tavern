@@ -70,6 +70,16 @@ export interface ModelDef {
 }
 
 /**
+ * Shared settings for a modular building piece: keep the authored origin, keep
+ * the baked vertex colours, keep the grid-cell size.
+ */
+const BUILDING_PIECE: NormalizeOptions = {
+  groundOrigin: false,
+  centreXZ: false,
+  keepVertexColors: true,
+};
+
+/**
  * Model table.
  *
  * Ids are the game's own vocabulary (`TreeKind` in `world/Foliage.ts`), not the
@@ -78,7 +88,7 @@ export interface ModelDef {
  *
  * `node` names are read out of the built `nature.glb`, never invented. Each
  * Kenney tree ships as one mesh with two primitives sharing a vertex buffer —
- * bark and leaves — and `tools/buildNatureKit.mjs` splits them into separate
+ * bark and leaves — and `tools/buildKit.mjs` splits them into separate
  * single-primitive nodes so `Foliage` can bind its existing bark and canopy
  * materials to them independently.
  *
@@ -87,9 +97,10 @@ export interface ModelDef {
  * trunk and canopy together. Letting `normalizeGeometry` redo it per node would
  * drop each canopy to y = 0 independently and take the trees apart.
  *
- * `scale` brings the kit (authored ~1–1.7 units tall) up to the dimensions of
- * the procedural geometry it replaces, so the existing placement, keep-out and
- * per-instance scale ranges in `Foliage` keep working unchanged.
+ * `scale` brings the nature kit (authored ~1–1.7 units tall) up to the
+ * dimensions of the procedural geometry it replaces, so the existing placement,
+ * keep-out and per-instance scale ranges in `Foliage` keep working unchanged.
+ * The building pieces carry no scale — see the note above them.
  */
 export const MODELS: ModelDef[] = [
   { id: 'tree.broadleaf.trunk',  kit: 'nature', node: 'tree_default_trunk',       normalize: { groundOrigin: false, centreXZ: false, scale: 3.2 } },
@@ -102,6 +113,51 @@ export const MODELS: ModelDef[] = [
   { id: 'tree.fruit.canopy',     kit: 'nature', node: 'tree_oak_canopy',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.9 } },
   { id: 'bush.small',            kit: 'nature', node: 'plant_bushDetailed',       normalize: { groundOrigin: false, centreXZ: false, scale: 2.4 } },
   { id: 'bush.large',            kit: 'nature', node: 'plant_bushLarge',          normalize: { groundOrigin: false, centreXZ: false, scale: 3.5 } },
+
+  // --- Fantasy Town Kit -----------------------------------------------------
+  //
+  // Modular pieces, so two things differ from the nature entries above.
+  //
+  // `keepVertexColors` — the kit shares one textured atlas across all 167
+  // models, and sampling it shows 40-60 shades per model because Kenney authors
+  // them as gradient ramps, not flat swatches. There are no material roles to
+  // split on, so `tools/buildKit.mjs` bakes the atlas into COLOR_0 per vertex
+  // and ships no texture at all. Render these with
+  // `createStylizedMaterial({ vertexColors: true })`.
+  //
+  // No `scale` — a piece is exactly one grid cell, and the *assembly* chooses
+  // how many metres a cell is. Scaling pieces individually would break the fit
+  // between them.
+  //
+  // `groundOrigin`/`centreXZ` stay false for a different reason than the trees:
+  // here the authored origin is the snap point. `wall` spans x 0.40..0.50 so
+  // four walls enclose a tile; centring it would collapse them into a post.
+  { id: 'path.straight',   kit: 'buildings', node: 'road',                 normalize: BUILDING_PIECE },
+  { id: 'path.bend',       kit: 'buildings', node: 'road-bend',            normalize: BUILDING_PIECE },
+  { id: 'path.corner',     kit: 'buildings', node: 'road-corner',          normalize: BUILDING_PIECE },
+  { id: 'path.edge',       kit: 'buildings', node: 'road-edge',            normalize: BUILDING_PIECE },
+  { id: 'path.curb',       kit: 'buildings', node: 'road-curb',            normalize: BUILDING_PIECE },
+
+  { id: 'wall.plaster',        kit: 'buildings', node: 'wall',                 normalize: BUILDING_PIECE },
+  { id: 'wall.plasterCorner',  kit: 'buildings', node: 'wall-corner',          normalize: BUILDING_PIECE },
+  { id: 'wall.doorway',        kit: 'buildings', node: 'wall-doorway-square',  normalize: BUILDING_PIECE },
+  { id: 'wall.window',         kit: 'buildings', node: 'wall-window-shutters', normalize: BUILDING_PIECE },
+  { id: 'wall.timber',         kit: 'buildings', node: 'wall-wood',            normalize: BUILDING_PIECE },
+  { id: 'wall.timberCorner',   kit: 'buildings', node: 'wall-wood-corner',     normalize: BUILDING_PIECE },
+
+  { id: 'roof.gable',      kit: 'buildings', node: 'roof-gable',           normalize: BUILDING_PIECE },
+  { id: 'roof.gableEnd',   kit: 'buildings', node: 'roof-gable-end',       normalize: BUILDING_PIECE },
+  { id: 'roof.gableTop',   kit: 'buildings', node: 'roof-gable-top',       normalize: BUILDING_PIECE },
+  { id: 'roof.corner',     kit: 'buildings', node: 'roof-corner',          normalize: BUILDING_PIECE },
+  { id: 'roof.flat',       kit: 'buildings', node: 'roof-flat',            normalize: BUILDING_PIECE },
+  { id: 'roof.chimney',    kit: 'buildings', node: 'chimney',              normalize: BUILDING_PIECE },
+
+  { id: 'yard.fence',      kit: 'buildings', node: 'fence',                normalize: BUILDING_PIECE },
+  { id: 'yard.fenceGate',  kit: 'buildings', node: 'fence-gate',           normalize: BUILDING_PIECE },
+  { id: 'yard.hedge',      kit: 'buildings', node: 'hedge',                normalize: BUILDING_PIECE },
+  { id: 'yard.hedgeGate',  kit: 'buildings', node: 'hedge-gate',           normalize: BUILDING_PIECE },
+  { id: 'yard.steps',      kit: 'buildings', node: 'stairs-stone',         normalize: BUILDING_PIECE },
+  { id: 'yard.lamp',       kit: 'buildings', node: 'lantern',              normalize: BUILDING_PIECE },
 ];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));

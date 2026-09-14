@@ -2,9 +2,10 @@
  * Validates a built kit GLB — the real file, not a fixture.
  *
  *   npm run assets:verify-kit -- public/assets/models/nature/nature.glb
+ *   npm run assets:verify-kit -- public/assets/models/buildings/buildings.glb --modular
  *
  * `assets:verify` covers the *import path* (`gltfImport` against a synthetic
- * glTF), and needs three. This covers the *artefact* `buildNatureKit.mjs`
+ * glTF), and needs three. This covers the *artefact* `buildKit.mjs`
  * produces, and needs nothing: it parses the GLB itself, so it runs in any
  * environment that has node.
  *
@@ -20,7 +21,11 @@
  */
 import { readFileSync } from 'node:fs';
 
-const file = process.argv[2] ?? 'public/assets/models/nature/nature.glb';
+const args = process.argv.slice(2);
+// Modular kits snap to a grid, so their authored origins are load-bearing and
+// must NOT be grounded or centred — the opposite of a kit of standalone props.
+const modular = args.includes('--modular');
+const file = args.find((a) => !a.startsWith('--')) ?? 'public/assets/models/nature/nature.glb';
 const buf = readFileSync(file);
 
 let failures = 0;
@@ -77,6 +82,25 @@ check(
 check('no materials shipped', !json.materials);
 check('no textures or images shipped', !json.images && !json.textures);
 check('no UVs shipped', json.meshes.every((m) => !('TEXCOORD_0' in m.primitives[0].attributes)));
+
+// A baked-atlas kit carries its colour per vertex instead of in a texture. It
+// is all-or-nothing: a kit where only some nodes kept their colour would render
+// the rest black under `vertexColors: true`.
+const coloured = json.meshes.filter((m) => 'COLOR_0' in m.primitives[0].attributes);
+check(
+  'vertex colours are all-or-nothing',
+  coloured.length === 0 || coloured.length === json.meshes.length,
+  `${coloured.length}/${json.meshes.length} nodes have COLOR_0`,
+);
+if (coloured.length > 0) {
+  check(
+    'COLOR_0 is normalised UNSIGNED_BYTE VEC4',
+    coloured.every((m) => {
+      const a = json.accessors[m.primitives[0].attributes.COLOR_0];
+      return a.componentType === 5121 && a.normalized === true && a.type === 'VEC4';
+    }),
+  );
+}
 check('indices narrowed to UINT16', json.meshes.every((m) => json.accessors[m.primitives[0].indices].componentType === 5123));
 
 function readAccessor(index) {
@@ -170,6 +194,26 @@ for (const [model, parts] of models) {
   const minY = Math.min(...parts.map((p) => boxes.get(p).min[1]));
   const centreX = (Math.min(...parts.map((p) => boxes.get(p).min[0])) + Math.max(...parts.map((p) => boxes.get(p).max[0]))) / 2;
   const centreZ = (Math.min(...parts.map((p) => boxes.get(p).min[2])) + Math.max(...parts.map((p) => boxes.get(p).max[2]))) / 2;
+
+  if (modular) {
+    // The authored origin is the contract here, so there is nothing to assert
+    // about grounding or centring — that a piece's origin survived the build is
+    // checked by buildKit.mjs, which is the thing that can see the source.
+    //
+    // Two invariants still hold and are worth guarding. A piece occupies a
+    // whole number of grid cells (Kenney authors multi-cell pieces: `road-bend`
+    // is a 3x3 curve), and it stays near the origin — a stray transform would
+    // show up as a piece flung cells away from its own tile.
+    const width = Math.max(...parts.map((p) => boxes.get(p).max[0])) - Math.min(...parts.map((p) => boxes.get(p).min[0]));
+    const depth = Math.max(...parts.map((p) => boxes.get(p).max[2])) - Math.min(...parts.map((p) => boxes.get(p).min[2]));
+    const centreOk = Math.abs(centreX) < 2 && Math.abs(centreZ) < 2 && Math.abs(minY) < 2;
+    check(
+      `${model}: ${Math.max(1, Math.round(width))}x${Math.max(1, Math.round(depth))} cells, anchored near its tile`,
+      centreOk && width < 4 && depth < 4,
+      `${width.toFixed(2)} x ${depth.toFixed(2)}, centre (${centreX.toFixed(2)}, ${centreZ.toFixed(2)}), minY ${minY.toFixed(3)}`,
+    );
+    continue;
+  }
 
   check(`${model}: base sits at y=0`, Math.abs(minY) < 1e-5, `minY=${minY.toExponential(1)}`);
   check(`${model}: centred on XZ`, Math.abs(centreX) < 1e-5 && Math.abs(centreZ) < 1e-5, `(${centreX.toExponential(1)}, ${centreZ.toExponential(1)})`);

@@ -25,7 +25,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 // --- GLB reading -----------------------------------------------------------
 
@@ -55,6 +55,9 @@ function readAccessor(json, bin, index) {
     if (accessor.componentType === 5126) out.push(bin.readFloatLE(base + i * 4));
     else if (accessor.componentType === 5123) out.push(bin.readUInt16LE(base + i * 2));
     else if (accessor.componentType === 5125) out.push(bin.readUInt32LE(base + i * 4));
+    // COLOR_0 ships as normalised unsigned bytes; keep them as 0-255 since that
+    // is the range the rasteriser shades in.
+    else if (accessor.componentType === 5121) out.push(bin.readUInt8(base + i));
   }
   return out;
 }
@@ -67,6 +70,11 @@ function loadNodes(path) {
       name: node.name,
       positions: readAccessor(json, bin, primitive.attributes.POSITION),
       indices: readAccessor(json, bin, primitive.indices),
+      // A baked-atlas kit carries its colour here instead of in a material, so
+      // the preview has to read it or every building renders one flat green.
+      colors: primitive.attributes.COLOR_0 !== undefined
+        ? readAccessor(json, bin, primitive.attributes.COLOR_0)
+        : null,
     };
   });
 }
@@ -212,14 +220,14 @@ function project(basis, p) {
  * frame with a little air around it, instead of being guessed at and leaving
  * half the image empty.
  */
-function frameCamera(contentWidth, contentHeight, centreX, fov, aspect, margin = 1.12) {
+function frameCamera(contentWidth, contentHeight, centre, fov, aspect, margin = 1.12) {
   const halfV = Math.tan((fov * Math.PI) / 180 / 2);
   const halfH = halfV * aspect;
   const distance = Math.max(contentWidth / 2 / halfH, contentHeight / 2 / halfV) * margin;
-  const midY = contentHeight * 0.46;
+  const [centreX, centreY] = centre;
   return {
-    eye: [centreX, midY + contentHeight * 0.06, distance],
-    target: [centreX, midY, 0],
+    eye: [centreX, centreY + contentHeight * 0.06, distance],
+    target: [centreX, centreY, 0],
     fov,
   };
 }
@@ -240,7 +248,7 @@ function render(meshes, width, height, camera, background, ss = 3) {
   const light = norm([-0.45, 0.8, 0.42]);
 
   for (const mesh of meshes) {
-    const { positions, indices, rgb, scale = 1, offset = [0, 0, 0] } = mesh;
+    const { positions, indices, rgb, colors = null, scale = 1, offset = [0, 0, 0] } = mesh;
     for (let t = 0; t < indices.length; t += 3) {
       const world = [0, 1, 2].map((k) => {
         const i = indices[t + k] * 3;
@@ -270,6 +278,15 @@ function render(meshes, width, height, camera, background, ss = 3) {
       const area = edge(screen[0], screen[1], screen[2]);
       if (area <= 0) continue; // back-facing
 
+      // Flat shading means one colour per face, so an averaged corner colour is
+      // what the game's own flatShading would show.
+      let face = rgb;
+      if (colors) {
+        face = [0, 1, 2].map((c) =>
+          (colors[indices[t] * 4 + c] + colors[indices[t + 1] * 4 + c] + colors[indices[t + 2] * 4 + c]) / 3,
+        );
+      }
+
       const minX = Math.max(0, Math.floor(Math.min(...screen.map((p) => p[0]))));
       const maxX = Math.min(w - 1, Math.ceil(Math.max(...screen.map((p) => p[0]))));
       const minY = Math.max(0, Math.floor(Math.min(...screen.map((p) => p[1]))));
@@ -286,9 +303,9 @@ function render(meshes, width, height, camera, background, ss = 3) {
           const at = py * w + px;
           if (z >= depth[at]) continue;
           depth[at] = z;
-          colour[at * 3] = Math.min(255, rgb[0] * shade);
-          colour[at * 3 + 1] = Math.min(255, rgb[1] * shade);
-          colour[at * 3 + 2] = Math.min(255, rgb[2] * shade);
+          colour[at * 3] = Math.min(255, face[0] * shade);
+          colour[at * 3 + 1] = Math.min(255, face[1] * shade);
+          colour[at * 3 + 2] = Math.min(255, face[2] * shade);
         }
       }
     }
@@ -371,25 +388,78 @@ const extent = (parts, axis) => {
 
 // --- one PNG per assembled model -------------------------------------------
 
+const tiles = [];
+
 for (const [model, parts] of byModel) {
   const scale = SCALES[model] ?? 1;
-  const height = extent(parts, 1).max * scale;
   const meshes = parts.map((p) => ({ ...p, rgb: colourFor(p.name), scale }));
   const size = 420;
+
+  // Frame on the model's own bounding box, not on the origin. Modular pieces
+  // are deliberately off-centre — a wall sits at x 0.40..0.50 so it forms its
+  // tile's edge — and framing those around x = 0 pushes them out of shot.
   const x = extent(parts, 0);
+  const y = extent(parts, 1);
+  const z = extent(parts, 2);
+  const centreX = ((x.min + x.max) / 2) * scale;
+  const centreY = ((y.min + y.max) / 2) * scale;
+  const spanX = Math.max((x.max - x.min) * scale, (z.max - z.min) * scale);
+  const spanY = (y.max - y.min) * scale;
   const camera = frameCamera(
-    Math.max((x.max - x.min) * scale, height * 0.7),
-    height * 1.18, // headroom for the label strip
-    0,
+    Math.max(spanX, spanY * 0.7),
+    Math.max(spanY, spanX * 0.5) * 1.3, // headroom for the label strip
+    [centreX, centreY],
     38,
     1,
   );
-  // Nudge off dead-on so the silhouette reads as a solid rather than a cutout.
-  camera.eye = [camera.eye[2] * 0.34, camera.eye[1], camera.eye[2] * 0.94];
+  // Nudge off dead-on so the silhouette reads as a solid rather than a cutout,
+  // and lift the camera. Flat pieces — the road and path tiles are 0.03 units
+  // tall — otherwise sit almost exactly at eye level and render as a line.
+  const distance = camera.eye[2];
+  camera.eye = [
+    centreX + distance * 0.34,
+    centreY + Math.max(spanY * 0.5, spanX * 0.42),
+    distance * 0.94,
+  ];
+  camera.target = [centreX, centreY, 0];
   const pixels = render(meshes, size, size, camera, BACKGROUND);
   drawText(pixels, size, size, model, 12, size - 20, 2, INK);
   drawText(pixels, size, size, `${parts.length} node${parts.length > 1 ? 's' : ''}  x${scale}`, 12, size - 40, 1, INK);
   writePng(join(outDir, `${model}.png`), size, size, pixels);
+  tiles.push({ model, size, pixels });
+}
+
+// --- contact sheet ---------------------------------------------------------
+//
+// A single row stops being readable past a handful of models, and a modular
+// building kit is two dozen. The tiles are already rendered, so the sheet is
+// just a blit.
+
+{
+  const columns = Math.min(6, Math.ceil(Math.sqrt(tiles.length)));
+  const rows = Math.ceil(tiles.length / columns);
+  const tile = tiles[0]?.size ?? 420;
+  const pad = 6;
+  const header = 30;
+  const width = columns * tile + pad * (columns + 1);
+  const height = header + rows * tile + pad * (rows + 1);
+  const sheet = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    sheet[i * 3] = BACKGROUND[0];
+    sheet[i * 3 + 1] = BACKGROUND[1];
+    sheet[i * 3 + 2] = BACKGROUND[2];
+  }
+
+  tiles.forEach((t, i) => {
+    const cx = pad + (i % columns) * (tile + pad);
+    const cy = header + pad + Math.floor(i / columns) * (tile + pad);
+    for (let y = 0; y < tile; y++) {
+      t.pixels.copy(sheet, ((cy + y) * width + cx) * 3, y * tile * 3, (y + 1) * tile * 3);
+    }
+  });
+
+  drawText(sheet, width, height, `${basename(glb)} - ${tiles.length} models - kenney cc0`, 12, 10, 2, INK);
+  writePng(join(outDir, 'contact.png'), width, height, sheet);
 }
 
 // --- the lineup: every model at true relative scale on one ground line ------
@@ -413,7 +483,7 @@ for (const [model, parts] of byModel) {
 const tallest = Math.max(...labels.map((l) => l.height));
 const lineWidth = 1280;
 const lineHeight = 520;
-const camera = frameCamera(cursor, tallest * 1.3, cursor / 2, 40, lineWidth / lineHeight);
+const camera = frameCamera(cursor, tallest * 1.3, [cursor / 2, tallest * 0.46], 40, lineWidth / lineHeight);
 const lineupPixels = render(lineup, lineWidth, lineHeight, camera, BACKGROUND);
 
 drawText(lineupPixels, lineWidth, lineHeight, 'cozy cove - nature kit - kenney cc0 - manifest scales', 14, 16, 2, INK);

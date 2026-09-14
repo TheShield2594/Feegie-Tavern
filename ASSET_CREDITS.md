@@ -17,7 +17,7 @@ condition — its `OFL.txt` ships in `licenses/`.
 | Kit | Source | Licence | Attribution | Models in use |
 | --- | --- | --- | --- | --- |
 | `nature` | Kenney — Nature Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 10 |
-| `buildings` | Kenney — Fantasy Town Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
+| `buildings` | Kenney — Fantasy Town Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 23 |
 | `furniture` | Kenney — Furniture Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `props` | Kenney — Survival Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `fish` | Quaternius — LowPoly Animated Fish | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |

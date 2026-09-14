@@ -43,6 +43,7 @@
  * `extractGeometries` yields exactly the node names listed in the manifest.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 import { dirname, join } from 'node:path';
 
 const GLB_MAGIC = 0x46546c67;
@@ -62,19 +63,15 @@ const ROLE_BY_MATERIAL = [
   ['grass', 'whole'],
 ];
 
-/**
- * The models the game actually places, and the roles to keep from each.
- * Kept deliberately small: ASSET_PLAN §5 step 1 is "import only the models
- * actually placed — not all 330".
- */
-const SOURCES = [
+/** Nature Kit models the game places, and which material roles to keep. */
+const NATURE_SOURCES = [
   { file: 'tree_default', roles: ['trunk', 'canopy'] },
   { file: 'tree_oak', roles: ['trunk', 'canopy'] },
   { file: 'tree_pineDefaultA', roles: ['trunk', 'canopy'] },
   // A tall palm rather than `tree_palmShort`: the short one had to be scaled
-  // ×5.7 to reach the height the procedural palm occupied, which made its trunk
+  // x5.7 to reach the height the procedural palm occupied, which made its trunk
   // read far thicker than every other tree's. This one needs roughly half that.
-  // It is also the model that requires the transform composition above, since
+  // It is also the model that requires the transform composition below, since
   // its fronds are rotated child nodes.
   { file: 'tree_palmDetailedTall', roles: ['trunk', 'canopy'] },
   // `plant_bushDetailed` over `plant_bush`: the procedural bush it replaces is
@@ -83,6 +80,56 @@ const SOURCES = [
   { file: 'plant_bushDetailed', roles: ['whole'] },
   { file: 'plant_bushLarge', roles: ['whole'] },
 ];
+
+/**
+ * The kits this script knows how to build, and the models taken from each.
+ *
+ * Kept deliberately small per kit: ASSET_PLAN §5 step 1 is "import only the
+ * models actually placed — not all 330".
+ *
+ * `mode` picks how a model's colour survives the trip:
+ *
+ *  - `split-by-material` — the source has one flat `baseColorFactor` per
+ *    material, so each material becomes its own node and the game binds a
+ *    palette material to it. Trunk and canopy stay independently tintable.
+ *  - `bake-atlas` — the source shares one textured atlas across every model,
+ *    with no discrete material roles to split on, so the atlas is sampled into
+ *    COLOR_0 per vertex and dropped. The manifest entry sets
+ *    `keepVertexColors: true` and the game renders it with
+ *    `createStylizedMaterial({ vertexColors: true })`.
+ */
+const KITS = {
+  nature: {
+    dir: 'Models/GLTF format',
+    out: 'public/assets/models/nature/nature.glb',
+    mode: 'split-by-material',
+    sources: NATURE_SOURCES,
+  },
+  town: {
+    dir: 'Models/GLB format',
+    out: 'public/assets/models/buildings/buildings.glb',
+    mode: 'bake-atlas',
+    atlas: 'Models/GLB format/Textures/colormap.png',
+    // Modular pieces snap to a 1x1 grid, and the authored origin *is* the snap
+    // point: `wall` spans x 0.40..0.50, sitting on its tile's edge so four of
+    // them enclose a room. Grounding and centring each piece the way a tree
+    // needs would move that wall to x -0.05..0.05 — the tile's middle — and the
+    // four walls would collapse into a post instead of a room. Origins are left
+    // exactly as authored.
+    preserveOrigin: true,
+    // Buildings, homes and the paths between them: a modular shell (walls,
+    // roofs, a doorway, a shuttered window, a chimney), the road pieces that
+    // dress `heightfield`'s PATHS, and the fences, hedges, steps and lamps that
+    // edge them.
+    sources: [
+      'road', 'road-bend', 'road-corner', 'road-edge', 'road-curb',
+      'wall', 'wall-corner', 'wall-doorway-square', 'wall-window-shutters',
+      'wall-wood', 'wall-wood-corner',
+      'roof-gable', 'roof-gable-end', 'roof-gable-top', 'roof-corner', 'roof-flat',
+      'chimney', 'fence', 'fence-gate', 'hedge', 'hedge-gate', 'stairs-stone', 'lantern',
+    ].map((file) => ({ file, roles: ['whole'] })),
+  },
+};
 
 function readGlb(path) {
   const buf = readFileSync(path);
@@ -102,22 +149,115 @@ function readGlb(path) {
   return { json, bin };
 }
 
-/** Reads an accessor out of the BIN chunk into a plain array of numbers. */
+/** Byte width of each glTF component type. */
+const COMPONENT_BYTES = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+
+/**
+ * Reads an accessor out of the BIN chunk into a plain array of numbers.
+ *
+ * Handles every integer width and honours `byteStride`, neither of which the
+ * Nature Kit needed: it is uniformly float data with UINT32 indices and tightly
+ * packed views. The Fantasy Town Kit is not — its meshes are small enough that
+ * it indexes them with UNSIGNED_BYTE, which a USHORT-only reader walks straight
+ * off the end of the buffer.
+ */
 function readAccessor(json, bin, index) {
   const accessor = json.accessors[index];
   const view = json.bufferViews[accessor.bufferView];
   const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[accessor.type];
+  const size = COMPONENT_BYTES[accessor.componentType];
+  if (!size) throw new Error(`unsupported componentType ${accessor.componentType}`);
   const base = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+  const stride = view.byteStride || components * size;
   const out = new Array(accessor.count * components);
 
-  for (let i = 0; i < accessor.count * components; i++) {
-    const at = base + i * (accessor.componentType === FLOAT || accessor.componentType === UINT ? 4 : 2);
-    if (accessor.componentType === FLOAT) out[i] = bin.readFloatLE(at);
-    else if (accessor.componentType === UINT) out[i] = bin.readUInt32LE(at);
-    else if (accessor.componentType === USHORT) out[i] = bin.readUInt16LE(at);
-    else throw new Error(`unsupported componentType ${accessor.componentType}`);
+  for (let i = 0; i < accessor.count; i++) {
+    for (let c = 0; c < components; c++) {
+      const at = base + i * stride + c * size;
+      const value =
+        accessor.componentType === 5126 ? bin.readFloatLE(at)
+        : accessor.componentType === 5125 ? bin.readUInt32LE(at)
+        : accessor.componentType === 5123 ? bin.readUInt16LE(at)
+        : accessor.componentType === 5121 ? bin.readUInt8(at)
+        : accessor.componentType === 5122 ? bin.readInt16LE(at)
+        : bin.readInt8(at);
+      out[i * components + c] = value;
+    }
   }
   return out;
+}
+
+// --- colour atlas ----------------------------------------------------------
+//
+// The Fantasy Town Kit is textured where the Nature Kit is not: all 167 models
+// share one 512x512 `colormap.png`. It is not a flat-swatch palette — sampling
+// it shows 40-60 slightly different shades per model, because Kenney authors
+// these as gradient ramps. That rules out splitting a model by atlas colour the
+// way the nature trees split by material: there are no discrete roles to split
+// on, only a smooth ramp.
+//
+// So the atlas is baked into COLOR_0 per vertex and thrown away. The look is
+// preserved, no texture ships at all (no KTX2 step, no second request), and the
+// result is exactly what `NormalizeOptions.keepVertexColors` was written for:
+// "Kits that bake several colours into one mesh need this".
+
+/** Decodes an 8-bit RGB/RGBA PNG. Enough for Kenney's colormap. */
+function decodePng(path) {
+  const d = readFileSync(path);
+  let i = 8;
+  let width = 0, height = 0, depth = 0, colourType = 0;
+  const idat = [];
+  while (i < d.length) {
+    const length = d.readUInt32BE(i);
+    const type = d.toString('ascii', i + 4, i + 8);
+    if (type === 'IHDR') {
+      width = d.readUInt32BE(i + 8); height = d.readUInt32BE(i + 12);
+      depth = d[i + 16]; colourType = d[i + 17];
+    } else if (type === 'IDAT') idat.push(d.subarray(i + 8, i + 8 + length));
+    i += 12 + length;
+  }
+  if (depth !== 8 || (colourType !== 2 && colourType !== 6)) {
+    throw new Error(`unsupported PNG (depth ${depth}, colour type ${colourType}): ${path}`);
+  }
+
+  const channels = colourType === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(width * height * 3);
+  let prev = Buffer.alloc(stride);
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? line[x - channels] : 0;
+      const b = prev[x];
+      const c = x >= channels ? prev[x - channels] : 0;
+      if (filter === 1) line[x] = (line[x] + a) & 255;
+      else if (filter === 2) line[x] = (line[x] + b) & 255;
+      else if (filter === 3) line[x] = (line[x] + ((a + b) >> 1)) & 255;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        line[x] = (line[x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 255;
+      }
+    }
+    for (let x = 0; x < width; x++) {
+      out[(y * width + x) * 3] = line[x * channels];
+      out[(y * width + x) * 3 + 1] = line[x * channels + 1];
+      out[(y * width + x) * 3 + 2] = line[x * channels + 2];
+    }
+    prev = line;
+  }
+  return { width, height, rgb: out };
+}
+
+/** Nearest-neighbour sample. The ramps are smooth, so filtering buys nothing. */
+function sampleAtlas(image, u, v) {
+  const x = Math.min(image.width - 1, Math.max(0, Math.floor(u * image.width)));
+  const y = Math.min(image.height - 1, Math.max(0, Math.floor(v * image.height)));
+  const at = (y * image.width + x) * 3;
+  return [image.rgb[at], image.rgb[at + 1], image.rgb[at + 2]];
 }
 
 function roleOf(materialName) {
@@ -225,7 +365,7 @@ const transformNormal = (n, x, y, z) => {
  * Pulls one model out of a source GLB as `{ role -> { positions, normals,
  * indices } }`, compacted so each role carries only its own vertices.
  */
-function extractParts(path, wantedRoles) {
+function extractParts(path, wantedRoles, atlas = null) {
   const { json, bin } = readGlb(path);
   const parts = new Map();
   const matrices = meshMatrices(json);
@@ -237,13 +377,18 @@ function extractParts(path, wantedRoles) {
     const normals3 = normalMatrix(world);
 
     for (const primitive of mesh.primitives) {
+      // A baked-atlas kit has one material for everything, so there is no role
+      // to read off it — the whole model is one part.
       const material = json.materials?.[primitive.material]?.name ?? '';
-      const role = roleOf(material);
+      const role = atlas ? 'whole' : roleOf(material);
       if (!role || !wantedRoles.includes(role)) continue;
 
       const srcPos = readAccessor(json, bin, primitive.attributes.POSITION);
       const srcNor = primitive.attributes.NORMAL !== undefined
         ? readAccessor(json, bin, primitive.attributes.NORMAL)
+        : null;
+      const srcUv = atlas && primitive.attributes.TEXCOORD_0 !== undefined
+        ? readAccessor(json, bin, primitive.attributes.TEXCOORD_0)
         : null;
       const srcIdx = readAccessor(json, bin, primitive.indices);
 
@@ -255,6 +400,7 @@ function extractParts(path, wantedRoles) {
       const remap = new Map();
       const positions = [];
       const normals = [];
+      const colors = [];
       const indices = [];
 
       const at = (i) => [srcPos[i * 3], srcPos[i * 3 + 1], srcPos[i * 3 + 2]];
@@ -288,6 +434,10 @@ function extractParts(path, wantedRoles) {
               ...transformNormal(normals3, srcNor[oldIndex * 3], srcNor[oldIndex * 3 + 1], srcNor[oldIndex * 3 + 2]),
             );
           }
+          // Sampled per vertex at its own UV, which is exactly what the texture
+          // lookup would return there; interpolation across the triangle then
+          // reproduces the ramp.
+          if (srcUv) colors.push(...sampleAtlas(atlas, srcUv[oldIndex * 2], srcUv[oldIndex * 2 + 1]));
         }
         indices.push(next);
       }
@@ -298,14 +448,72 @@ function extractParts(path, wantedRoles) {
         const offset = existing.positions.length / 3;
         existing.positions.push(...positions);
         existing.normals.push(...normals);
+        existing.colors.push(...colors);
         existing.indices.push(...indices.map((i) => i + offset));
       } else {
-        parts.set(role, { positions, normals, indices });
+        parts.set(role, { positions, normals, colors, indices });
       }
     }
   }
   if (dropped > 0) console.log(`  (dropped ${dropped} degenerate triangle${dropped > 1 ? 's' : ''} from ${path.split('/').pop()})`);
   return parts;
+}
+
+/**
+ * Confirms a modular piece came through with its authored bounds intact.
+ *
+ * Kenney's town pieces snap to a 1x1 grid and the origin is the snap point:
+ * `wall` spans x 0.40..0.50, sitting on its tile's edge so four of them enclose
+ * a room. Centring it — correct for a tree, wrong for a wall — moves it to
+ * x -0.05..0.05 and four walls collapse into a post.
+ */
+function assertOriginPreserved(name, sourcePath, parts) {
+  const { json } = readGlb(sourcePath);
+  const matrices = meshMatrices(json);
+  const source = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+
+  for (let meshIndex = 0; meshIndex < json.meshes.length; meshIndex++) {
+    const world = matrices.get(meshIndex) ?? IDENTITY;
+    for (const primitive of json.meshes[meshIndex].primitives) {
+      const accessor = json.accessors[primitive.attributes.POSITION];
+      // The accessor's min/max are in the mesh's own space. Comparing them
+      // against post-transform output would flag any model with a moved child
+      // node — `fence-gate` swings its gate panel — so the eight corners of the
+      // source box go through the same world matrix the build applies.
+      for (let corner = 0; corner < 8; corner++) {
+        const local = [
+          corner & 1 ? accessor.max[0] : accessor.min[0],
+          corner & 2 ? accessor.max[1] : accessor.min[1],
+          corner & 4 ? accessor.max[2] : accessor.min[2],
+        ];
+        const world3 = transformPoint(world, local[0], local[1], local[2]);
+        for (let c = 0; c < 3; c++) {
+          source.min[c] = Math.min(source.min[c], world3[c]);
+          source.max[c] = Math.max(source.max[c], world3[c]);
+        }
+      }
+    }
+  }
+
+  const built = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (const part of parts.values()) {
+    for (let i = 0; i < part.positions.length; i += 3) {
+      for (let c = 0; c < 3; c++) {
+        built.min[c] = Math.min(built.min[c], part.positions[i + c]);
+        built.max[c] = Math.max(built.max[c], part.positions[i + c]);
+      }
+    }
+  }
+
+  for (let c = 0; c < 3; c++) {
+    if (Math.abs(source.min[c] - built.min[c]) > 2e-3 || Math.abs(source.max[c] - built.max[c]) > 2e-3) {
+      throw new Error(
+        `${name}: origin not preserved on axis ${'xyz'[c]} — ` +
+          `source [${source.min[c].toFixed(3)}, ${source.max[c].toFixed(3)}] ` +
+          `built [${built.min[c].toFixed(3)}, ${built.max[c].toFixed(3)}]`,
+      );
+    }
+  }
 }
 
 /** Moves a whole model so its base sits at y = 0 and it is centred on XZ. */
@@ -360,7 +568,7 @@ function writeGlb(models, outPath) {
     return json.bufferViews.length - 1;
   };
 
-  for (const { name, positions, normals, indices } of models) {
+  for (const { name, positions, normals, colors, indices } of models) {
     const count = positions.length / 3;
     if (count > 65535) throw new Error(`${name} needs 32-bit indices`);
 
@@ -393,12 +601,29 @@ function writeGlb(models, outPath) {
       bufferView: pushView(idxBuf, 34963), componentType: USHORT, count: indices.length, type: 'SCALAR',
     });
 
+    // COLOR_0 as normalised unsigned bytes: a quarter the size of float32 and
+    // visually identical for 8-bit source colours. VEC4 rather than VEC3 so
+    // each element stays 4-byte aligned, as the spec requires.
+    let colAccessor = null;
+    if (colors && colors.length === positions.length) {
+      const colBuf = Buffer.alloc(count * 4);
+      for (let i = 0; i < count; i++) {
+        colBuf[i * 4] = colors[i * 3];
+        colBuf[i * 4 + 1] = colors[i * 3 + 1];
+        colBuf[i * 4 + 2] = colors[i * 3 + 2];
+        colBuf[i * 4 + 3] = 255;
+      }
+      colAccessor = json.accessors.length;
+      json.accessors.push({
+        bufferView: pushView(colBuf, 34962), componentType: 5121, normalized: true, count, type: 'VEC4',
+      });
+    }
+
     // Name the mesh and the node identically: three's GLTFLoader may take
     // either as `mesh.name`, and `extractGeometries` keys on that name.
-    json.meshes.push({
-      name,
-      primitives: [{ mode: 4, indices: idxAccessor, attributes: { POSITION: posAccessor, NORMAL: norAccessor } }],
-    });
+    const attributes = { POSITION: posAccessor, NORMAL: norAccessor };
+    if (colAccessor !== null) attributes.COLOR_0 = colAccessor;
+    json.meshes.push({ name, primitives: [{ mode: 4, indices: idxAccessor, attributes }] });
     json.nodes.push({ name, mesh: json.meshes.length - 1 });
     json.scenes[0].nodes.push(json.nodes.length - 1);
   }
@@ -427,20 +652,33 @@ function writeGlb(models, outPath) {
   writeFileSync(outPath, Buffer.concat([header, chunk(jsonBuf, CHUNK_JSON), chunk(binBuf, CHUNK_BIN)]));
 }
 
-const kitDir = process.argv[2];
-const outPath = process.argv[3] ?? 'public/assets/models/nature/nature.glb';
-if (!kitDir) {
-  console.error('usage: node tools/buildNatureKit.mjs <kenney_nature-kit/Models/GLTF format> [out.glb]');
+const kitName = process.argv[2];
+const kitRoot = process.argv[3];
+const kit = KITS[kitName];
+if (!kit || !kitRoot) {
+  console.error(`usage: node tools/buildKit.mjs <${Object.keys(KITS).join('|')}> <unzipped-kit-root> [out.glb]`);
   process.exit(1);
 }
+const outPath = process.argv[4] ?? kit.out;
+const sourceDir = join(kitRoot, kit.dir);
+const atlas = kit.atlas ? decodePng(join(kitRoot, kit.atlas)) : null;
+if (atlas) console.log(`atlas ${kit.atlas} — ${atlas.width}x${atlas.height}, baked to COLOR_0 and dropped`);
 
 const models = [];
-for (const source of SOURCES) {
-  const parts = extractParts(join(kitDir, `${source.file}.glb`), source.roles);
+for (const source of kit.sources) {
+  const parts = extractParts(join(sourceDir, `${source.file}.glb`), source.roles, atlas);
   for (const role of source.roles) {
     if (!parts.has(role)) throw new Error(`${source.file}: no primitive with role "${role}"`);
   }
-  groundAndCentre(parts);
+  if (kit.preserveOrigin) {
+    // The whole point of preserveOrigin is that nothing moved. Assert it here
+    // rather than trusting it: this is the only place that can see both the
+    // source file and the result, and a piece that quietly drifted to the
+    // centre of its tile still passes every structural check downstream.
+    assertOriginPreserved(source.file, join(sourceDir, `${source.file}.glb`), parts);
+  } else {
+    groundAndCentre(parts);
+  }
   for (const [role, part] of parts) {
     models.push({ name: role === 'whole' ? source.file : `${source.file}_${role}`, ...part });
   }

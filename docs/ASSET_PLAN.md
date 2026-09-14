@@ -345,12 +345,13 @@ in its archive.
 | RPG Audio | `kenney.nl/assets/rpg-audio` | `License (Creative Commons Zero, CC0)` — "You may use these assets in personal and commercial projects. Credit (Kenney or www.kenney.nl) would be nice but is not mandatory." |
 | Interface Sounds 1.0 | `kenney.nl/assets/interface-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
 | Impact Sounds 1.0 | `kenney.nl/assets/impact-sounds` | `License: (Creative Commons Zero, CC0)` — "This content is free to use in personal, educational and commercial projects. Support us by crediting Kenney or www.kenney.nl (this is not mandatory)" |
+| Fantasy Town Kit 2.0 | `kenney.nl/assets/fantasy-town-kit` | `License: (Creative Commons Zero, CC0)` — "You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)" |
 
-All four match §8 decision 4 (strict CC0). Nothing was committed on the strength
+All five match §8 decision 4 (strict CC0). Nothing was committed on the strength
 of a download page alone.
 
 Kenney ships a separate `License.txt` per pack, identical in grant but differing
-in pack name, version and date. They are kept as four files rather than one
+in pack name, version and date. They are kept as one file per pack rather than a single
 `kenney-CC0.txt`, because merging them would mean editing licence text.
 
 ### 9.3 What landed
@@ -648,36 +649,118 @@ looks wrong. Normals are checked for unit length specifically to catch a botched
 inverse transpose, and triangles for zero area — the check that found the
 `tree_oak` pair. All pass on the current kit.
 
+### 9.5f Buildings, homes and paths — `buildings.glb` (asset #2)
+
+Downloaded from `kenney.nl/assets/fantasy-town-kit` (Fantasy Town Kit 2.0, CC0
+read in-archive, quoted in §9.2). 23 of its 167 models, **138,124 bytes**, 3,806
+verts, 2,334 tris, built by the same `tools/buildKit.mjs`:
+
+| Group | Models |
+| --- | --- |
+| Paths | `road`, `road-bend`, `road-corner`, `road-edge`, `road-curb` |
+| Walls | `wall`, `wall-corner`, `wall-doorway-square`, `wall-window-shutters`, `wall-wood`, `wall-wood-corner` |
+| Roofs | `roof-gable`, `roof-gable-end`, `roof-gable-top`, `roof-corner`, `roof-flat`, `chimney` |
+| Yards | `fence`, `fence-gate`, `hedge`, `hedge-gate`, `stairs-stone`, `lantern` |
+
+This kit differs from the Nature Kit in two ways that each forced real work.
+
+**It is textured, and the texture is a gradient ramp.** All 167 models share one
+512×512 `colormap.png`. The first assumption — that it is a flat-swatch palette,
+so a model could be split by atlas colour the way the trees split by material —
+is wrong: sampling shows **40–60 distinct shades per model**, because Kenney
+authors these as ramps. There are no discrete roles to split on. So the atlas is
+sampled per vertex into `COLOR_0` and dropped: the look is preserved, no texture
+ships at all (no KTX2 step, no second request), and the manifest sets
+`keepVertexColors: true` — which is exactly what that option was written for.
+
+**Its pieces are modular, so the authored origin is load-bearing.** This one was
+nearly a silent disaster. `groundAndCentre` is right for a tree and wrong for a
+wall: `wall` spans x 0.40..0.50 in the source, sitting on its tile's *edge* so
+four of them enclose a room. Centring it moved it to x −0.05..0.05, the tile's
+middle — four walls would have collapsed into a post instead of a room, and
+every structural check would still have passed. Modular kits now set
+`preserveOrigin`, and `buildKit.mjs` **asserts** the built bounds match the
+source, transforming the source's bounding box through the same node matrices so
+the comparison is like-for-like. All 23 pieces verified unmoved.
+
+Two more things the kit exposed:
+
+- **UNSIGNED_BYTE indices.** The town kit indexes its small meshes with
+  `componentType` 5121. The Nature Kit reader handled only USHORT/UINT and
+  walked off the end of the buffer. The accessor reader now covers every integer
+  width and honours `byteStride`.
+- **14 more degenerate triangles**, in `road-bend`, `road-corner`,
+  `wall-window-shutters` and `roof-gable-end`, pruned like `tree_oak`'s.
+
+**What this does *not* do is swap `Buildings.ts` over**, and there is a design
+question in the way that is worth stating before anyone tries. The game builds
+its 8 named buildings from parameterised procedural parts, and
+`applyHouseStyle` recolours the player's cottage by **matching material hex
+colours** — roof, body, trim, door. Baked vertex colours have no material colour
+to match, so that mechanism does not survive a naive swap. Options are to
+re-tint per-instance through `InstancedMesh.setColorAt`, to split pieces by
+colour at build time after all (harder here than for the trees, given the
+ramps), or to keep the cottage procedural and use the kit for the other
+buildings. That is a decision about a gameplay feature, not an asset question.
+
+**One cost this introduces, stated rather than buried.** `AssetManager.loadAll`
+fetches every kit that `referencedKits()` names, and adding these entries puts
+`buildings` on that list. So the game now fetches and retains 138 KB of building
+geometry that **nothing renders yet** — `Buildings.ts` is untouched. That is
+~12% of the current ~1.16 MB first load, for no visible benefit until the
+buildings are wired.
+
+It is left in rather than worked around, for two reasons: the entries are the
+verified record of what is in the file and where it came from, and `Buildings.ts`
+is the next category in the queue, so the fetch stops being wasted shortly. But
+§5 step 6 does call for lazy-loading kits behind their systems, and this is
+exactly such a case — whoever wires `Buildings.ts` should add that (a `lazy`
+flag on `KitDef`, skipped by `loadAll` and loaded on demand) and measure it,
+from an environment that can actually run `vite build`. Flagging it here so the
+next person finds it deliberately rather than discovering an unexplained 138 KB.
+
+### 9.5g `buildNatureKit.mjs` is now `buildKit.mjs`
+
+Generalised to build any kit from a config table, because the second kit needed
+a different colour strategy, a different origin policy and a wider accessor
+reader — all of which would otherwise have been copy-pasted.
+
+The refactor was guarded the only way that is meaningful without a test suite:
+`nature.glb` was rebuilt after every step and checked **byte-identical** by
+SHA-256 against the committed file. It is, at every stage and at the end.
+
 ### 9.6 Asset payload measured
 
 | Group | Bytes |
 | --- | --- |
 | `nature.glb` | 58,984 |
+| `buildings.glb` | 138,124 |
 | 8 OGG sound effects | 60,075 |
-| **Total** | **119,059 (116.3 KB)** |
+| **Total** | **257,183 (251.2 KB)** |
 
-Against the ≤ 8 MB first-load budget in §5 that is **1.5%**. Neither group is in
+Against the ≤ 8 MB first-load budget in §5 that is **3.1%**. Neither group is in
 the JS bundle: the OGGs are fetched after the audio context unlocks, and
 `nature.glb` is not fetched at all yet (see below).
 
 ### 9.7 Deliberately not done
 
-- **`Foliage.ts` is not yet driven by `nature.glb`.** The kit, the manifest
-  entries and the loading layer are all in place, but the code change that binds
-  imported geometry to the instanced bark/canopy materials is held back: with no
-  `three`, no `@types/three` and no `vite`, it could not be typechecked, built or
-  run even once. Pushing an unexercised rendering change is a worse outcome than
-  pushing the asset and the data, so the swap is left as its own commit for when
-  the toolchain is available. The intended shape is already settled by this
-  commit: `nature.glb` splits trunk and canopy into separate nodes precisely so
-  `Foliage`'s existing `barkMaterial` and `canopyMaterial` can each bind one,
-  keeping season tint, wind, wetness and the instancing path (§7.1).
-- **`AssetManager` is still not wired into `Game.ts`.** Wiring it now would pull
-  `GLTFLoader` and the meshopt decoder into the bundle to load geometry that
-  nothing yet consumes — the same reason it was left out before. It should go in
-  together with the `Foliage` swap above.
+> **The first two bullets below have since been done** — see "Model half of the
+> slice wired and verified in a browser" further down. They are kept as the
+> record of why they waited, and because the reasoning still governs the
+> categories that have not been wired yet.
+
+- ~~**`Foliage.ts` is not yet driven by `nature.glb`.**~~ Done. The swap was
+  held back here because with no `three`, no `@types/three` and no `vite` it
+  could not be typechecked, built or run even once, and pushing an unexercised
+  rendering change is worse than pushing the asset and the data. It landed from
+  a session that *did* have the toolchain, which is the right way round — and
+  which immediately turned up a bug (`AssetManager` discarding every model's
+  `normalize`) that no amount of static checking here would have found.
+- ~~**`AssetManager` is still not wired into `Game.ts`.**~~ Done, in the same
+  commit, once there was geometry for it to load.
 - **§7 step 6 (the wholesale category-by-category swap) was not started**, as
-  intended: it is separate commits and separate review.
+  intended: it is separate commits and separate review. Buildings are now
+  downloaded and in `MODELS` but still not wired — see §9.5f.
 
 ### Model half of the slice wired and verified in a browser, 2026-09-14
 
@@ -742,8 +825,16 @@ exactly asset #19, still blocked on reading `OFL.txt`.
 | **Total** | **1045.58 kB** | **289.89 kB** | **+118.07 / +33.18** |
 
 The growth is `GLTFLoader` plus the meshopt decoder, which the baseline note
-predicted would arrive with the first kit. On top of that sits 116.3 KB of
-assets, so first load is ~1.16 MB against the §5 budget of <= 8 MB.
+predicted would arrive with the first kit. On top of that sat 116.3 KB of assets
+at the time of this measurement, so first load was ~1.16 MB against the §5
+budget of <= 8 MB.
+
+`buildings.glb` (138 KB) landed after this build was measured, taking assets to
+251.2 KB and first load to ~1.30 MB — still 16% of budget. **That figure is
+arithmetic on top of a measured build, not a measured build of its own:** the
+session that added the buildings kit has no npm, so it could not re-run
+`vite build`. The JS side is unchanged by it either way, since a kit is a
+runtime fetch rather than bundle content.
 
 ### Coverage as it actually stands, 2026-09-14
 
@@ -755,27 +846,29 @@ Recording the honest state so the gap is tracked rather than assumed.
 | --- | --- | --- | --- |
 | Foliage (trees, bushes) | Kenney Nature Kit | ✅ | ✅ `world/Foliage.ts`, 10 models |
 | SFX + UI audio | Kenney RPG / Interface / Impact | ✅ | ✅ 8 sounds via `sounds.ts` |
-| Buildings, houses | Kenney Fantasy Town Kit | ❌ | ❌ `BuildingKit.ts`, `Buildings.ts` |
+| Buildings, houses | Kenney Fantasy Town Kit | ✅ | ❌ `BuildingKit.ts`, `Buildings.ts` — 23 models in `MODELS`, see §9.5f |
 | Interiors | Kenney Fantasy Town / Furniture | ❌ | ❌ `InteriorKit.ts`, `Interiors.ts` |
 | Furniture | Kenney Furniture Kit | ❌ | ❌ `housing/FurnitureModels.ts` |
 | Props | Kenney Survival Kit | ❌ | ❌ `world/Props.ts` |
 | Items | Kenney Food Kit | ❌ | ❌ `items/ItemModels.ts` |
-| Paths / paving | source not yet identified | ❌ | ❌ terrain path surfaces |
+| Paths / paving | Kenney Fantasy Town Kit (`road-*`) | ✅ | ❌ terrain path surfaces — 5 road pieces, see §9.5f |
 | Fish | Quaternius | ❌ blocked | ❌ `fishing/FishSchools.ts` |
 | Animals | Quaternius | ❌ blocked | ❌ |
 | Characters | KayKit | ❌ | ❌ `player/CharacterRig.ts` |
 
-`KITS` in `src/assets/manifest.ts` already declares buildings, furniture, props,
-fish, animals and characters, but only `nature.glb` exists on disk and only
-nature has `MODELS` entries. A declared kit with no file is not an error — the
+`KITS` in `src/assets/manifest.ts` declares furniture, props, fish, animals and
+characters with no file on disk and no `MODELS` entries; `nature.glb` and
+`buildings.glb` exist and are populated. A declared kit with no file is not an error — the
 loader treats a missing kit as "keep the procedural path" — so the game runs
 correctly today; those categories simply have not been replaced yet.
 
-**Paths are an open question, not an assumption.** Nothing in the plan's §3
-shortlist was chosen for path or paving geometry, and the terrain currently
-draws path surfaces itself. Whether Fantasy Town supplies usable paving pieces
-has to be checked against the real kit; if it does not, that gets reported
-rather than filled from a source outside §3.
+**Paths: answered.** This was flagged as an open question — nothing in §3 was
+chosen for paving, and whether Fantasy Town supplies usable pieces had to be
+checked against the real kit rather than assumed. It does: the kit ships nine
+`road-*` pieces (straight, bend, corner, inner corner, edge, curb, curb-end and
+two slopes). Five are in `buildings.glb` — straight, bend, corner, edge and
+curb — which covers the shapes `heightfield`'s `PATHS` actually needs. No source
+outside §3 was required.
 
 **A note on process, after losing work.** The download session was archived by
 the parent session while mid-inventory of the Fantasy Town Kit, and everything
