@@ -8,6 +8,7 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import { makeKitMesh } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 
@@ -41,6 +42,19 @@ export function makeTool(id: ToolId, level = 1): Group {
   // Upgraded tools get brighter metal, so the investment is visible in-world.
   const metalColor = level >= 3 ? '#e8d9a8' : level >= 2 ? '#c8ccd0' : '#9aa4a8';
   const metal = createStylizedMaterial({ color: metalColor, roughness: 0.38, metalness: 0.55 });
+
+  // The survival kit's hand tools are authored upright with the head at the
+  // top, which is the same orientation the procedural handles below use.
+  const kitId = id === 'axe' ? 'tools.axe' : id === 'shovel' ? 'tools.shovel' : null;
+  const kitMesh = kitId ? makeKitMesh(kitId, { scale: 0.82, roughness: 0.7 }) : null;
+  if (kitMesh) {
+    // Grip a third of the way up the handle rather than at the butt.
+    kitMesh.position.y = -0.22;
+    group.add(kitMesh);
+    group.rotation.set(-0.35, 0, -0.2);
+    group.position.set(0, -0.06, 0.04);
+    return group;
+  }
 
   switch (id) {
     case 'rod': {

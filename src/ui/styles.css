@@ -379,15 +379,15 @@ html, body {
   transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 8px 15px 8px 8px;
+  gap: 8px;
+  padding: 6px 13px 6px 6px;
   border-radius: var(--r-pill);
-  background: linear-gradient(180deg, rgba(255, 253, 247, 0.96), rgba(246, 238, 222, 0.94));
+  background: linear-gradient(180deg, rgba(255, 253, 247, 0.94), rgba(246, 238, 222, 0.92));
   box-shadow: var(--lift-2), var(--inner-light);
   border: 1px solid rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(8px);
   font-weight: 800;
-  font-size: 14px;
+  font-size: 13px;
   white-space: nowrap;
   animation: cc-pop-in 260ms var(--spring) both;
 }
@@ -398,10 +398,10 @@ html, body {
 .cc-prompt .key {
   display: grid;
   place-items: center;
-  min-width: 27px;
-  height: 27px;
+  min-width: 25px;
+  height: 25px;
   padding: 0 7px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: linear-gradient(180deg, #45a7c0, var(--sea-deep));
   color: #fff;
   font-size: 12.5px;
@@ -585,7 +585,31 @@ html, body {
 .cc-slot.selected { box-shadow: var(--lift-2), 0 0 0 2.5px var(--sea); }
 .cc-slot.empty { background: rgba(120, 108, 90, 0.06); box-shadow: none; border-style: dashed; cursor: default; }
 .cc-slot.empty:hover { transform: none; }
-.cc-slot img { width: 66%; height: 66%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(40, 34, 26, 0.16)); }
+.cc-slot img { width: 66%; height: 66%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(40, 34, 26, 0.16)); transition: transform 180ms var(--spring); }
+.cc-slot:hover img { transform: translateY(-2px) scale(1.06) rotate(-3deg); }
+/* The item's name slides up from the slot's foot on hover, so the grid can
+   be scanned without opening every slot. */
+.cc-slot[title]::after {
+  content: attr(title);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 6px 5px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(46, 58, 60, 0), rgba(46, 58, 60, 0.82));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+  pointer-events: none;
+}
+.cc-slot[title]:hover::after,
+.cc-slot[title]:focus-visible::after { opacity: 1; transform: translateY(0); }
 .cc-slot .qty {
   position: absolute;
   right: 6px;
@@ -812,6 +836,59 @@ html, body {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   letter-spacing: 0.02em;
 }
+
+/* --------------------------------------------------------------------------
+   Boot / loading
+   -------------------------------------------------------------------------- */
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(80% 60% at 50% 40%, #1f3a55, #0f1c30 70%);
+  font-family: var(--font);
+  transition: opacity 460ms var(--ease-out);
+}
+#boot.leaving { opacity: 0; pointer-events: none; }
+.cc-boot-card {
+  width: min(380px, calc(100vw - 48px));
+  padding: 30px 30px 24px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(253, 249, 240, 0.97), rgba(243, 233, 214, 0.96));
+  box-shadow: var(--lift-3);
+  text-align: center;
+  animation: cc-title-in 520ms var(--spring) both;
+}
+.cc-boot-mark { display: grid; place-items: center; margin-bottom: 4px; animation: cc-hint-bob 2.2s ease-in-out infinite; }
+.cc-boot-card h1 {
+  margin: 0 0 16px;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, #2f8fa8, #1f6b80);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.cc-boot-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(90, 80, 65, 0.14);
+  overflow: hidden;
+}
+.cc-boot-bar > i {
+  display: block;
+  width: 6%;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--leaf), #8fbf6a);
+  transition: width 320ms var(--ease-out);
+}
+.cc-boot-label { margin: 12px 0 0; font-size: 12.5px; font-weight: 800; color: var(--ink-2); }
+.cc-boot-tip { margin: 14px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); font-style: italic; }
 
 /* --------------------------------------------------------------------------
    Title screen

@@ -1,5 +1,6 @@
 import { Box3, Color, Group, Vector3 } from 'three';
 import type { AssetManager } from '@/assets/AssetManager';
+import { setAssets } from '@/assets/registry';
 import { AudioSystem } from '@/audio/AudioSystem';
 import { EventBus } from './EventBus';
 import { InputSystem } from '@/input/InputSystem';
@@ -17,6 +18,8 @@ import { Terrain } from '@/world/Terrain';
 import { Water } from '@/world/Water';
 import { Foliage } from '@/world/Foliage';
 import { Props } from '@/world/Props';
+import { Scatter } from '@/world/Scatter';
+import { Wildlife } from '@/world/Wildlife';
 import { Buildings, type BuildingId } from '@/world/Buildings';
 import {
   createHomeInterior,
@@ -27,7 +30,7 @@ import {
   homeLayoutFor,
   type InteriorScene,
 } from '@/world/Interiors';
-import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, waterDepth } from '@/world/heightfield';
+import { ISLAND_HALF, LANDMARKS, SEA_LEVEL, terrainHeight, walkHeight, waterDepth } from '@/world/heightfield';
 import { drawIslandMap } from '@/world/Minimap';
 import { Player } from '@/player/Player';
 import { TOOLS, type ToolId } from '@/player/Tools';
@@ -105,6 +108,8 @@ export class Game {
   private water!: Water;
   private foliage!: Foliage;
   private props!: Props;
+  private scatter!: Scatter;
+  private wildlife!: Wildlife;
   private buildings!: Buildings;
   private fishSchools!: FishSchools;
   private farm!: Farm;
@@ -159,6 +164,8 @@ export class Game {
    */
   constructor(private container: HTMLElement, private assets?: AssetManager) {
     registerShaderChunks();
+    // Every system built below may reach for kit geometry through the registry.
+    setAssets(assets);
 
     this.renderer = new Renderer(container);
     this.input = new InputSystem(window);
@@ -207,10 +214,14 @@ export class Game {
     this.interiorRoot.position.copy(INTERIOR_ORIGIN);
     this.interiorRoot.visible = false;
 
-    this.terrain = new Terrain({ resolution: 300 });
+    // 380 divisions puts a vertex every half metre, which is what stops the
+    // waterline stepping across the beach where the flat sea meets the mesh.
+    this.terrain = new Terrain({ resolution: 380 });
     this.water = new Water();
     this.foliage = new Foliage(this.renderer.profile.foliageDensity, this.assets);
     this.props = new Props();
+    this.scatter = new Scatter(this.foliage.trees, this.renderer.profile.foliageDensity);
+    this.wildlife = new Wildlife();
     this.buildings = new Buildings();
     this.fishSchools = new FishSchools();
     this.farm = new Farm(this.bus);
@@ -221,6 +232,8 @@ export class Game {
       this.water.mesh,
       this.foliage.group,
       this.props.group,
+      this.scatter.group,
+      this.wildlife.group,
       this.buildings.group,
       this.fishSchools.group,
       this.farm.group,
@@ -252,6 +265,7 @@ export class Game {
 
     this.terrain.applySeason('Spring');
     this.foliage.applySeason('Spring');
+    this.scatter.applySeason('Spring');
   }
 
   private wireEvents(): void {
@@ -259,6 +273,20 @@ export class Game {
     this.bus.on('audio:music', ({ id }) => this.audio.playMusic(id));
 
     this.bus.on('ui:catchCard', (payload) => this.catchCard.show(payload));
+
+    // The bite is the one moment in fishing that has to be unmissable.
+    this.bus.on('fishing:state', ({ state }) => {
+      if (state === 'casting') this.cameraRig.setPreset('fishing');
+      else if (state === 'idle') this.cameraRig.setPreset(this.mode === 'exterior' ? 'exterior' : 'interior');
+      if (state === 'biting') {
+        this.player.emoteBubble('exclaim', 1.0);
+        this.cameraRig.shake(0.08);
+      } else if (state === 'nibbling') {
+        this.player.emoteBubble('question', 0.8);
+      } else if (state === 'landing') {
+        this.player.emoteBubble('fish', 1.4);
+      }
+    });
 
     this.bus.on('inventory:full', () => {
       this.uiRoot.toast('Your bag is full. Sell or store something.', 'warn');
@@ -446,6 +474,7 @@ export class Game {
     const season = this.time.season;
     this.terrain.applySeason(season);
     this.foliage.applySeason(season);
+    this.scatter.applySeason(season);
     this.lastSeason = season;
   }
 
@@ -650,13 +679,15 @@ export class Game {
         0.3 + weather.wind * 0.7,
       );
       this.foliage.update(dt, this.player.position.x, this.player.position.z);
+      this.updateAmbientEffects(dt, lightingOutput.darkness, weather.precipitation);
       this.foliage.setGrassDistance(this.renderer.profile.grassDistance);
       this.props.update(dt, lightingOutput.darkness, this.elapsed);
+      this.wildlife.update(dt, 1 - lightingOutput.darkness, weather.precipitation, time.season, weather.wind, camera.position.x, camera.position.z);
       this.buildings.update(dt, lightingOutput.darkness, this.townWorks.lighthouse, this.time.hour);
       this.fishSchools.update(dt, this.elapsed, camera.position.x, camera.position.z);
       this.farm.update(dt);
       if (advance) this.villagers.update(dt, this.time.hour, this.player.position);
-      this.drops.update(dt, this.player.position, (x, z) => terrainHeight(x, z));
+      this.drops.update(dt, this.player.position, (x, z) => walkHeight(x, z));
     } else {
       this.updateInteriorWalls(camera.position);
       this.activeInterior?.update?.(dt, this.elapsed);
@@ -671,6 +702,98 @@ export class Game {
       this.lastSeason = time.season;
       this.terrain.applySeason(time.season);
       this.foliage.applySeason(time.season);
+      this.scatter.applySeason(time.season);
+    }
+  }
+
+  private rippleTimer = 0;
+  private smokeTimer = 0;
+  private fountainTimer = 0;
+
+  /**
+   * Small, continuous world effects that make the island feel occupied:
+   * ripples around a wading player, chimney smoke on cold evenings, the
+   * fountain's spray, and sparks off the beach fire. All local, all cheap.
+   */
+  private updateAmbientEffects(dt: number, darkness: number, rain: number): void {
+    // Wading and swimming disturb the water.
+    const speed = Math.hypot(this.player.velocity.x, this.player.velocity.z);
+    if (this.player.swimDepth > 0.06) {
+      this.rippleTimer -= dt;
+      const interval = this.player.inWater ? 0.32 : 0.2;
+      if (this.rippleTimer <= 0 && (speed > 0.6 || this.player.inWater)) {
+        this.rippleTimer = interval;
+        const at = new Vector3(this.player.position.x, SEA_LEVEL + 0.02, this.player.position.z);
+        this.particles.burst('waterRing', at, this.player.inWater ? 0.45 : 0.3);
+        if (speed > 3 && !this.player.inWater) this.particles.burst('splash', at, 0.25);
+      }
+    }
+
+    // Chimneys smoke when it is dim or cold; nobody lights a fire at noon.
+    const season = this.time.season;
+    const smoky = Math.max(darkness, season === 'Winter' ? 0.8 : season === 'Autumn' ? 0.45 : 0) * (1 - rain * 0.5);
+    if (smoky > 0.25) {
+      this.smokeTimer -= dt;
+      if (this.smokeTimer <= 0) {
+        this.smokeTimer = 0.26;
+        for (const building of this.buildings.instances.values()) {
+          if (!building.chimney) continue;
+          if (building.chimney.distanceToSquared(this.player.position) > 70 * 70) continue;
+          // Public buildings are shut after hours and stay cold.
+          const id = building.config.id;
+          if ((id === 'store' || id === 'townHall') && (this.time.hour >= 22 || this.time.hour < 7)) continue;
+          this.particles.emit({
+            position: building.chimney,
+            velocity: new Vector3(0.15, 1.1, 0.1),
+            spread: 0.25,
+            color: '#d8d4cc',
+            size: 0.28,
+            endScale: 2.6,
+            life: 3.2,
+            gravity: 0.35,
+            drag: 0.9,
+          });
+        }
+      }
+    }
+
+    // Fountain spray.
+    this.fountainTimer -= dt;
+    if (this.fountainTimer <= 0) {
+      this.fountainTimer = 0.09;
+      const centre = LANDMARKS['square.center'];
+      if (Math.hypot(centre.x - this.player.position.x, centre.z - this.player.position.z) < 40) {
+        const top = new Vector3(centre.x, terrainHeight(centre.x, centre.z) + 2.7, centre.z);
+        for (let i = 0; i < 2; i++) {
+          this.particles.emit({
+            position: top,
+            velocity: new Vector3(0, 2.4, 0),
+            spread: 0.9,
+            color: i ? '#eaf7fb' : '#bfe4f0',
+            size: 0.07,
+            life: 0.9,
+            gravity: -7,
+            drag: 0.4,
+          });
+        }
+      }
+    }
+
+    // Embers rising off the beach fire.
+    const fire = this.props.campfireState;
+    if (fire && fire.strength > 0.2 && Math.random() < dt * 9 * fire.strength) {
+      this.particles.emit({
+        position: fire.position,
+        velocity: new Vector3(0, 1.6, 0),
+        spread: 0.45,
+        color: Math.random() < 0.5 ? '#ffb347' : '#ff7a3c',
+        size: 0.06,
+        endScale: 0.2,
+        life: 1.4,
+        gravity: 0.8,
+        drag: 1.4,
+        additive: true,
+      });
     }
   }
 
@@ -734,6 +857,21 @@ export class Game {
 
     if (this.input.justPressed('toolPrev')) this.player.cycleTool(-1);
     if (this.input.justPressed('toolNext')) this.player.cycleTool(1);
+
+    // Social emotes. Villagers in earshot answer a wave, which is the smallest
+    // possible version of "the island noticed you".
+    if (!this.fishing.isActive) {
+      if (this.input.justPressed('emoteWave') && this.player.emote('wave')) {
+        this.bus.emit('audio:sfx', { id: 'ui.hover', volume: 0.4 });
+        if (this.mode === 'exterior') this.villagers.greetFrom(this.player.position);
+      } else if (this.input.justPressed('emoteCheer')) {
+        this.player.emote('cheer');
+      } else if (this.input.justPressed('emoteNod')) {
+        this.player.emote('nod');
+      } else if (this.input.justPressed('emoteSit')) {
+        this.player.emote('sit');
+      }
+    }
 
     // Fishing owns the action button while a line is out.
     if (this.fishing.isActive) {
@@ -933,13 +1071,24 @@ export class Game {
     });
     if (species.rarity === 'rare' || species.rarity === 'legendary') this.cameraRig.shake(0.25);
 
-    this.bus.emit('ui:catchCard', {
+    // A reeled-in fish leaps out of the water and flies to the player before
+    // the card appears, so the catch happens in the world first.
+    const reeled = headline === 'Reeled in';
+    if (reeled) {
+      const from = this.fishing.bobberWorldPosition.clone();
+      from.y = SEA_LEVEL + 0.1;
+      this.drops.spawn(defId, from, () => true, { upward: 6.2, spread: 0.15 });
+      this.particles.burst('sparkle', from, 0.6);
+    }
+    const show = () => this.bus.emit('ui:catchCard', {
       item,
       headline,
       sizeCm: measured,
       isNewSpecies: isNew,
       isRecord,
     });
+    if (reeled) window.setTimeout(show, 620);
+    else show();
     this.save.markDirty();
   }
 
@@ -1007,6 +1156,7 @@ export class Game {
         minZ: b.minZ + INTERIOR_ORIGIN.z - margin,
         maxZ: b.maxZ + INTERIOR_ORIGIN.z + margin,
       };
+      this.cameraRig.terrainClamp = false;
       this.cameraRig.setPreset('interior', true);
       this.cameraRig.clearOcclusion();
       this.cameraRig.occluders = [];
@@ -1075,6 +1225,7 @@ export class Game {
         new Vector3(ISLAND_HALF - 6, 60, ISLAND_HALF - 6),
       );
       this.cameraRig.positionBounds = null;
+      this.cameraRig.terrainClamp = true;
       this.cameraRig.setPreset('exterior', true);
       this.cameraRig.occluders = [...this.buildings.occluders, ...this.foliage.occluders];
       this.cameraRig.snapTo(this.player.position, (building?.doorFacing ?? Math.PI) + Math.PI);
@@ -1550,6 +1701,14 @@ export class Game {
     this.inventory.remove(item.uid);
     this.bus.emit('audio:sfx', { id: 'museum.donate' });
     this.player.celebrate();
+    this.player.emoteBubble('sparkle', 1.4);
+    // The piece lifts off the pedestal in a shower of light.
+    const pedestal = this.activeInterior?.anchors.curator;
+    const at = pedestal
+      ? new Vector3(pedestal.x + INTERIOR_ORIGIN.x, 1.3, pedestal.z + INTERIOR_ORIGIN.z)
+      : this.player.headPosition;
+    this.particles.burst('sparkle', at, 1.6);
+    this.particles.burst('petals', at, 0.6);
     this.quests.record('donate', 1);
     this.relationships.add('juniper', 6);
 
@@ -2084,6 +2243,8 @@ export class Game {
   warpTo(landmarkId: string): void {
     const target = LANDMARKS[landmarkId];
     if (!target) return;
+    // A line left in the water would stretch across the island behind us.
+    if (this.fishing.isActive) this.fishing.reelIn(this.player);
     this.player.teleport(target.x, target.z, this.player.facing);
     this.cameraRig.snapTo(this.player.position, this.player.facing + Math.PI);
   }
@@ -2107,6 +2268,8 @@ export class Game {
     this.water.dispose();
     this.foliage.dispose();
     this.props.dispose();
+    this.scatter.dispose();
+    this.wildlife.dispose();
     this.buildings.dispose();
     this.fishSchools.dispose();
     this.farm.dispose();

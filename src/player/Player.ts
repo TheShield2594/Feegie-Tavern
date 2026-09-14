@@ -5,8 +5,9 @@ import { clamp, dampAngle, lerp } from '@/util/math';
 import { CharacterAnimator, type ClipName } from './CharacterAnimator';
 import { CharacterRig } from './CharacterRig';
 import { disposeObject } from '@/util/three';
+import { EmoteBubble, type EmoteKind } from '@/rendering/WorldLabel';
 import { makeTool, TOOLS, type ToolId } from './Tools';
-import { SEA_LEVEL, isWalkable, sampleSurface, terrainHeight, type Surface } from '@/world/heightfield';
+import { SEA_LEVEL, isWalkable, sampleWalkSurface, walkHeight, type Surface } from '@/world/heightfield';
 
 export interface MovementConstraints {
   /** Circles the player cannot walk into. */
@@ -62,14 +63,49 @@ export class Player {
   private footstepTimer = 0;
   private lastFootstepFoot: 'L' | 'R' = 'L';
   private idleTimer = 0;
+  /** The bubble over the player's head — bites, greetings, discoveries. */
+  readonly bubble = new EmoteBubble();
 
   constructor(private bus: EventBus, look: CharacterLook) {
     this.rig = new CharacterRig({ height: 1.62 });
     this.rig.setLook(look);
     this.animator = new CharacterAnimator(this.rig);
     this.group.add(this.rig.group);
+    this.bubble.baseY = 2.25;
+    this.group.add(this.bubble.sprite);
     this.group.name = 'Player';
     this.setTool('rod', false);
+  }
+
+  /** Shows a speech bubble over the player. */
+  emoteBubble(kind: EmoteKind, duration = 1.6): void {
+    this.bubble.show(kind, duration);
+  }
+
+  /**
+   * Player-triggered social emotes. Returns false when the character is busy,
+   * so the caller can ignore the press rather than queue a wave mid-swing.
+   */
+  emote(kind: 'wave' | 'cheer' | 'nod' | 'sit'): boolean {
+    if (kind === 'sit') {
+      if (this.state === 'sitting') { this.stand(); return true; }
+      if (this.state !== 'free') return false;
+      this.sit();
+      return true;
+    }
+    if (this.state !== 'free' || this.animator.isBusy) return false;
+    if (kind === 'wave') {
+      this.performAction('wave', 1.5, false);
+      this.rig.setExpression('happy');
+      this.emoteBubble('happy', 1.4);
+    } else if (kind === 'cheer') {
+      this.celebrate();
+      this.emoteBubble('sparkle', 1.4);
+    } else {
+      this.performAction('nod', 0.9, false);
+      this.rig.setExpression('happy');
+    }
+    return true;
   }
 
   setLook(look: CharacterLook): void {
@@ -171,8 +207,9 @@ export class Player {
     this.rig.setExpression('sleepy');
   }
 
+  /** Moves the player instantly, grounding them on the deck or terrain unless a height is given. */
   teleport(x: number, z: number, facing = this.facing, height?: number): void {
-    this.position.set(x, height ?? terrainHeight(x, z), z);
+    this.position.set(x, height ?? walkHeight(x, z), z);
     this.velocity.set(0, 0, 0);
     this.facing = facing;
     this.group.position.copy(this.position);
@@ -224,11 +261,12 @@ export class Player {
       this.inWater = false;
       this.swimDepth = 0;
     } else {
-      const sample = sampleSurface(this.position.x, this.position.z);
+      const sample = sampleWalkSurface(this.position.x, this.position.z);
       // Ease onto the new height so slopes and steps do not jolt the camera.
       this.position.y = lerp(this.position.y, sample.height, 1 - Math.exp(-18 * dt));
       this.surface = sample.surface;
-      this.swimDepth = Math.max(0, SEA_LEVEL - sample.height);
+      // Standing on decking over the sea is dry, however deep the water below.
+      this.swimDepth = sample.surface === 'wood' ? 0 : Math.max(0, SEA_LEVEL - sample.height);
       const wasInWater = this.inWater;
       this.inWater = this.swimDepth > 0.55;
       if (this.inWater !== wasInWater) {
@@ -242,6 +280,10 @@ export class Player {
 
     this.updateAnimation(dt);
     this.updateFootsteps(dt);
+    this.bubble.update(dt);
+    // The contact shadow fades as the body goes under water.
+    const shadowMaterial = this.rig.blobShadow.material as { opacity: number };
+    shadowMaterial.opacity = this.inWater ? 0.15 : 0.9;
   }
 
   private move(dx: number, dz: number, constraints: MovementConstraints): void {

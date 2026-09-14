@@ -15,12 +15,14 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { kitGeometry, kitMaterial, makeKitMesh } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
 import { smoothstep } from '@/util/math';
-import { makeSign, makeStreetLamp, roundedBoxGeometry } from './BuildingKit';
-import { BRIDGES, ISLAND_HALF, LANDMARKS, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
+import { makeSign, makeStreetLamp, roundedBoxGeometry, surfaces } from './BuildingKit';
+import { flagstoneTexture } from '@/rendering/textures';
+import { BRIDGES, ISLAND_HALF, LANDMARKS, PIER_DECK_HEIGHT, PIER_START, SEA_LEVEL, sampleSurface, terrainHeight } from './heightfield';
 
 export interface GatherNode {
   id: string;
@@ -41,6 +43,11 @@ export interface GatherNode {
    * spots rebuild their two arms instead, so they do not carry one.
    */
   matrix?: Matrix4;
+  /**
+   * The instanced mesh this node lives in. Rocks come in three kit variants,
+   * each its own mesh, so the kind alone no longer identifies the batch.
+   */
+  mesh?: InstancedMesh;
 }
 
 /**
@@ -60,6 +67,9 @@ export class Props {
   private lampGlass: MeshStandardMaterial[] = [];
   private dummy = new Object3D();
   private waterTrough: Mesh | null = null;
+  private campfire: { light: PointLight; glow: MeshStandardMaterial; position: Vector3 } | null = null;
+  /** Signposts with their label, so the map and the world agree. */
+  readonly signposts: { x: number; z: number; label: string }[] = [];
 
   /** Solid props the player collides with, as circles. */
   readonly colliders: { x: number; z: number; radius: number }[] = [];
@@ -91,6 +101,7 @@ export class Props {
 
     const stone = createStylizedMaterial({ color: '#e2dbcd', roughness: 0.92 });
     const stoneDark = createStylizedMaterial({ color: '#c3b9a6', roughness: 0.94 });
+    const paving = createStylizedMaterial({ color: '#e6dfd0', roughness: 0.94, map: flagstoneTexture(), mapRepeat: 6 });
     const water = new MeshStandardMaterial({
       color: 0x7fc9de,
       roughness: 0.12,
@@ -143,7 +154,7 @@ export class Props {
     // Paving ring around the fountain, laid as radial slabs.
     // Paving: a wide apron disc with joint lines cut into it, rather than
     // separate tiles, so the square reads as one worked surface.
-    const apron = new Mesh(new CylinderGeometry(8.8, 9.1, 0.14, 48), stone);
+    const apron = new Mesh(new CylinderGeometry(8.8, 9.1, 0.14, 48), paving);
     apron.position.y = 0.02;
     apron.receiveShadow = true;
     square.add(apron);
@@ -233,9 +244,10 @@ export class Props {
     }
   }
 
+  /** A slatted wooden bench on iron legs, the square's standard seat. */
   private makeBench(): Group {
     const bench = new Group();
-    const wood = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.9 });
+    const wood = surfaces.plank(PALETTE.wood.plank, 1.2);
     const iron = createStylizedMaterial({ color: '#48524f', roughness: 0.55, metalness: 0.35 });
 
     const seat = new Mesh(roundedBoxGeometry(2.1, 0.14, 0.62, 0.07), wood);
@@ -267,14 +279,16 @@ export class Props {
     group.name = 'Harbour';
     this.group.add(group);
 
-    const plank = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.92 });
+    const plank = surfaces.plank('#c9a06f', 0.75);
     const post = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.95 });
 
-    // Decking starts on the sand and marches out over the water.
-    const deckY = 1.7;
+    // Decking starts on the sand and marches out over the water. Its extent
+    // and height come from the heightfield's platform so the player walks on
+    // exactly what is drawn.
+    const deckY = PIER_DECK_HEIGHT;
     const bays = 9;
     for (let i = 0; i < bays; i++) {
-      const z = pier.z - 3 + i * 3.0;
+      const z = pier.z + PIER_START + 1.5 + i * 3.0;
       const deck = new Mesh(roundedBoxGeometry(5.2, 0.24, 3.0, 0.06), plank);
       deck.position.set(pier.x, deckY, z);
       deck.castShadow = true;
@@ -303,6 +317,18 @@ export class Props {
       }
     }
 
+    // A step up onto the deck at the landward end, so the half-metre rise
+    // reads as a threshold rather than a floating slab.
+    for (let i = 0; i < 2; i++) {
+      const stepZ = pier.z + PIER_START - 0.35 - i * 0.55;
+      const stepY = terrainHeight(pier.x, stepZ) + (deckY - terrainHeight(pier.x, stepZ)) * (i === 0 ? 0.62 : 0.3);
+      const step = new Mesh(roundedBoxGeometry(4.4, 0.18, 0.6, 0.05), plank);
+      step.position.set(pier.x, stepY, stepZ);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      group.add(step);
+    }
+
     // Mooring bollards and a rowboat.
     for (const offset of [-3.5, 3.5]) {
       const bollard = new Mesh(new CylinderGeometry(0.24, 0.3, 0.9, 10), post);
@@ -312,22 +338,42 @@ export class Props {
     }
     group.add(this.makeRowboat(pier.x + 4.8, pier.z + 13, 0.4));
 
-    // Crates and barrels on the apron.
+    // Crates, barrels and a chest on the apron — a working harbour, not a
+    // stage set. Kit models where the survival kit is loaded, boxes otherwise.
     const crateMaterial = createStylizedMaterial({ color: '#c49a6c', roughness: 0.92 });
-    const apron = [
-      { x: pier.x - 4, z: pier.z - 7, r: 0.3 },
-      { x: pier.x - 2.6, z: pier.z - 5.6, r: -0.6 },
-      { x: pier.x + 6, z: pier.z - 4, r: 0.9 },
+    const apron: { x: number; z: number; r: number; kind: 'crate' | 'barrel' | 'chest' | 'bucket'; s: number }[] = [
+      { x: pier.x - 4, z: pier.z - 7, r: 0.3, kind: 'crate', s: 1.25 },
+      { x: pier.x - 3.1, z: pier.z - 6.2, r: -0.6, kind: 'crate', s: 1.05 },
+      { x: pier.x - 3.5, z: pier.z - 7.2, r: 0.1, kind: 'barrel', s: 1.2 },
+      { x: pier.x + 6, z: pier.z - 4, r: 0.9, kind: 'barrel', s: 1.3 },
+      { x: pier.x + 6.9, z: pier.z - 3.2, r: 0.2, kind: 'chest', s: 1.1 },
+      { x: pier.x - 1.6, z: pier.z - 4.4, r: 1.4, kind: 'bucket', s: 1.1 },
     ];
     for (const spot of apron) {
       const y = terrainHeight(spot.x, spot.z);
-      const crate = new Mesh(roundedBoxGeometry(1.0, 1.0, 1.0, 0.08), crateMaterial);
-      crate.position.set(spot.x, y + 0.5, spot.z);
-      crate.rotation.y = spot.r;
-      crate.castShadow = true;
-      crate.receiveShadow = true;
-      group.add(crate);
-      this.colliders.push({ x: spot.x, z: spot.z, radius: 0.8 });
+      const kit = makeKitMesh(`props.${spot.kind}`, { scale: spot.s, roughness: 0.88 });
+      if (kit) {
+        kit.position.set(spot.x, y - 0.03, spot.z);
+        kit.rotation.y = spot.r;
+        group.add(kit);
+      } else {
+        const crate = new Mesh(roundedBoxGeometry(1.0, 1.0, 1.0, 0.08), crateMaterial);
+        crate.position.set(spot.x, y + 0.5, spot.z);
+        crate.rotation.y = spot.r;
+        crate.castShadow = true;
+        crate.receiveShadow = true;
+        group.add(crate);
+      }
+      if (spot.kind !== 'bucket') this.colliders.push({ x: spot.x, z: spot.z, radius: 0.55 * spot.s });
+    }
+
+    // Lobster pots stacked at the pier head: rope-bound crates read as pots.
+    for (let i = 0; i < 2; i++) {
+      const pot = makeKitMesh('props.crate', { scale: 0.85, tint: '#d9c6a4' });
+      if (!pot) break;
+      pot.position.set(pier.x + 2.0, deckY + 0.12 + i * 0.6, pier.z + 7.5 - i * 0.05);
+      pot.rotation.y = 0.3 + i * 0.5;
+      group.add(pot);
     }
 
     // Lamp at the pier head.
@@ -377,8 +423,9 @@ export class Props {
 
   // --- Bridge and stairs ---------------------------------------------------
 
+  /** The cambered plank bridge over the creek, with rails. */
   private buildBridge(): void {
-    const plank = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.92 });
+    const plank = surfaces.plank(PALETTE.wood.plank, 1.4);
     const beam = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.94 });
 
     for (const bridge of BRIDGES) {
@@ -449,7 +496,12 @@ export class Props {
     // A picket run around the farm terrace.
     const centre = LANDMARKS['farm.terrace'];
     const radius = 11;
-    const count = 30;
+    const fenceGeometry = kitGeometry('yard.fence');
+    // The town kit's fence is one grid cell long; at 2.6x it is a 2.6 m run
+    // that stands a little over a metre, which is picket height.
+    const segment = fenceGeometry ? 2.6 : 2.3;
+    const count = Math.round((Math.PI * 2 * radius) / segment);
+    const fenceMaterial = kitMaterial({ roughness: 0.92, tint: '#f0e4d0' });
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
       // Leave a gap where the path arrives.
@@ -457,6 +509,19 @@ export class Props {
       const x = centre.x + Math.cos(a) * radius;
       const z = centre.z + Math.sin(a) * radius;
       const y = terrainHeight(x, z);
+
+      if (fenceGeometry) {
+        const run = new Mesh(fenceGeometry, fenceMaterial);
+        // The kit fence lies along its local Z; rotate it onto the tangent.
+        run.position.set(x, y - 0.02, z);
+        run.rotation.y = -a;
+        run.scale.setScalar(segment);
+        run.castShadow = true;
+        run.receiveShadow = true;
+        group.add(run);
+        continue;
+      }
+
       const post = new Mesh(roundedBoxGeometry(0.16, 1.15, 0.16, 0.04), wood);
       post.position.set(x, y + 0.55, z);
       post.rotation.y = -a;
@@ -468,6 +533,33 @@ export class Props {
       rail.rotation.y = -a;
       group.add(rail);
     }
+
+    // Signposts at the junctions where a newcomer would hesitate.
+    const posts: { x: number; z: number; r: number; label: string }[] = [
+      { x: 3.4, z: 16.5, r: 0.4, label: 'Beach' },
+      { x: -8.6, z: -13.2, r: -0.9, label: 'Museum' },
+      { x: 13.8, z: 6.2, r: 0.9, label: 'East Shore' },
+      { x: -26.4, z: 8.4, r: -0.5, label: 'Garden' },
+    ];
+    for (const spot of posts) {
+      const y = terrainHeight(spot.x, spot.z);
+      const kit = makeKitMesh('props.signpost', { scale: 1.55, roughness: 0.9 });
+      if (kit) {
+        kit.position.set(spot.x, y, spot.z);
+        kit.rotation.y = spot.r;
+        group.add(kit);
+      } else {
+        const sign = makeSign({ text: spot.label, width: 1.3, height: 0.42, boardColor: '#e8d6b2' });
+        sign.position.set(spot.x, y + 1.6, spot.z);
+        sign.rotation.y = spot.r;
+        group.add(sign);
+        const pole = new Mesh(new CylinderGeometry(0.06, 0.08, 1.7, 8), wood);
+        pole.position.set(spot.x, y + 0.85, spot.z);
+        group.add(pole);
+      }
+      this.signposts.push({ x: spot.x, z: spot.z, label: spot.label });
+      this.colliders.push({ x: spot.x, z: spot.z, radius: 0.35 });
+    }
   }
 
   private buildBeachDressing(rng: Rng): void {
@@ -477,16 +569,56 @@ export class Props {
 
     // The driftwood log villagers sit on.
     const log = LANDMARKS['beach.log'];
-    const logMesh = new Mesh(
-      new CylinderGeometry(0.55, 0.65, 4.6, 10),
-      createStylizedMaterial({ color: '#c4b49a', roughness: 0.96, flatShading: true }),
-    );
-    logMesh.position.set(log.x, terrainHeight(log.x, log.z) + 0.5, log.z);
-    logMesh.rotation.set(0, 0.5, Math.PI / 2);
-    logMesh.castShadow = true;
-    logMesh.receiveShadow = true;
-    group.add(logMesh);
+    // Kit shape, our own colour: the survival kit's log is fresh red timber,
+    // and driftwood has been bleached grey by a year of salt and sun.
+    const logGeometry = kitGeometry('props.log');
+    const kitLog = logGeometry
+      ? new Mesh(logGeometry, createStylizedMaterial({ color: '#cfc2a8', roughness: 0.96, flatShading: true }))
+      : null;
+    if (kitLog) {
+      kitLog.scale.setScalar(1.5);
+      kitLog.castShadow = true;
+      kitLog.receiveShadow = true;
+      kitLog.position.set(log.x, terrainHeight(log.x, log.z) - 0.05, log.z);
+      kitLog.rotation.y = 0.5 + Math.PI / 2;
+      group.add(kitLog);
+    } else {
+      const logMesh = new Mesh(
+        new CylinderGeometry(0.55, 0.65, 4.6, 10),
+        createStylizedMaterial({ color: '#c4b49a', roughness: 0.96, flatShading: true }),
+      );
+      logMesh.position.set(log.x, terrainHeight(log.x, log.z) + 0.5, log.z);
+      logMesh.rotation.set(0, 0.5, Math.PI / 2);
+      logMesh.castShadow = true;
+      logMesh.receiveShadow = true;
+      group.add(logMesh);
+    }
     this.colliders.push({ x: log.x, z: log.z, radius: 1.6 });
+
+    // A fire pit beside the log, lit after dark — the beach's evening anchor.
+    const fireX = log.x + 2.6;
+    const fireZ = log.z + 1.4;
+    const firePit = makeKitMesh('props.campfire', { scale: 1.5, roughness: 0.96 });
+    if (firePit) {
+      firePit.position.set(fireX, terrainHeight(fireX, fireZ), fireZ);
+      group.add(firePit);
+    } else {
+      const ring = new Mesh(new TorusGeometry(0.7, 0.16, 6, 14), createStylizedMaterial({ color: PALETTE.rock.dark, roughness: 0.96, flatShading: true }));
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(fireX, terrainHeight(fireX, fireZ) + 0.12, fireZ);
+      ring.castShadow = true;
+      group.add(ring);
+    }
+    const fireGlow = new MeshStandardMaterial({ color: 0xffa040, emissive: 0xff7a22, emissiveIntensity: 0, roughness: 0.6 });
+    const embers = new Mesh(new SphereGeometry(0.34, 10, 8), fireGlow);
+    embers.scale.set(1.3, 0.55, 1.3);
+    embers.position.set(fireX, terrainHeight(fireX, fireZ) + 0.22, fireZ);
+    group.add(embers);
+    const fireLight = new PointLight(0xff9a4a, 0, 11, 2);
+    fireLight.position.set(fireX, terrainHeight(fireX, fireZ) + 0.9, fireZ);
+    group.add(fireLight);
+    this.campfire = { light: fireLight, glow: fireGlow, position: new Vector3(fireX, terrainHeight(fireX, fireZ) + 0.3, fireZ) };
+    this.colliders.push({ x: fireX, z: fireZ, radius: 1.0 });
 
     // Beach umbrellas and towels near the dunes.
     const dunes = LANDMARKS['beach.dunes'];
@@ -534,29 +666,55 @@ export class Props {
       placements.push({ x, y: sample.height, z, s: rng.range(0.8, 1.6), r: rng.range(0, 6.28) });
     }
 
-    const geometry = new IcosahedronGeometry(1, 0);
-    const material = createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.96, flatShading: true });
-    const mesh = new InstancedMesh(geometry, material, placements.length);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.name = 'Rocks';
+    // Three kit boulders, each its own instanced batch, so a field of rocks
+    // is not one silhouette repeated. Falls back to the faceted blob.
+    const variants = ['props.rock.a', 'props.rock.b', 'props.rock.c']
+      .map((id) => kitGeometry(id))
+      .filter((g): g is NonNullable<typeof g> => !!g);
+    const useKit = variants.length > 0;
+    const geometries = useKit ? variants : [new IcosahedronGeometry(1, 0)];
+    const material = useKit
+      ? kitMaterial({ roughness: 0.96, tint: '#e6e2da' })
+      : createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.96, flatShading: true });
+
+    const meshes = geometries.map((geometry, v) => {
+      const mesh = new InstancedMesh(geometry, material, placements.length);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.name = `Rocks_${v}`;
+      mesh.count = 0;
+      this.group.add(mesh);
+      return mesh;
+    });
 
     placements.forEach((p, i) => {
-      this.dummy.position.set(p.x, p.y + 0.5 * p.s, p.z);
-      this.dummy.rotation.set(rng.range(-0.3, 0.3), p.r, rng.range(-0.3, 0.3));
-      this.dummy.scale.set(p.s * 1.2, p.s * 0.85, p.s);
+      const variant = i % meshes.length;
+      const mesh = meshes[variant];
+      const slot = mesh.count++;
+      if (useKit) {
+        // Kit rocks stand on their base at roughly two metres across, so a
+        // smaller scale range than the unit blob gives the same footprint.
+        const s = p.s * 0.7;
+        this.dummy.position.set(p.x, p.y - 0.08, p.z);
+        this.dummy.rotation.set(rng.range(-0.08, 0.08), p.r, rng.range(-0.08, 0.08));
+        this.dummy.scale.set(s, s * rng.range(0.8, 1.05), s);
+      } else {
+        this.dummy.position.set(p.x, p.y + 0.5 * p.s, p.z);
+        this.dummy.rotation.set(rng.range(-0.3, 0.3), p.r, rng.range(-0.3, 0.3));
+        this.dummy.scale.set(p.s * 1.2, p.s * 0.85, p.s);
+      }
       this.dummy.updateMatrix();
-      mesh.setMatrixAt(i, this.dummy.matrix);
+      mesh.setMatrixAt(slot, this.dummy.matrix);
       this.gatherNodes.push({
         matrix: this.dummy.matrix.clone(),
+        mesh,
         id: `rock_${i}`, kind: 'rock', x: p.x, y: p.y, z: p.z,
-        harvestedOnDay: -99, index: i, hitTimer: 0,
+        harvestedOnDay: -99, index: slot, hitTimer: 0,
       });
-      this.colliders.push({ x: p.x, z: p.z, radius: p.s * 0.9 });
+      this.colliders.push({ x: p.x, z: p.z, radius: p.s * 0.85 });
     });
-    mesh.instanceMatrix.needsUpdate = true;
-    this.rockMesh = mesh;
-    this.group.add(mesh);
+    for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true;
+    this.rockMesh = meshes[0];
   }
 
   private buildDigSpots(rng: Rng): void {
@@ -644,7 +802,7 @@ export class Props {
 
     for (const node of this.gatherNodes) {
       const available = day - node.harvestedOnDay >= cooldowns[node.kind];
-      const mesh = node.kind === 'rock' ? this.rockMesh : node.kind === 'digSpot' ? this.digMesh : this.shellMesh;
+      const mesh = node.mesh ?? (node.kind === 'rock' ? this.rockMesh : node.kind === 'digSpot' ? this.digMesh : this.shellMesh);
       if (!mesh) continue;
 
       if (node.kind === 'digSpot') {
@@ -697,12 +855,24 @@ export class Props {
       // A touch of flicker keeps the lamps from looking like flat emissives.
       const flicker = 1 + Math.sin(time * 7.3 + i * 2.1) * 0.03;
       this.lampLights[i].intensity = glow * 6.0 * flicker;
-      this.lampGlass[i].emissiveIntensity = glow * 2.4 * flicker;
+      this.lampGlass[i].emissiveIntensity = glow * 1.5 * flicker;
     }
     if (this.waterTrough) {
       this.waterTrough.position.y = 0.62 + Math.sin(time * 1.4) * 0.012;
     }
+    if (this.campfire) {
+      const lit = smoothstep(0.3, 0.7, darkness);
+      const flicker = 1 + Math.sin(time * 11.3) * 0.12 + Math.sin(time * 4.1) * 0.08;
+      this.campfire.light.intensity = lit * 9 * flicker;
+      this.campfire.glow.emissiveIntensity = lit * 2.6 * flicker;
+    }
     void dt;
+  }
+
+  /** Where the beach fire burns and how strongly, for particles and audio. */
+  get campfireState(): { position: Vector3; strength: number } | null {
+    if (!this.campfire) return null;
+    return { position: this.campfire.position, strength: this.campfire.light.intensity / 9 };
   }
 
   get occluders(): Object3D[] {

@@ -1,6 +1,6 @@
 import {
   ACESFilmicToneMapping,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
@@ -68,7 +68,9 @@ export class Renderer {
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    // PCF rather than PCFSoft: only the former honours `shadow.radius`, and a
+    // blurred penumbra is what keeps the diorama from reading as hard CG.
+    this.renderer.shadowMap.type = PCFShadowMap;
     this.renderer.setClearColor(0x9fd6ea, 1);
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.classList.add('cc-canvas');
@@ -79,7 +81,7 @@ export class Renderer {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
-    this.bloomPass = new UnrealBloomPass(new Vector2(1, 1), 0.42, 0.75, 0.86);
+    this.bloomPass = new UnrealBloomPass(new Vector2(1, 1), 0.32, 0.6, 0.9);
     this.composer.addPass(this.bloomPass);
 
     this.gradePass = new ShaderPass(GradePass);
@@ -143,7 +145,8 @@ export class Renderer {
     u.uFlash.value = params.flash;
   }
 
-  setBloom(strength: number, radius = 0.75, threshold = 0.86): void {
+  /** Bloom parameters, driven by the lighting rig each frame. */
+  setBloom(strength: number, radius = 0.6, threshold = 0.9): void {
     if (!this.bloomPass) return;
     this.bloomPass.strength = strength;
     this.bloomPass.radius = radius;

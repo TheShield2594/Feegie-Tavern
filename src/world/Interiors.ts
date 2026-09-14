@@ -11,6 +11,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three';
+import { makeKitMesh, softTint } from '@/assets/registry';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { makeItemModel } from '@/items/ItemModels';
@@ -72,8 +73,8 @@ export function createHomeInterior(level: number): InteriorScene {
     trimColor: '#fdf8ec',
     windows: level >= 2 ? 3 : 2,
     lights: level >= 3
-      ? [{ x: -width * 0.22, z: -depth * 0.1 }, { x: width * 0.22, z: -depth * 0.1 }]
-      : [{ x: 0, z: -depth * 0.12 }],
+      ? [{ x: -width * 0.22, z: -depth * 0.1, color: '#ffdcb0' }, { x: width * 0.22, z: -depth * 0.1, color: '#ffdcb0' }]
+      : [{ x: 0, z: -depth * 0.12, color: '#ffdcb0', intensity: 20 }],
   });
 
   const group = new Group();
@@ -121,30 +122,53 @@ export function createHomeInterior(level: number): InteriorScene {
 
   // Wardrobe: where the player changes their look.
   const wardrobe = new Group();
-  const body = new Mesh(roundedBoxGeometry(1.1, 2.0, 0.6, 0.08), createStylizedMaterial({ color: '#b98a58', roughness: 0.86 }));
-  body.position.y = 1.0;
-  body.castShadow = true;
-  wardrobe.add(body);
-  for (const dx of [-0.26, 0.26]) {
-    const knob = new Mesh(new SphereGeometry(0.05, 8, 6), createStylizedMaterial({ color: PALETTE.accent.gold, roughness: 0.35, metalness: 0.6 }));
-    knob.position.set(dx, 1.0, 0.31);
-    wardrobe.add(knob);
+  const kitWardrobe = makeKitMesh('furniture.cabinet', { scale: 0.8, tint: '#e8d8bc', roughness: 0.86 });
+  if (kitWardrobe) {
+    wardrobe.add(kitWardrobe);
+  } else {
+    const body = new Mesh(roundedBoxGeometry(1.1, 2.0, 0.6, 0.08), createStylizedMaterial({ color: '#b98a58', roughness: 0.86 }));
+    body.position.y = 1.0;
+    body.castShadow = true;
+    wardrobe.add(body);
+    for (const dx of [-0.26, 0.26]) {
+      const knob = new Mesh(new SphereGeometry(0.05, 8, 6), createStylizedMaterial({ color: PALETTE.accent.gold, roughness: 0.35, metalness: 0.6 }));
+      knob.position.set(dx, 1.0, 0.31);
+      wardrobe.add(knob);
+    }
   }
   wardrobe.position.copy(anchors.wardrobe);
   group.add(wardrobe);
 
   // Storage chest.
   const chest = new Group();
-  const chestBody = new Mesh(roundedBoxGeometry(0.9, 0.6, 0.6, 0.08), createStylizedMaterial({ color: '#8a6238', roughness: 0.9 }));
-  chestBody.position.y = 0.3;
-  chestBody.castShadow = true;
-  chest.add(chestBody);
-  const lid = new Mesh(new CylinderGeometry(0.31, 0.31, 0.9, 12, 1, false, 0, Math.PI), createStylizedMaterial({ color: '#a8763f', roughness: 0.88 }));
-  lid.rotation.z = Math.PI / 2;
-  lid.position.y = 0.6;
-  chest.add(lid);
+  const kitChest = makeKitMesh('props.chest', { scale: 1.2, roughness: 0.88 });
+  if (kitChest) {
+    chest.add(kitChest);
+  } else {
+    const chestBody = new Mesh(roundedBoxGeometry(0.9, 0.6, 0.6, 0.08), createStylizedMaterial({ color: '#8a6238', roughness: 0.9 }));
+    chestBody.position.y = 0.3;
+    chestBody.castShadow = true;
+    chest.add(chestBody);
+    const lid = new Mesh(new CylinderGeometry(0.31, 0.31, 0.9, 12, 1, false, 0, Math.PI), createStylizedMaterial({ color: '#a8763f', roughness: 0.88 }));
+    lid.rotation.z = Math.PI / 2;
+    lid.position.y = 0.6;
+    chest.add(lid);
+  }
   chest.position.copy(anchors.storage);
   group.add(chest);
+
+  // A rug by the hearth and a small plant by the door, so an unfurnished
+  // cottage still reads as lived in rather than a display box.
+  const hearthRug = makeKitMesh('furniture.rugRound', { scale: 1.1, tint: '#e4c4b0' });
+  if (hearthRug) {
+    hearthRug.position.set(0, 0.005, -depth / 2 + 2.4);
+    group.add(hearthRug);
+  }
+  const doorPlant = makeKitMesh('furniture.plantSmall', { scale: 1.4 });
+  if (doorPlant) {
+    doorPlant.position.set(layout.gridHalfW - 0.9, 0, layout.gridHalfD - 1.0);
+    group.add(doorPlant);
+  }
 
   // Kitchen counter, for cooking.
   const kitchen = new Group();
@@ -202,35 +226,62 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
   const width = 36;
   const depth = 28;
 
+  // A museum is the one room that should feel dim and precious: deep walls,
+  // a warm floor, and light concentrated on the cases rather than the ceiling.
   const room = buildRoom({
     name: 'Museum',
     width,
     depth,
-    height: 6.2,
-    floor: 'tile',
-    wallColor: '#e8e2d4',
-    trimColor: '#f8f5ec',
+    height: 5.8,
+    floor: 'plank',
+    wallColor: '#5a6e78',
+    trimColor: '#e9dcc3',
     windows: 4,
     doorwayWidth: 2.6,
     lights: [
-      { x: 0, z: 8, intensity: 14 },
-      { x: -12, z: -4, intensity: 10, color: '#cfe8f5' },
-      { x: 12, z: -4, intensity: 10, color: '#e2f5cf' },
-      { x: -12, z: -16, intensity: 10, color: '#f5e6cf' },
-      { x: 12, z: -16, intensity: 10, color: '#cfd9f5' },
+      { x: 0, z: 8, intensity: 16, color: '#ffe2b8' },
+      { x: -12, z: -4, intensity: 12, color: '#cfe8f5' },
+      { x: 12, z: -4, intensity: 12, color: '#e2f5cf' },
+      { x: -12, z: -16, intensity: 12, color: '#f5e6cf' },
+      { x: 12, z: -16, intensity: 12, color: '#cfd9f5' },
     ],
   });
 
   const group = new Group();
   group.add(room.group);
 
-  const colliders: { x: number; z: number; radius: number }[] = [];
+  // Lobby dressing: a runner from the door to the desk, benches to sit on,
+  // planters either side of the entrance.
+  const runner = makeKitMesh('furniture.rug', { scale: 1.6, tint: '#b6584e' });
+  if (runner) {
+    runner.position.set(0, 0.006, 9.6);
+    runner.rotation.y = Math.PI / 2;
+    runner.scale.set(1.3, 1, 2.1);
+    group.add(runner);
+  }
+  const lobbyColliders: { x: number; z: number; radius: number }[] = [];
+  for (const side of [-1, 1]) {
+    const bench = makeKitMesh('furniture.sofa', { scale: 1.05, tint: '#cdb79a' });
+    if (bench) {
+      bench.position.set(side * 5.2, 0, 9.8);
+      bench.rotation.y = -side * Math.PI / 2;
+      group.add(bench);
+      lobbyColliders.push({ x: side * 5.2, z: 9.8, radius: 1.1 });
+    }
+    const planter = makeKitMesh('furniture.plant', { scale: 1.1 });
+    if (planter) {
+      planter.position.set(side * 2.4, 0, 12.6);
+      group.add(planter);
+    }
+  }
+
+  const colliders: { x: number; z: number; radius: number }[] = [...lobbyColliders];
   const exhibits: ExhibitSlot[] = [];
   const wingLights: SpotLight[] = [];
 
   // Partition walls that make four wings out of one hall while keeping it
   // walkable — the player can see every wing from the lobby.
-  const partitionMaterial = createStylizedMaterial({ color: '#ded7c8', roughness: 0.92 });
+  const partitionMaterial = createStylizedMaterial({ color: '#6c7f88', roughness: 0.92 });
   for (const [dx, dz, w, d] of [
     [-6.5, -10, 0.5, 14],
     [6.5, -10, 0.5, 14],
@@ -247,16 +298,41 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
 
   // Curator desk in the lobby.
   const desk = new Group();
-  const deskTop = new Mesh(roundedBoxGeometry(3.2, 1.1, 1.1, 0.1), createStylizedMaterial({ color: '#a8763f', roughness: 0.85 }));
-  deskTop.position.y = 0.55;
-  deskTop.castShadow = true;
-  desk.add(deskTop);
+  const kitDesk = makeKitMesh('furniture.desk', { scale: 1.45, tint: '#c8a882' });
+  if (kitDesk) {
+    kitDesk.rotation.y = Math.PI;
+    desk.add(kitDesk);
+  } else {
+    const deskTop = new Mesh(roundedBoxGeometry(3.2, 1.1, 1.1, 0.1), createStylizedMaterial({ color: '#a8763f', roughness: 0.85 }));
+    deskTop.position.y = 0.55;
+    deskTop.castShadow = true;
+    desk.add(deskTop);
+  }
   const ledger = new Mesh(roundedBoxGeometry(0.5, 0.06, 0.36, 0.02), createStylizedMaterial({ color: '#f4ecd8', roughness: 0.9 }));
   ledger.position.set(0.6, 1.13, 0.1);
   desk.add(ledger);
+  const deskLamp = makeKitMesh('furniture.lamp', { scale: 1.1 });
+  if (deskLamp) {
+    deskLamp.position.set(-0.7, 1.08, -0.1);
+    desk.add(deskLamp);
+  }
   desk.position.set(0, 0, 6.5);
   group.add(desk);
   colliders.push({ x: 0, z: 6.5, radius: 1.9 });
+
+  // The donation pedestal: a lit brass plinth in front of the desk, where
+  // the prompt to donate lives and where new pieces sparkle in.
+  const pedestal = new Mesh(new CylinderGeometry(0.42, 0.5, 0.9, 16), createStylizedMaterial({ color: '#4e5b63', roughness: 0.6, metalness: 0.2 }));
+  pedestal.position.set(0, 0.45, 4.2);
+  pedestal.castShadow = true;
+  group.add(pedestal);
+  const pedestalCap = new Mesh(new CylinderGeometry(0.5, 0.42, 0.08, 16), createStylizedMaterial({ color: PALETTE.accent.gold, roughness: 0.35, metalness: 0.6 }));
+  pedestalCap.position.set(0, 0.92, 4.2);
+  group.add(pedestalCap);
+  const pedestalLight = new PointLight('#ffe2a8', 4, 5, 2);
+  pedestalLight.position.set(0, 2.2, 4.2);
+  group.add(pedestalLight);
+  colliders.push({ x: 0, z: 4.2, radius: 0.7 });
 
   const anchors: Record<string, Vector3> = {
     exit: room.exit.clone(),
@@ -271,9 +347,27 @@ export function createMuseumInterior(museum: Museum): InteriorScene {
     group.add(wingGroup);
     anchors[`wing.${wingId}`] = new Vector3(layout.x, 0, layout.z + 3.5);
 
-    const sign = makeSign({ text: layout.label, width: 3.4, height: 0.62, boardColor: '#f6f0e2' });
+    const sign = makeSign({ text: layout.label, width: 3.4, height: 0.62, boardColor: '#f6f0e2', textColor: '#3a4a52' });
     sign.position.set(0, 4.0, 4.4);
     wingGroup.add(sign);
+
+    // A hanging banner in the wing's colour, so each hall reads from the lobby.
+    const banner = new Mesh(
+      new BoxGeometry(1.4, 3.0, 0.06),
+      createStylizedMaterial({ color: layout.accent, roughness: 0.9 }),
+    );
+    banner.position.set(-2.9, 3.6, 4.4);
+    banner.castShadow = true;
+    wingGroup.add(banner);
+    const bannerTail = new Mesh(new BoxGeometry(1.4, 0.5, 0.06), createStylizedMaterial({ color: '#f6f0e2', roughness: 0.9 }));
+    bannerTail.position.set(-2.9, 1.95, 4.4);
+    wingGroup.add(bannerTail);
+
+    const wingRug = makeKitMesh('furniture.rugRound', { scale: 2.2, tint: softTint(layout.accent, 0.35) });
+    if (wingRug) {
+      wingRug.position.set(0, 0.006, -0.2);
+      wingGroup.add(wingRug);
+    }
 
     // A soft key light per wing so each reads as its own space.
     const spot = new SpotLight(new Color(layout.accent), 0, 22, 0.72, 0.55, 1.2);
@@ -430,12 +524,18 @@ function buildExhibitSlot(wing: MuseumWing, species: SpeciesDef, index: number, 
 
   const plinth = new Mesh(
     roundedBoxGeometry(1.2, 1.0, 1.0, 0.08),
-    createStylizedMaterial({ color: '#d8d1c2', roughness: 0.9 }),
+    createStylizedMaterial({ color: '#6b4d3a', roughness: 0.82 }),
   );
   plinth.position.y = 0.5;
   plinth.castShadow = true;
   plinth.receiveShadow = true;
   root.add(plinth);
+  const trim = new Mesh(
+    roundedBoxGeometry(1.26, 0.06, 1.06, 0.04),
+    createStylizedMaterial({ color: PALETTE.accent.gold, roughness: 0.4, metalness: 0.5 }),
+  );
+  trim.position.y = 1.0;
+  root.add(trim);
 
   if (wing === 'aquarium' || wing === 'oceanGallery') {
     // A glass tank with visible water rather than an open case.
@@ -613,9 +713,19 @@ export function createShopInterior(): InteriorScene {
       shelf.castShadow = true;
       group.add(shelf);
       for (let i = 0; i < 6; i++) {
+        const tints = ['#c9784f', '#7fa86a', '#7fa8c4', '#e0b45f'];
+        const kitBox = (i + level) % 3 === 0
+          ? makeKitMesh('props.bucket', { scale: 0.7 })
+          : makeKitMesh('props.crate', { scale: 0.55, tint: softTint(tints[i % 4], 0.5) });
+        if (kitBox) {
+          kitBox.position.set(side * 5.5, 0.74 + level * 0.75, -2.2 + i * 0.95);
+          kitBox.rotation.y = (i * 1.3) % 1.2;
+          group.add(kitBox);
+          continue;
+        }
         const crate = new Mesh(
           roundedBoxGeometry(0.4, 0.32, 0.4, 0.04),
-          createStylizedMaterial({ color: ['#c9784f', '#7fa86a', '#7fa8c4', '#e0b45f'][i % 4], roughness: 0.9 }),
+          createStylizedMaterial({ color: tints[i % 4], roughness: 0.9 }),
         );
         crate.position.set(side * 5.5, 0.9 + level * 0.75, -2.2 + i * 0.95);
         crate.castShadow = true;
@@ -623,6 +733,21 @@ export function createShopInterior(): InteriorScene {
       }
     }
     colliders.push({ x: side * 5.5, z: 0.4, radius: 0.8 });
+  }
+
+  // Floor stock: barrels by the counter and a sack-stand of produce.
+  for (const [x, z, r] of [[-3.4, -3.6, 0.3], [-2.6, -3.9, 1.1], [3.6, -3.7, 0.6]] as [number, number, number][]) {
+    const barrel = makeKitMesh('props.barrel', { scale: 1.05 });
+    if (!barrel) break;
+    barrel.position.set(x, 0, z);
+    barrel.rotation.y = r;
+    group.add(barrel);
+    colliders.push({ x, z, radius: 0.5 });
+  }
+  const shopRug = makeKitMesh('furniture.rug', { scale: 1.2, tint: '#d8b9a0' });
+  if (shopRug) {
+    shopRug.position.set(0, 0.005, 1.4);
+    group.add(shopRug);
   }
 
   const sign = makeSign({ text: 'Bruno’s', width: 2.6, height: 0.6, boardColor: '#f2e2c4' });
@@ -658,10 +783,30 @@ export function createTownHallInterior(): InteriorScene {
   group.add(room.group);
   const colliders: { x: number; z: number; radius: number }[] = [];
 
-  const desk = new Mesh(roundedBoxGeometry(4.4, 1.1, 1.3, 0.1), createStylizedMaterial({ color: '#7fa86a', roughness: 0.86 }));
-  desk.position.set(0, 0.55, -3.4);
-  desk.castShadow = true;
-  group.add(desk);
+  const kitDesk = makeKitMesh('furniture.desk', { scale: 1.3, tint: '#d8ddc8' });
+  if (kitDesk) {
+    kitDesk.position.set(0, 0, -3.4);
+    kitDesk.rotation.y = Math.PI;
+    group.add(kitDesk);
+    const chair = makeKitMesh('furniture.chairSoft', { scale: 1.0, tint: '#c9d8bc' });
+    if (chair) {
+      chair.position.set(0, 0, -4.4);
+      group.add(chair);
+    }
+    for (const side of [-1, 1]) {
+      const bench = makeKitMesh('furniture.sofa', { scale: 1.0, tint: '#d2c7ae' });
+      if (!bench) break;
+      bench.position.set(side * 4.6, 0, 0.4);
+      bench.rotation.y = -side * Math.PI / 2;
+      group.add(bench);
+      colliders.push({ x: side * 4.6, z: 0.4, radius: 1.1 });
+    }
+  } else {
+    const desk = new Mesh(roundedBoxGeometry(4.4, 1.1, 1.3, 0.1), createStylizedMaterial({ color: '#7fa86a', roughness: 0.86 }));
+    desk.position.set(0, 0.55, -3.4);
+    desk.castShadow = true;
+    group.add(desk);
+  }
   colliders.push({ x: 0, z: -3.4, radius: 2.4 });
 
   // A model of the island on a plinth — the town-progress fantasy made literal.
@@ -709,6 +854,56 @@ export function createVillagerHomeInterior(villagerId: string, accent: string): 
   const colliders: { x: number; z: number; radius: number }[] = [];
 
   // A small, characterful set: bed, table, rug, and one accent piece.
+  const kitBed = makeKitMesh('furniture.bed', { scale: 1.05, tint: softTint(accent, 0.5) });
+  if (kitBed) {
+    kitBed.position.set(-2.6, 0, -1.8);
+    kitBed.rotation.y = Math.PI;
+    group.add(kitBed);
+    colliders.push({ x: -2.6, z: -1.8, radius: 1.2 });
+    const kitTable = makeKitMesh('furniture.tableLow', { scale: 1.0 });
+    if (kitTable) {
+      kitTable.position.set(2.2, 0, -0.6);
+      group.add(kitTable);
+      colliders.push({ x: 2.2, z: -0.6, radius: 0.85 });
+    }
+    const kitChair = makeKitMesh('furniture.chair', { scale: 1.0 });
+    if (kitChair) {
+      kitChair.position.set(2.2, 0, -1.6);
+      group.add(kitChair);
+    }
+    const rugKit = makeKitMesh('furniture.rugRound', { scale: 1.2, tint: softTint(accent, 0.6) });
+    if (rugKit) {
+      rugKit.position.set(0, 0.005, 1.2);
+      group.add(rugKit);
+    }
+    const shelfKit = makeKitMesh('furniture.shelf', { scale: 0.95 });
+    if (shelfKit) {
+      shelfKit.position.set(0.4, 0, -3.1);
+      group.add(shelfKit);
+      colliders.push({ x: 0.4, z: -3.1, radius: 0.6 });
+    }
+    const lampKit = makeKitMesh('furniture.lampTable', { scale: 1 }) ?? makeKitMesh('furniture.lamp', { scale: 1.1 });
+    if (lampKit) {
+      lampKit.position.set(2.5, 0.46, -0.75);
+      group.add(lampKit);
+    }
+    const plantKit = makeKitMesh('furniture.plant', { scale: 0.9 });
+    if (plantKit) {
+      plantKit.position.set(-3.4, 0, 2.2);
+      group.add(plantKit);
+    }
+    return {
+      id: `npcHome.${villagerId}`,
+      group,
+      room,
+      colliders,
+      anchors: { exit: room.exit.clone() },
+      ambience: 'interior',
+      music: 'music.home',
+      title: 'A Neighbour’s Home',
+    };
+  }
+
   const bed = new Group();
   const frame = new Mesh(roundedBoxGeometry(1.3, 0.36, 2.1, 0.08), createStylizedMaterial({ color: '#a8763f', roughness: 0.88 }));
   frame.position.y = 0.3;

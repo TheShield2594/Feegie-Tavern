@@ -47,21 +47,70 @@ export class VillagerManager {
         villager.def.schedule[0],
       );
       const target = LANDMARKS[entry.at];
-      if (target) villager.goTo(target.x, target.z, entry.activity);
-      villager.position.x = target?.x ?? villager.position.x;
-      villager.position.z = target?.z ?? villager.position.z;
+      if (!target) continue;
+      // Anchors can sit inside an obstacle (the fountain); stand beside it.
+      const spot = this.navigation.snapToOpen(target.x + villager.anchorOffset.x, target.z + villager.anchorOffset.z);
+      villager.snapTo(spot.x, spot.z, entry.activity);
     }
     this.lastHour = hour;
   }
+
+  private chatTimer = 0;
 
   update(dt: number, hour: number, playerPosition: Vector3): void {
     if (hour !== this.lastHour) {
       this.lastHour = hour;
       for (const villager of this.villagers.values()) villager.applySchedule(hour);
     }
+    this.pairChats(dt);
     for (const villager of this.villagers.values()) {
       villager.update(dt, hour, playerPosition);
     }
+  }
+
+  /**
+   * Two idle neighbours standing near each other fall into conversation.
+   * Re-evaluated every couple of seconds; a pair breaks up as soon as either
+   * walks off, starts talking to the player, or their schedule moves them.
+   */
+  private pairChats(dt: number): void {
+    this.chatTimer -= dt;
+    if (this.chatTimer > 0) return;
+    this.chatTimer = 2;
+    const all = [...this.villagers.values()];
+    for (const v of all) {
+      const partner = v.chattingWith;
+      if (!partner) continue;
+      const still = v.activity === 'idle' && partner.activity === 'idle' && !v.talking && !partner.talking
+        && !v.isMoving && !partner.isMoving && v.position.distanceToSquared(partner.position) < 5.5 * 5.5;
+      if (!still) {
+        v.endChat();
+        partner.endChat();
+      }
+    }
+    for (let i = 0; i < all.length; i++) {
+      const a = all[i];
+      if (a.chattingWith || a.activity !== 'idle' || a.talking || a.isMoving) continue;
+      for (let j = i + 1; j < all.length; j++) {
+        const b = all[j];
+        if (b.chattingWith || b.activity !== 'idle' || b.talking || b.isMoving) continue;
+        if (a.position.distanceToSquared(b.position) > 4.5 * 4.5) continue;
+        a.beginChat(b);
+        b.beginChat(a);
+        break;
+      }
+    }
+  }
+
+  /** Everyone within `radius` of a point answers a greeting. */
+  greetFrom(position: Vector3, radius = 7): number {
+    let count = 0;
+    for (const villager of this.villagers.values()) {
+      if (villager.position.distanceToSquared(position) > radius * radius) continue;
+      villager.greetBack();
+      count += 1;
+    }
+    return count;
   }
 
   /** Nearest villager within range, for the interaction system. */

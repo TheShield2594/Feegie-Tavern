@@ -129,6 +129,49 @@ export const CREEK = {
 /** Where the creek is bridged, so the path stays walkable. */
 export const BRIDGES = [{ x: -34, z: 7, rotation: Math.PI / 2 - 0.22, width: 8, length: 4.5 }];
 
+/** Deck height of the harbour pier above sea level, shared with `Props`. */
+export const PIER_DECK_HEIGHT = 1.7;
+/** Pier decking runs from this far short of the harbour landmark... */
+export const PIER_START = -4.5;
+/** ...to this far past it, along +Z. */
+export const PIER_END = 22.5;
+
+/**
+ * A built surface the player stands on *above* the terrain: the pier decking.
+ *
+ * Platforms live outside `terrainHeight` on purpose. The terrain mesh, the
+ * water's baked depth texture and the fish all read the raw heightfield, so
+ * a platform folded into it would raise a block of seabed under the pier and
+ * draw foam around it. Only the things that walk consult platforms.
+ */
+export interface Platform {
+  x: number;
+  z: number;
+  halfW: number;
+  halfD: number;
+  height: number;
+  surface: Surface;
+}
+
+export const PLATFORMS: Platform[] = [
+  {
+    x: HARBOUR.x,
+    z: HARBOUR.z + (PIER_START + PIER_END) / 2,
+    halfW: 2.3,
+    halfD: (PIER_END - PIER_START) / 2,
+    height: PIER_DECK_HEIGHT,
+    surface: 'wood',
+  },
+];
+
+/** The platform under a point, if any. */
+export function platformAt(x: number, z: number): Platform | null {
+  for (const p of PLATFORMS) {
+    if (Math.abs(x - p.x) <= p.halfW && Math.abs(z - p.z) <= p.halfD) return p;
+  }
+  return null;
+}
+
 function distanceToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
   const dx = bx - ax;
   const dz = bz - az;
@@ -182,9 +225,12 @@ function baseElevation(x: number, z: number): number {
   if (mask <= 0) {
     // Seabed: slope away from *this* stretch of coast, so a bay shelves as
     // gently as it should while the open water still goes properly deep.
+    // It starts a hair under sea level right at the coast and meets the beach
+    // shelf continuously; the half-metre ledge it used to start from drew a
+    // stair-stepped waterline out of the terrain triangles.
     const d = Math.hypot(x, z);
-    const drop = smoothstep(0, 22, d - coastRadius(x, z));
-    return lerp(-0.5, SEABED_FLOOR, drop);
+    const drop = smoothstep(-1.5, 24, d - coastRadius(x, z));
+    return lerp(0, SEABED_FLOOR, drop);
   }
 
   const rolling = fbm2D(x * 0.012, z * 0.012, 4, SHAPE_SEED) * 7.5;
@@ -327,9 +373,27 @@ export function sampleSurface(x: number, z: number): SurfaceSample {
   return { height, surface, slope };
 }
 
+/**
+ * What a character standing at a point is standing on: a platform where one
+ * exists, the terrain everywhere else. Movement, footsteps, NPC grounding and
+ * item drops read this; meshing reads `sampleSurface` directly.
+ */
+export function sampleWalkSurface(x: number, z: number): SurfaceSample {
+  const platform = platformAt(x, z);
+  if (platform) return { height: platform.height, surface: platform.surface, slope: 0 };
+  return sampleSurface(x, z);
+}
+
+/** Height a character's feet rest at: deck over the pier, ground elsewhere. */
+export function walkHeight(x: number, z: number): number {
+  return platformAt(x, z)?.height ?? terrainHeight(x, z);
+}
+
 /** Cheap walkability test used by movement and by NPC navigation. */
 export function isWalkable(x: number, z: number): boolean {
   if (Math.abs(x) > ISLAND_HALF - 2 || Math.abs(z) > ISLAND_HALF - 2) return false;
+  // Decking is walkable regardless of the water beneath it.
+  if (platformAt(x, z)) return true;
   const sample = sampleSurface(x, z);
   // Waist-deep water and cliff faces are out; shallow shoreline is fine.
   if (sample.height < SEA_LEVEL - 0.55) return false;

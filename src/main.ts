@@ -48,29 +48,53 @@ function reportFailure(message: string, detail?: unknown): void {
  * optional, so it must never look like an error when they fail.
  */
 function showLoading(): { progress: (done: number, total: number) => void; done: () => void } {
-  const el = document.createElement('div');
-  el.style.cssText = `
-    position:fixed;inset:0;display:grid;place-items:center;
-    background:#141d2c;color:#f4ecdc;font:15px/1.6 system-ui,sans-serif;z-index:50;
-  `;
+  const bar = document.createElement('i');
+  const fill = document.createElement('div');
+  fill.className = 'cc-boot-bar';
+  fill.append(bar);
+
   const label = document.createElement('p');
-  label.textContent = 'Loading Cozy Cove…';
-  el.append(label);
+  label.className = 'cc-boot-label';
+  label.textContent = 'Setting out the island…';
+
+  const tips = [
+    'Shake a tree you have already picked — sometimes a bug falls out.',
+    'Fish come up under the rain. Pip swears by it.',
+    'Press 1 to wave. Neighbours wave back.',
+    'Star-shaped cracks in the soil hide fossils.',
+    'Bruno pays fair for duplicates, and nothing for your first of anything.',
+    'Lamps come on at dusk. The square is best just after.',
+  ];
+  const tip = document.createElement('p');
+  tip.className = 'cc-boot-tip';
+  tip.textContent = tips[Math.floor(Math.random() * tips.length)];
+
+  const card = document.createElement('div');
+  card.className = 'cc-boot-card';
+  const mark = document.createElement('div');
+  mark.className = 'cc-boot-mark';
+  mark.innerHTML = '<svg viewBox="0 0 76 76" width="56" height="56" aria-hidden="true"><path d="M40 6C22 10 8 24 8 42c0 12 8 22 20 24 2-20 12-36 30-48-8 18-14 34-16 48 16-4 26-18 26-36C68 16 56 8 40 6Z" fill="#6f9a55"/><path d="M38 66c2-14 8-30 16-48-18 12-28 28-30 48" fill="#8fbf6a"/></svg>';
+  const title = document.createElement('h1');
+  title.textContent = 'Cozy Cove';
+  card.append(mark, title, fill, label, tip);
+
+  const el = document.createElement('div');
+  el.id = 'boot';
+  el.append(card);
   document.body.append(el);
+
   return {
     progress: (done, total) => {
-      label.textContent = total > 0 ? `Loading Cozy Cove… ${done}/${total}` : 'Loading Cozy Cove…';
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      bar.style.width = `${Math.max(6, pct)}%`;
+      label.textContent = total > 0 && done < total ? `Unpacking the kits… ${done}/${total}` : 'Nearly there…';
     },
-    done: () => el.remove(),
+    done: () => {
+      bar.style.width = '100%';
+      el.classList.add('leaving');
+      window.setTimeout(() => el.remove(), 480);
+    },
   };
-}
-
-// Fail with an explanation rather than a blank canvas when WebGL is missing.
-const probe = document.createElement('canvas');
-if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
-  reportFailure('Your browser did not provide a WebGL context.');
-} else {
-  void boot(container);
 }
 
 /**
@@ -79,6 +103,14 @@ if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
  * stalled request does not read as a hung game.
  */
 const ASSET_DEADLINE_MS = 15_000;
+
+// Fail with an explanation rather than a blank canvas when WebGL is missing.
+const probe = document.createElement('canvas');
+if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
+  reportFailure('Your browser did not provide a WebGL context.');
+} else {
+  void boot(container);
+}
 
 /**
  * Starts the game: loads the optional asset kits, then constructs `Game`.

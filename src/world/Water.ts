@@ -66,6 +66,7 @@ export class Water {
         varying vec3 vWorldPos;
         varying float vDepth;
         varying vec3 vNormal;
+        varying float vCrest;
 
         // Terrain height is stored as a plain 8-bit channel rather than a float
         // texture, because float textures are not filterable everywhere.
@@ -82,7 +83,9 @@ export class Water {
           float a = sin(p.x * 0.085 + t * 0.85) * cos(p.y * 0.062 - t * 0.6);
           float b = sin((p.x * 0.041 - p.y * 0.052) + t * 1.25);
           float c = sin(p.x * 0.31 + t * 2.3) * cos(p.y * 0.28 - t * 1.9);
-          float amp = mix(0.06, 0.42, shore) * (0.55 + uWind * 0.9);
+          // Flat at the waterline: any vertical motion there drags the
+          // shoreline back and forth across the coarse grid as a sawtooth.
+          float amp = mix(0.0, 0.42, shore) * (0.55 + uWind * 0.9);
           return vec3(0.0, (a * 0.55 + b * 0.32 + c * 0.13) * amp * uChoppiness * 3.0, 0.0);
         }
 
@@ -101,6 +104,9 @@ export class Water {
           float hx = waveOffset(world.xz + vec2(e, 0.0), shore).y - offset.y;
           float hz = waveOffset(world.xz + vec2(0.0, e), shore).y - offset.y;
           vNormal = normalize(vec3(-hx, e, -hz));
+          // How far up its own swell this vertex sits, for crest highlights.
+          float amp = mix(0.0, 0.42, shore) * (0.55 + uWind * 0.9) * uChoppiness * 3.0;
+          vCrest = clamp(offset.y / max(0.02, amp), -1.0, 1.0);
 
           vWorldPos = world.xyz;
           gl_Position = projectionMatrix * viewMatrix * world;
@@ -121,6 +127,7 @@ export class Water {
         varying vec3 vWorldPos;
         varying float vDepth;
         varying vec3 vNormal;
+        varying float vCrest;
 
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float noise(vec2 p) {
@@ -136,8 +143,18 @@ export class Water {
           vec3 normal = normalize(vNormal);
 
           // Depth ramp: turquoise over sand, deepening to navy off the shelf.
-          vec3 color = mix(uShallow, uMid, smoothstep(0.15, 1.7, vDepth));
-          color = mix(color, uDeep, smoothstep(1.5, 5.5, vDepth));
+          vec3 color = mix(uShallow, uMid, smoothstep(0.15, 1.9, vDepth));
+          color = mix(color, uDeep, smoothstep(1.6, 6.0, vDepth));
+
+          // Caustic shimmer over the sand: two drifting noise fields that
+          // only agree in bright threads, fading out where the bed is deep.
+          float c1 = noise(vWorldPos.xz * 1.9 + vec2(uTime * 0.21, -uTime * 0.17));
+          float c2 = noise(vWorldPos.xz * 2.3 - vec2(uTime * 0.13, uTime * 0.19) + 7.3);
+          float caustic = smoothstep(0.62, 0.9, c1 * 0.5 + c2 * 0.5) * (1.0 - smoothstep(0.4, 2.4, vDepth));
+          color += caustic * 0.16;
+
+          // Crests pick up a little of the sky.
+          color = mix(color, uSkyColor, smoothstep(0.35, 1.0, vCrest) * 0.14 * smoothstep(0.3, 2.0, vDepth));
 
           // Fresnel sky reflection — the single biggest cue that this is water.
           float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.4);
@@ -152,21 +169,23 @@ export class Water {
 
           // Shoreline foam: a band that follows the depth contour, chewed up by
           // noise and pushed in and out with the swell.
-          float tideOffset = sin(uTime * 0.55 + vWorldPos.x * 0.05) * 0.12;
-          float foamBand = 1.0 - smoothstep(0.02, 0.48 + tideOffset, vDepth);
+          float tideOffset = sin(uTime * 0.55 + vWorldPos.x * 0.05) * 0.1;
+          float foamBand = 1.0 - smoothstep(0.02, 0.36 + tideOffset, vDepth);
           float foamNoise = noise(vWorldPos.xz * 1.5 + vec2(uTime * 0.35, uTime * 0.22));
           float foamNoise2 = noise(vWorldPos.xz * 4.1 - vec2(uTime * 0.5, 0.0));
-          float foam = foamBand * smoothstep(0.28, 0.78, foamNoise * 0.6 + foamNoise2 * 0.4);
-          // A hard lip right at the waterline.
-          foam += (1.0 - smoothstep(0.0, 0.14, vDepth)) * 0.75;
-          color = mix(color, uFoam, clamp(foam, 0.0, 1.0) * 0.92);
+          float foam = foamBand * smoothstep(0.3, 0.8, foamNoise * 0.6 + foamNoise2 * 0.4);
+          // A soft lip right at the waterline, broken by the same noise.
+          foam += (1.0 - smoothstep(0.0, 0.2, vDepth)) * (0.4 + foamNoise2 * 0.35);
+          // Wisps of foam on the biggest crests further out.
+          foam += smoothstep(0.7, 1.0, vCrest) * smoothstep(0.55, 0.8, foamNoise2) * 0.35 * smoothstep(0.8, 3.0, vDepth);
+          color = mix(color, uFoam, clamp(foam, 0.0, 1.0) * 0.88);
 
           // Streaks of surface texture out in open water.
           float streak = noise(vWorldPos.xz * 0.35 + vec2(uTime * 0.08, 0.0));
           color += (streak - 0.5) * 0.05 * uWind;
 
           // The shallows are translucent so the sand shows through.
-          float alpha = mix(0.5, uOpacity, smoothstep(0.0, 1.2, vDepth));
+          float alpha = mix(0.42, uOpacity, smoothstep(0.0, 1.5, vDepth));
           alpha = max(alpha, clamp(foam, 0.0, 1.0));
 
           gl_FragColor = vec4(color, alpha);

@@ -24,6 +24,7 @@ import {
   makeStreetLamp,
   makeWindow,
   roundedBoxGeometry,
+  surfaces,
 } from './BuildingKit';
 import { terrainHeight } from './heightfield';
 
@@ -158,6 +159,8 @@ export interface BuildingInstance {
   lampLights: PointLight[];
   lampGlass: MeshStandardMaterial[];
   beacon?: { light: SpotLight; glass: MeshStandardMaterial; pivot: Object3D };
+  /** World position of the chimney mouth, for smoke. */
+  chimney?: Vector3;
   /** Collision footprint, axis-aligned in local space then rotated. */
   collider: { x: number; z: number; halfW: number; halfD: number; rotation: number };
 }
@@ -186,10 +189,12 @@ export class Buildings {
     const ground = terrainHeight(config.x, config.z);
     group.position.set(config.x, ground, config.z);
     group.rotation.y = config.rotation;
+    group.updateMatrixWorld(true);
 
     const windows: MeshStandardMaterial[] = [];
     const lampLights: PointLight[] = [];
     const lampGlass: MeshStandardMaterial[] = [];
+    let chimneyTop: Vector3 | null = null;
 
     if (config.roof === 'tower') {
       const result = this.buildLighthouse(config, group, windows);
@@ -208,7 +213,7 @@ export class Buildings {
     // --- Foundation --------------------------------------------------------
     const plinth = new Mesh(
       roundedBoxGeometry(config.width + 0.5, 0.45, config.depth + 0.5, 0.2),
-      createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.95, flatShading: true }),
+      surfaces.stone(PALETTE.rock.light),
     );
     plinth.position.y = -0.2;
     plinth.receiveShadow = true;
@@ -218,12 +223,37 @@ export class Buildings {
     // --- Walls -------------------------------------------------------------
     const body = new Mesh(
       roundedBoxGeometry(config.width, config.wallHeight, config.depth, 0.28),
-      createStylizedMaterial({ color: config.bodyColor, roughness: 0.9 }),
+      surfaces.plaster(config.bodyColor),
     );
     body.position.y = 0.25 + config.wallHeight / 2;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
+
+    // Eave shadow: a translucent dark band just under the roof line. The sun
+    // rarely rakes low enough to draw this itself, and without it a wall meets
+    // its roof as flatly as two coloured boxes.
+    const eave = new Mesh(
+      roundedBoxGeometry(config.width + 0.03, 0.55, config.depth + 0.03, 0.28),
+      new MeshStandardMaterial({ color: 0x1a1612, transparent: true, opacity: 0.16, depthWrite: false, roughness: 1 }),
+    );
+    eave.position.y = config.wallHeight - 0.05;
+    eave.renderOrder = 1;
+    group.add(eave);
+
+    // Corner boards on the cottages give the walls a timber frame to hang on.
+    const isCivic = config.id === 'museum' || config.id === 'townHall';
+    if (!isCivic) {
+      const boardMaterial = createStylizedMaterial({ color: config.trimColor, roughness: 0.86 });
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const board = new Mesh(roundedBoxGeometry(0.24, config.wallHeight + 0.1, 0.24, 0.05), boardMaterial);
+          board.position.set(sx * (config.width / 2 - 0.02), 0.25 + config.wallHeight / 2, sz * (config.depth / 2 - 0.02));
+          board.castShadow = true;
+          group.add(board);
+        }
+      }
+    }
 
     // A trim band under the eaves ties the palette together.
     const band = new Mesh(
@@ -235,7 +265,7 @@ export class Buildings {
     group.add(band);
 
     // --- Roof --------------------------------------------------------------
-    const roofMaterial = createStylizedMaterial({ color: config.roofColor, roughness: 0.86, flatShading: true });
+    const roofMaterial = surfaces.roof(config.roofColor);
     const roofRise = config.roof === 'hip' ? config.depth * 0.34 : config.depth * 0.46;
     const roofGeometry = config.roof === 'hip'
       ? hipRoofGeometry(config.width, config.depth, roofRise, 0.65)
@@ -261,7 +291,7 @@ export class Buildings {
     if (config.id !== 'museum' && config.id !== 'townHall') {
       const chimney = new Mesh(
         roundedBoxGeometry(0.7, config.wallHeight * 0.55 + roofRise, 0.7, 0.1),
-        createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.95, flatShading: true }),
+        surfaces.stone(PALETTE.rock.light),
       );
       chimney.position.set(
         config.width * 0.26,
@@ -280,6 +310,7 @@ export class Buildings {
         chimney.position.z,
       );
       group.add(cap);
+      chimneyTop = new Vector3(cap.position.x, cap.position.y + 0.2, cap.position.z);
     }
 
     // --- Door --------------------------------------------------------------
@@ -369,6 +400,7 @@ export class Buildings {
       private_windows: windows,
       lampLights,
       lampGlass,
+      chimney: chimneyTop ? group.localToWorld(chimneyTop.clone()) : undefined,
       collider: { x: config.x, z: config.z, halfW: config.width / 2, halfD: config.depth / 2, rotation: config.rotation },
     };
   }
@@ -399,10 +431,13 @@ export class Buildings {
     group: Group,
     windows: MeshStandardMaterial[],
   ): { doorLeaf: Group; beacon: BuildingInstance['beacon'] } {
-    const white = createStylizedMaterial({ color: config.bodyColor, roughness: 0.88 });
-    const red = createStylizedMaterial({ color: config.trimColor, roughness: 0.86 });
+    // Cylinder UVs wrap the whole circumference into one texture repeat, so a
+    // tiled plaster map would stretch into streaks; the world-space grain does
+    // not care about UVs.
+    const white = createStylizedMaterial({ color: config.bodyColor, roughness: 0.88, groundDetail: 0.35 });
+    const red = createStylizedMaterial({ color: config.trimColor, roughness: 0.86, groundDetail: 0.3 });
 
-    const base = new Mesh(new CylinderGeometry(3.2, 3.9, 1.1, 16), createStylizedMaterial({ color: PALETTE.rock.base, roughness: 0.96, flatShading: true }));
+    const base = new Mesh(new CylinderGeometry(3.2, 3.9, 1.1, 16), surfaces.stone(PALETTE.rock.base));
     base.position.y = 0.5;
     base.castShadow = true;
     base.receiveShadow = true;
@@ -492,7 +527,7 @@ export class Buildings {
       }
       for (let i = 0; i < instance.lampLights.length; i++) {
         instance.lampLights[i].intensity = lampGlow * 5.5;
-        instance.lampGlass[i].emissiveIntensity = lampGlow * 2.2;
+        instance.lampGlass[i].emissiveIntensity = lampGlow * 1.4;
       }
 
       if (instance.beacon) {

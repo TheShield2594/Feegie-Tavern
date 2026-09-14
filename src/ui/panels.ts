@@ -896,6 +896,7 @@ export function openSettings(ui: UIRoot, bridge: SettingsBridge): void {
             'Bag — <b>I</b> / <b>Y</b> · Map — <b>M</b> · Journal — <b>Q</b>',
             'Cycle tools — <b>Z</b> / <b>C</b> or <b>LB</b> / <b>RB</b>',
             'Camera — <b>O</b> / <b>P</b> or right stick · Zoom — <b>+</b> / <b>−</b>',
+            'Emotes — <b>1</b> wave · <b>2</b> cheer · <b>3</b> nod · <b>4</b> sit, or the D-pad',
           ].join('<br>') }),
         ]),
         el('div', { style: 'display:flex;gap:9px;margin-top:8px' }, [

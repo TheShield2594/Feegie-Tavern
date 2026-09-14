@@ -23,7 +23,9 @@ export type ClipName =
   | 'celebrate'
   | 'talk'
   | 'sleep'
-  | 'carry';
+  | 'carry'
+  | 'wave'
+  | 'nod';
 
 /** A joint's local rotation for one animation frame. */
 type JointPose = [number, number, number];
@@ -604,6 +606,39 @@ function buildClips(): Record<ClipName, ClipDef> {
           shoulderR: [0.35, 0, -0.4],
           elbowL: [-1.1, 0, 0],
           elbowR: [-1.0, 0, 0],
+        };
+      },
+    },
+
+    wave: {
+      period: 1.5,
+      duration: 1.5,
+      loop: false,
+      evaluate: (t) => {
+        // Arm up fast, four beats of waving from the elbow, then down.
+        const raise = easeOutCubic(clamp01(t / 0.22)) * (1 - easeInCubic(clamp01((t - 1.15) / 0.35)));
+        const swing = Math.sin(t * TAU * 2.6) * raise;
+        return {
+          shoulderR: [-2.6 * raise, 0, -0.55 * raise],
+          elbowR: [-0.35 * raise, 0, swing * 0.55],
+          handR: [0, 0, swing * 0.3],
+          torso: [-0.05 * raise, 0.12 * raise, 0.04 * raise],
+          head: [-0.08 * raise, 0.18 * raise, -0.06 * raise],
+          shoulderL: [0.1 * raise, 0, 0.1],
+        };
+      },
+    },
+
+    nod: {
+      period: 0.9,
+      duration: 0.9,
+      loop: false,
+      evaluate: (t) => {
+        const nod = Math.sin(clamp01(t) * Math.PI * 2) * Math.sin(clamp01(t) * Math.PI);
+        return {
+          head: [nod * 0.32, 0, 0],
+          neck: [nod * 0.1, 0, 0],
+          torso: [nod * 0.04, 0, 0],
         };
       },
     },

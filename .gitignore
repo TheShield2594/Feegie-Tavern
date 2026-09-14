@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.local
 .vite/
+.shots/
+.shots2/
+.shots3/

@@ -23,7 +23,11 @@ export type GameAction =
   | 'uiLeft'
   | 'uiRight'
   | 'uiConfirm'
-  | 'uiBack';
+  | 'uiBack'
+  | 'emoteWave'
+  | 'emoteCheer'
+  | 'emoteSit'
+  | 'emoteNod';
 
 export const ALL_ACTIONS: GameAction[] = [
   'moveUp', 'moveDown', 'moveLeft', 'moveRight',
@@ -33,6 +37,7 @@ export const ALL_ACTIONS: GameAction[] = [
   'cameraLeft', 'cameraRight', 'zoomIn', 'zoomOut',
   'menu',
   'uiUp', 'uiDown', 'uiLeft', 'uiRight', 'uiConfirm', 'uiBack',
+  'emoteWave', 'emoteCheer', 'emoteSit', 'emoteNod',
 ];
 
 /** Keyboard bindings. Multiple keys may map to the same action. */
@@ -58,6 +63,10 @@ export const KEYBOARD_BINDINGS: Record<string, GameAction[]> = {
   Equal: ['zoomIn'], NumpadAdd: ['zoomIn'],
   Minus: ['zoomOut'], NumpadSubtract: ['zoomOut'],
   KeyF: ['menu'],
+  Digit1: ['emoteWave'],
+  Digit2: ['emoteCheer'],
+  Digit3: ['emoteNod'],
+  Digit4: ['emoteSit'],
 };
 
 /**
@@ -75,10 +84,12 @@ export const GAMEPAD_BUTTON_BINDINGS: Record<number, GameAction[]> = {
   7: ['zoomIn'],
   8: ['map'],
   9: ['menu'],
-  12: ['uiUp'],
-  13: ['uiDown'],
-  14: ['uiLeft'],
-  15: ['uiRight'],
+  // The D-pad doubles as the emote wheel outside menus; the UI actions only
+  // matter while a panel is open, so the two never compete.
+  12: ['uiUp', 'emoteWave'],
+  13: ['uiDown', 'emoteSit'],
+  14: ['uiLeft', 'emoteNod'],
+  15: ['uiRight', 'emoteCheer'],
 };
 
 /** Human-readable glyphs used by the contextual prompt UI. */
@@ -107,4 +118,8 @@ export const ACTION_GLYPHS: Record<GameAction, { key: string; pad: string }> = {
   uiRight: { key: '→', pad: 'D→' },
   uiConfirm: { key: 'E', pad: 'A' },
   uiBack: { key: 'Esc', pad: 'B' },
+  emoteWave: { key: '1', pad: 'D↑' },
+  emoteCheer: { key: '2', pad: 'D→' },
+  emoteNod: { key: '3', pad: 'D←' },
+  emoteSit: { key: '4', pad: 'D↓' },
 };
