@@ -36,6 +36,7 @@ export class TimeSystem {
 
   private accumulator = 0;
   private lastHour = -1;
+  private lastPhase: DayPhase | null = null;
 
   constructor(private bus: EventBus) {}
 
@@ -123,15 +124,24 @@ export class TimeSystem {
     if (hour !== this.lastHour) {
       this.lastHour = hour;
       this.bus.emit('time:hour', { hour, day: this.day });
-      this.bus.emit('time:phase', { phase: this.phase });
+    }
+    // Phases turn over at fractional times (05:18, 17:30, 19:18, 20:30), so
+    // tying the event to the hour delivered some of them up to 42 minutes late.
+    const phase = this.phase;
+    if (phase !== this.lastPhase) {
+      this.lastPhase = phase;
+      this.bus.emit('time:phase', { phase });
     }
   }
 
   /** Fast-forwards to the given hour, firing day/hour events along the way. */
   skipTo(hour: number): void {
-    const target = Math.round(clamp01(hour / 24) * 1440);
+    // 24:00 is midnight of the next day, which the clock stores as minute 0.
+    // Without the wrap the loop chases a minute value the clock never holds
+    // and burns all 1440 advances before the guard stops it.
+    const target = Math.round(clamp01(hour / 24) * 1440) % 1440;
     let guard = 0;
-    while (this.minutes !== target && guard < 1441) {
+    while (this.minutes !== target && guard < 1440) {
       this.advanceMinute();
       guard += 1;
     }
@@ -147,7 +157,9 @@ export class TimeSystem {
 
   load(day: number, minutes: number): void {
     this.day = Math.max(1, Math.floor(day));
-    this.minutes = clamp01(minutes / 1440) * 1440;
+    // A stored 1440 means midnight; the clock only ever holds 0..1439.
+    this.minutes = (clamp01(minutes / 1440) * 1440) % 1440;
     this.lastHour = this.hour;
+    this.lastPhase = this.phase;
   }
 }

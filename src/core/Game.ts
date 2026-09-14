@@ -75,6 +75,7 @@ import {
   type PanelContext,
 } from '@/ui/panels';
 import { clamp01 } from '@/util/math';
+import { disposeObject } from '@/util/three';
 
 /** Interiors are built far from the island so both can exist in one scene. */
 const INTERIOR_ORIGIN = new Vector3(1000, 0, 0);
@@ -137,6 +138,8 @@ export class Game {
   private homeLevel = 1;
   private houseStyleId = 'style.harbourBlue';
   private ownedFurniture: string[] = [];
+  /** Paid exterior colourways the player has bought; free ones need no entry. */
+  private ownedStyles: string[] = [];
   private stats = { totalCaught: 0, totalSold: 0, harvested: 0, flowersPlanted: 0, cooked: 0, records: {} as Record<string, number> };
   private slot = 1;
   private playtime = 0;
@@ -396,6 +399,8 @@ export class Game {
     this.homeLevel = data.home.level;
     this.houseStyleId = data.home.styleId;
     this.ownedFurniture = [...data.home.ownedFurniture];
+    // Older v5 blobs from before styles were tracked: honour the applied style.
+    this.ownedStyles = [...(data.home.ownedStyles ?? [data.home.styleId])];
     this.buildings.applyHouseStyle(this.houseStyleId);
 
     this.farm.load(data.farm.plots);
@@ -471,6 +476,7 @@ export class Game {
       home: {
         level: this.homeLevel,
         styleId: this.houseStyleId,
+        ownedStyles: [...this.ownedStyles],
         ownedFurniture: [...this.ownedFurniture],
         placed: this.furnishing.serialize(),
       },
@@ -1036,6 +1042,10 @@ export class Game {
       this.interiorRoot.add(this.furnishing.group);
     }
     this.interiorRoot.remove(this.activeInterior.group);
+    // The room kit bakes a floor texture and builds fresh geometry and
+    // materials for every entry, so dropping the group alone would leak a
+    // room's worth of GPU resources each time a door is used.
+    disposeObject(this.activeInterior.group);
     this.activeInterior = null;
   }
 
@@ -1632,6 +1642,7 @@ export class Game {
       homeLevel: this.homeLevel,
       houseStyleId: this.houseStyleId,
       ownedFurniture: this.ownedFurniture,
+      ownedStyles: this.ownedStyles,
       placedFurniture: this.furnishing.pieces.map((p) => ({ defId: p.defId })),
       look: this.look,
       townRating: this.lastTownRating,
@@ -1801,6 +1812,7 @@ export class Game {
       this.ownedFurniture.push(defId);
       this.uiRoot.toast(`${FURNITURE_BY_ID.get(defId)?.name ?? 'It'} is yours.`, 'good', iconFor(defId, 64));
     } else {
+      if (!this.ownedStyles.includes(defId)) this.ownedStyles.push(defId);
       this.setHouseStyle(defId);
     }
     this.save.markDirty();
@@ -1919,7 +1931,14 @@ export class Game {
   }
 
   private setHouseStyle(styleId: string): void {
-    if (!HOUSE_STYLES_BY_ID.has(styleId)) return;
+    const style = HOUSE_STYLES_BY_ID.get(styleId);
+    if (!style) return;
+    // The Home panel reaches this directly, so ownership is checked here rather
+    // than in the UI: otherwise every paid colourway applies for nothing.
+    if (style.price > 0 && !this.ownedStyles.includes(styleId)) {
+      this.buy(styleId, style.price, 'houseStyle');
+      return;
+    }
     this.houseStyleId = styleId;
     this.buildings.applyHouseStyle(styleId);
     this.uiRoot.toast('Your cottage has a new coat.', 'good');

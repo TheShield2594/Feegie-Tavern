@@ -1,4 +1,6 @@
-import type { InventoryItem, ItemStack } from '@/items/types';
+import type { InventoryItem } from '@/items/types';
+// Type-only, so this does not create an import cycle with the inventory.
+import type { Stack } from '@/inventory/Inventory';
 import type { WeatherKind } from '@/time/WeatherSystem';
 import type { InteractionOption } from '@/interactions/types';
 
@@ -37,7 +39,7 @@ export interface GameEvents {
   'player:enterInterior': { interiorId: string };
   'player:exitInterior': { interiorId: string };
 
-  'inventory:changed': { stacks: ItemStack[]; capacity: number };
+  'inventory:changed': { stacks: Stack[]; capacity: number };
   'inventory:full': { attempted: InventoryItem };
   'item:gained': { item: InventoryItem; quantity: number };
   'item:removed': { itemId: string; quantity: number };

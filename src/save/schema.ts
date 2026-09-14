@@ -116,6 +116,8 @@ export interface SaveDataV5 {
   home: {
     level: number;
     styleId: string;
+    /** Exterior colourways the player has bought. Free styles are always in. */
+    ownedStyles: string[];
     ownedFurniture: string[];
     placed: PlacedFurnitureData[];
   };

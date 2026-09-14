@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  BufferAttribute,
   BufferGeometry,
   Color,
   DynamicDrawUsage,
@@ -60,7 +61,9 @@ export class WeatherFX {
     }
 
     const rainGeometry = new BufferGeometry();
-    const rainPos = new Float32BufferAttribute(this.rainPositions, 3);
+    // BufferAttribute wraps the array; Float32BufferAttribute would copy it,
+    // and `update` writes `rainPositions` directly, so the rain would freeze.
+    const rainPos = new BufferAttribute(this.rainPositions, 3);
     rainPos.setUsage(DynamicDrawUsage);
     rainGeometry.setAttribute('position', rainPos);
     rainGeometry.setAttribute('aOffset', new Float32BufferAttribute(this.rainOffsets, 1));

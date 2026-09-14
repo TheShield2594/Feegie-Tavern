@@ -116,9 +116,4 @@ export interface InventoryItem {
   acquiredDay?: number;
 }
 
-export interface ItemStack {
-  key: string;
-  defId: string;
-  items: InventoryItem[];
-  get quantity(): number;
-}
+

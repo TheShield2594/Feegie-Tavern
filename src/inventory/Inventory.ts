@@ -204,6 +204,6 @@ export class Inventory {
   }
 
   private emitChanged(): void {
-    this.bus.emit('inventory:changed', { stacks: [], capacity: this.capacity });
+    this.bus.emit('inventory:changed', { stacks: this.stacks(), capacity: this.capacity });
   }
 }

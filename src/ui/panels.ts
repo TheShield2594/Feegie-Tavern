@@ -39,6 +39,8 @@ export interface PanelContext {
   homeLevel: number;
   houseStyleId: string;
   ownedFurniture: string[];
+  /** Paid exterior colourways already bought; free ones are never listed. */
+  ownedStyles: string[];
   placedFurniture: { defId: string }[];
   look: CharacterLook;
   townRating: number;
@@ -746,7 +748,8 @@ export function openHome(context: PanelContext): void {
       const exteriors = el('div', { class: 'cc-grid wide' });
       for (const style of HOUSE_STYLES) {
         const active = context.houseStyleId === style.id;
-        const affordable = context.coins >= style.price;
+        const owned = style.price === 0 || context.ownedStyles.includes(style.id);
+        const affordable = owned || context.coins >= style.price;
         exteriors.append(el('div', { class: 'cc-card' }, [
           el('div', { class: 'row' }, [
             el('div', { class: 'thumb' }, [el('img', { src: iconFor(style.id, 96), alt: style.name })]),
@@ -757,7 +760,7 @@ export function openHome(context: PanelContext): void {
           ]),
           el('button', {
             class: `cc-btn ${active ? '' : affordable ? 'primary' : ''}`,
-            text: active ? 'Current' : affordable ? 'Apply' : 'Too pricey',
+            text: active ? 'Current' : owned ? 'Apply' : affordable ? `Buy · ${formatCoins(style.price)}` : 'Too pricey',
             disabled: active || !affordable,
             onclick: () => { context.setHouseStyle(style.id); panel.refresh(); },
           }),

@@ -11,7 +11,7 @@ import type { Expression } from '@/player/CharacterRig';
 const cache = new Map<string, string>();
 
 export function villagerPortrait(look: VillagerLook, expression: Expression = 'neutral', size = 148): string {
-  const key = `v:${look.species}:${look.fur}:${look.cream}:${look.outfit}:${look.earStyle}:${look.accessory ?? ''}:${expression}:${size}`;
+  const key = `v:${look.species}:${look.fur}:${look.cream}:${look.outfit}:${look.outfitTrim}:${look.earStyle}:${look.accessory ?? ''}:${expression}:${size}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -93,7 +93,7 @@ export function villagerPortrait(look: VillagerLook, expression: Expression = 'n
 }
 
 export function playerPortrait(look: CharacterLook, expression: Expression = 'neutral', size = 148): string {
-  const key = `p:${look.skin}:${look.hairColor}:${look.hairStyle}:${look.shirtColor}:${look.hat}:${expression}:${size}`;
+  const key = `p:${look.skin}:${look.hairColor}:${look.hairStyle}:${look.shirtColor}:${look.hat}:${look.hatColor}:${expression}:${size}`;
   const hit = cache.get(key);
   if (hit) return hit;
 

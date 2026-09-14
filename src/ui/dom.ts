@@ -43,14 +43,29 @@ export function removeAfter(node: Element, className: string, ms: number): void 
   window.setTimeout(() => node.remove(), ms);
 }
 
-/** Animates a number, for currency counters and friendship totals. */
-export function countUp(node: HTMLElement, from: number, to: number, ms = 520, format = (n: number) => String(n)): void {
+/**
+ * Animates a number, for currency counters and friendship totals.
+ *
+ * Returns a cancel handle. Callers that can retrigger before the previous run
+ * finishes must use it: two loops writing the same node interleave, and the
+ * older one keeps easing toward the stale target, so the display jumps
+ * backwards. Selling several stacks in quick succession does exactly that.
+ */
+export function countUp(
+  node: HTMLElement,
+  from: number,
+  to: number,
+  ms = 520,
+  format = (n: number) => String(n),
+): () => void {
   if (from === to) {
     node.textContent = format(to);
-    return;
+    return () => {};
   }
+  let cancelled = false;
   const start = performance.now();
   const step = (now: number) => {
+    if (cancelled) return;
     const t = Math.min(1, (now - start) / ms);
     // Ease out so the last digits settle rather than snapping.
     const eased = 1 - Math.pow(1 - t, 3);
@@ -58,6 +73,9 @@ export function countUp(node: HTMLElement, from: number, to: number, ms = 520, f
     if (t < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+  return () => {
+    cancelled = true;
+  };
 }
 
 export function formatCoins(n: number): string {

@@ -273,6 +273,9 @@ const migrate4to5: Migration = (data) => {
     home: {
       level: Math.max(1, num(legacyPlayer.homeLevel, 1)),
       styleId,
+      // The prototype had no shop for exteriors, so whatever the island is
+      // wearing is the one style the player carries over as owned.
+      ownedStyles: [styleId],
       ownedFurniture,
       placed: placed as SaveDataV5['home']['placed'],
     },
@@ -323,9 +326,34 @@ export function detectVersion(data: AnySaveData): number {
   return SAVE_VERSION;
 }
 
+/**
+ * Throws unless `data` has the fields `Game.applySave` dereferences.
+ *
+ * `detectVersion` has to guess for blobs with no version field, so an empty or
+ * truncated record can reach here claiming to be current. Failing loudly keeps
+ * that out of `applySave`, where the first `data.clock.day` would throw from
+ * inside the frame loop instead of from a read the caller already guards.
+ */
+function assertV5(data: AnySaveData): asserts data is SaveDataV5 {
+  const d = data as Record<string, unknown>;
+  const required = ['clock', 'player', 'museum', 'home', 'farm', 'world', 'quests', 'relationships', 'settings'];
+  const missing = required.filter((key) => typeof d[key] !== 'object' || d[key] === null);
+  if (missing.length > 0) {
+    throw new Error(`Save is missing required section(s): ${missing.join(', ')}`);
+  }
+}
+
 export function migrate(raw: AnySaveData): MigrationResult {
   const from = detectVersion(raw);
-  if (from >= SAVE_VERSION) return { data: raw as SaveDataV5, migratedFrom: null };
+  if (from > SAVE_VERSION) {
+    // A save written by a newer build. Refusing beats silently loading fields
+    // this build does not understand.
+    throw new Error(`Save version ${from} is newer than this build supports (${SAVE_VERSION})`);
+  }
+  if (from === SAVE_VERSION) {
+    assertV5(raw);
+    return { data: raw, migratedFrom: null };
+  }
 
   let data = raw as Record<string, unknown>;
   let version = from;
@@ -342,5 +370,7 @@ export function migrate(raw: AnySaveData): MigrationResult {
     }
   }
 
-  return { data: data as unknown as SaveDataV5, migratedFrom: from };
+  const migrated = data as AnySaveData;
+  assertV5(migrated);
+  return { data: migrated, migratedFrom: from };
 }

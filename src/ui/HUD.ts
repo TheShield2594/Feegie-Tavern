@@ -47,6 +47,8 @@ export class HUD {
   private fishingMeter: HTMLElement | null = null;
 
   private lastCoins = -1;
+  /** Cancels an in-flight coin roll so a second sale does not fight the first. */
+  private cancelCoinRoll: (() => void) | null = null;
   private promptNodes = new Map<string, HTMLElement>();
   private lastToolSignature = '';
 
@@ -119,7 +121,8 @@ export class HUD {
 
     if (state.coins !== this.lastCoins) {
       if (this.lastCoins >= 0) {
-        countUp(this.coinsAmount, this.lastCoins, state.coins, 520, formatCoins);
+        this.cancelCoinRoll?.();
+        this.cancelCoinRoll = countUp(this.coinsAmount, this.lastCoins, state.coins, 520, formatCoins);
         this.coinsPill.classList.remove('bump');
         void this.coinsPill.offsetWidth;
         this.coinsPill.classList.add('bump');

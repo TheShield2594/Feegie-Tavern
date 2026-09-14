@@ -111,9 +111,9 @@ export class Renderer {
     this.bloomPass?.setSize(width, height);
 
     this.camera.aspect = width / Math.max(1, height);
-    // Widen the field of view on narrow screens so a phone still frames the
-    // player and the building they are standing next to.
-    this.camera.fov = this.camera.aspect < 1 ? 52 : this.camera.aspect < 1.4 ? 44 : 38;
+    // The field of view itself belongs to CameraRig, which writes it from its
+    // preset spring every frame and would overwrite anything set here. It
+    // widens the preset on narrow screens from this same aspect.
     this.camera.updateProjectionMatrix();
   }
 

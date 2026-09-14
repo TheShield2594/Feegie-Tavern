@@ -1,9 +1,9 @@
 import {
   AdditiveBlending,
+  BufferAttribute,
   BufferGeometry,
   Color,
   DynamicDrawUsage,
-  Float32BufferAttribute,
   NormalBlending,
   Points,
   ShaderMaterial,
@@ -94,10 +94,13 @@ export class ParticleSystem {
 
   private createPoints(pool: ReturnType<ParticleSystem['createPool']>, additive: boolean): Points {
     const geometry = new BufferGeometry();
-    const position = new Float32BufferAttribute(pool.positions, 3);
-    const color = new Float32BufferAttribute(pool.colors, 3);
-    const size = new Float32BufferAttribute(pool.sizes, 1);
-    const alpha = new Float32BufferAttribute(pool.alphas, 1);
+    // BufferAttribute, not Float32BufferAttribute: the latter copies the array
+    // it is handed, and the simulation writes the pool's arrays every frame.
+    // With a copy the uploaded buffer never changes and nothing animates.
+    const position = new BufferAttribute(pool.positions, 3);
+    const color = new BufferAttribute(pool.colors, 3);
+    const size = new BufferAttribute(pool.sizes, 1);
+    const alpha = new BufferAttribute(pool.alphas, 1);
     position.setUsage(DynamicDrawUsage);
     color.setUsage(DynamicDrawUsage);
     size.setUsage(DynamicDrawUsage);

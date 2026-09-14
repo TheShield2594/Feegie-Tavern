@@ -214,8 +214,13 @@ export class CameraRig {
     this.camera.up.copy(UP);
     this.camera.lookAt(lookTarget);
 
-    if (Math.abs(this.camera.fov - this.fovSpring.value) > 0.01) {
-      this.camera.fov = this.fovSpring.value;
+    // Widen the preset on narrow screens so a phone still frames the player
+    // and the building they are standing next to.
+    const aspect = this.camera.aspect;
+    const widen = aspect < 1 ? 1.37 : aspect < 1.4 ? 1.16 : 1;
+    const fov = this.fovSpring.value * widen;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
   }
@@ -249,7 +254,11 @@ export class CameraRig {
         if ((mesh as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) continue;
         if (mesh.userData.noFade) continue;
 
-        const key = mesh.uuid;
+        // Keyed by material, not mesh: materials are shared (one shrub material
+        // across four bushes, one furniture material across many meshes). Keying
+        // by mesh lets a second mesh capture the already-faded opacity as its
+        // "original", and the restore then leaves the material permanently dim.
+        const key = material.uuid;
         let entry = this.faded.get(key);
         if (!entry) {
           entry = {

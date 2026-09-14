@@ -109,14 +109,16 @@ export function hipRoofGeometry(width: number, depth: number, rise: number, over
   const c2 = [w, 0, d];
   const c3 = [-w, 0, d];
 
+  // Counter-clockwise seen from outside, or `computeVertexNormals` derives
+  // downward normals and the whole roof is back-face culled from above.
   // Two trapezoid slopes...
-  push(c0[0], c0[1], c0[2], c1[0], c1[1], c1[2], r1[0], r1[1], r1[2]);
-  push(c0[0], c0[1], c0[2], r1[0], r1[1], r1[2], r0[0], r0[1], r0[2]);
-  push(c2[0], c2[1], c2[2], c3[0], c3[1], c3[2], r0[0], r0[1], r0[2]);
-  push(c2[0], c2[1], c2[2], r0[0], r0[1], r0[2], r1[0], r1[1], r1[2]);
+  push(c0[0], c0[1], c0[2], r1[0], r1[1], r1[2], c1[0], c1[1], c1[2]);
+  push(c0[0], c0[1], c0[2], r0[0], r0[1], r0[2], r1[0], r1[1], r1[2]);
+  push(c2[0], c2[1], c2[2], r0[0], r0[1], r0[2], c3[0], c3[1], c3[2]);
+  push(c2[0], c2[1], c2[2], r1[0], r1[1], r1[2], r0[0], r0[1], r0[2]);
   // ...and two triangular hip ends.
-  push(c1[0], c1[1], c1[2], c2[0], c2[1], c2[2], r1[0], r1[1], r1[2]);
-  push(c3[0], c3[1], c3[2], c0[0], c0[1], c0[2], r0[0], r0[1], r0[2]);
+  push(c1[0], c1[1], c1[2], r1[0], r1[1], r1[2], c2[0], c2[1], c2[2]);
+  push(c3[0], c3[1], c3[2], r0[0], r0[1], r0[2], c0[0], c0[1], c0[2]);
 
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));

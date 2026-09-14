@@ -76,8 +76,16 @@ export class WeatherSystem {
   /** Advances the forecast. `elapsedMinutes` comes from the TimeSystem. */
   tickMinutes(elapsedMinutes: number, season: Season): void {
     this.remaining -= elapsedMinutes;
-    if (this.remaining > 0) return;
-    this.set(this.roll(season), this.rng.range(180, 540));
+    // A loop, not a single roll: `skipTo` can hand over a whole day at once,
+    // and consuming only one pattern would leave the overflow unspent and push
+    // the next change that much further out.
+    let guard = 0;
+    while (this.remaining <= 0 && guard < 64) {
+      const overflow = -this.remaining;
+      this.set(this.roll(season), this.rng.range(180, 540));
+      this.remaining -= overflow;
+      guard += 1;
+    }
   }
 
   private roll(season: Season): WeatherKind {

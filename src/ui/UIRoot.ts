@@ -158,6 +158,10 @@ export class UIRoot {
 
     this.panels.push(handle);
     this.collectFocusables();
+    // `update` only accepts uiConfirm when the active element is one of these,
+    // so without an initial focus the pad's A button does nothing until the
+    // player nudges a direction first.
+    this.focusables[0]?.focus();
     this.bus.emit('ui:panel', { id: options.id });
     this.bus.emit('audio:sfx', { id: 'ui.open' });
     return handle;
@@ -288,10 +292,16 @@ export class UIRoot {
     this.fade.style.transitionDuration = `${outMs}ms`;
     this.fade.classList.add('on');
     await wait(outMs);
-    await midpoint();
-    this.fade.style.transitionDuration = `${inMs}ms`;
-    this.fade.classList.remove('on');
-    await wait(inMs);
+    try {
+      await midpoint();
+    } finally {
+      // The overlay is opaque and covers the viewport. If `midpoint` throws —
+      // callers pass interior loading through here — leaving it up would end
+      // the session on a black screen with the loop still running.
+      this.fade.style.transitionDuration = `${inMs}ms`;
+      this.fade.classList.remove('on');
+      await wait(inMs);
+    }
   }
 
   showLocation(name: string, subtitle = ''): void {

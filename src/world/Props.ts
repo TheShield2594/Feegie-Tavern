@@ -6,6 +6,7 @@ import {
   Group,
   IcosahedronGeometry,
   InstancedMesh,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -33,6 +34,13 @@ export interface GatherNode {
   index: number;
   /** Runtime hit animation. */
   hitTimer: number;
+  /**
+   * The randomised transform written at build time. Kept because harvesting
+   * overwrites the instance matrix with a hidden one, and regrowing has to put
+   * the original back — recomputing it would need the build RNG again. Dig
+   * spots rebuild their two arms instead, so they do not carry one.
+   */
+  matrix?: Matrix4;
 }
 
 /**
@@ -540,6 +548,7 @@ export class Props {
       this.dummy.updateMatrix();
       mesh.setMatrixAt(i, this.dummy.matrix);
       this.gatherNodes.push({
+        matrix: this.dummy.matrix.clone(),
         id: `rock_${i}`, kind: 'rock', x: p.x, y: p.y, z: p.z,
         harvestedOnDay: -99, index: i, hitTimer: 0,
       });
@@ -616,6 +625,7 @@ export class Props {
       this.dummy.updateMatrix();
       mesh.setMatrixAt(placed, this.dummy.matrix);
       this.gatherNodes.push({
+        matrix: this.dummy.matrix.clone(),
         id: `shell_${placed}`, kind: 'shell', x, y: sample.height, z,
         harvestedOnDay: -99, index: placed, hitTimer: 0,
       });
@@ -656,6 +666,10 @@ export class Props {
         this.dummy.rotation.set(0, 0, 0);
         this.dummy.updateMatrix();
         mesh.setMatrixAt(node.index, this.dummy.matrix);
+      } else if (node.matrix) {
+        // Without this branch a harvested rock or shell stays hidden for the
+        // rest of the session: nothing ever wrote its transform back.
+        mesh.setMatrixAt(node.index, node.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
     }

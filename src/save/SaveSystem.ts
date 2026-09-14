@@ -51,7 +51,7 @@ export function createNewSave(slot: number): SaveDataV5 {
       stats: { totalCaught: 0, totalSold: 0, harvested: 0, flowersPlanted: 0, cooked: 0, records: {} },
     },
     museum: { donated: [] },
-    home: { level: 1, styleId: 'style.harbourBlue', ownedFurniture: [], placed: [] },
+    home: { level: 1, styleId: 'style.harbourBlue', ownedStyles: [], ownedFurniture: [], placed: [] },
     farm: { plots: [] },
     world: { gardens: [], gatherables: [], townWorks: { bridge: false, stairs: false, lighthouse: false } },
     quests: { activeId: 'museum', progress: 0, issuedDay: 1, completedIds: [] },
