@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push supersedes whatever was still running for the same branch,
+# so a quick follow-up fix does not queue behind the commit it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # No .nvmrc or engines field to read from; 22 is the active LTS and
+          # what the build is developed against.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run build` is `tsc --noEmit && vite build` — the same one command
+      # a contributor runs locally, so CI cannot drift from it.
+      - run: npm run build
