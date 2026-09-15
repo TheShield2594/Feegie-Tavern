@@ -16,7 +16,7 @@ import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { makeItemModel } from '@/items/ItemModels';
 import { makeSign, roundedBoxGeometry } from './BuildingKit';
-import { buildRoom, type BuiltRoom } from './InteriorKit';
+import { buildRoom, type BuiltRoom, type FloorRegion, type RoomOpening, type RoomOptions } from './InteriorKit';
 import type { Museum } from '@/museum/Museum';
 import type { MuseumWing, SpeciesDef } from '@/items/types';
 import type { AmbienceId } from '@/audio/sounds';
@@ -26,7 +26,18 @@ export type InteriorId = 'home' | 'museum' | 'shop' | 'townhall' | 'npcHome';
 export interface InteriorScene {
   id: string;
   group: Group;
+  /** The room the player arrives in, and the only one a single-room scene has. */
   room: BuiltRoom;
+  /**
+   * Every room in the scene with its offset, for the camera: each room's walls
+   * are hidden against that room's own centre rather than the scene's.
+   */
+  rooms?: { room: BuiltRoom; origin: Vector3 }[];
+  /**
+   * Walkable floor, when the scene is more than one rectangle. Absent for the
+   * rooms that are, which are walked by `room.bounds`.
+   */
+  regions?: FloorRegion[];
   /** Circles the player cannot walk through, in interior local space. */
   colliders: { x: number; z: number; radius: number }[];
   /** Named points the interaction system anchors prompts to. */
@@ -39,57 +50,277 @@ export interface InteriorScene {
 
 // --- Player home -------------------------------------------------------------
 
-export interface HomeLayout {
-  level: number;
-  /** Half-extents of the placement grid, in metres. */
-  gridHalfW: number;
-  gridHalfD: number;
+/** One room of the cottage, placed in the cottage's own local space. */
+export interface HomeRoomLayout {
+  id: string;
+  name: string;
+  /** Room centre. Rooms are laid out along -Z, back from the front door. */
+  x: number;
+  z: number;
+  floorY: number;
+  width: number;
+  depth: number;
+  height: number;
+  floor: NonNullable<RoomOptions['floor']>;
+  wallColor: string;
+  trimColor: string;
+  windows: number;
+  /** Only the room the front door opens into. */
+  frontDoor: boolean;
+  openings: RoomOpening[];
+  /** Where furniture may be placed in this room, in cottage-local metres. */
+  grid: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Rectangles furniture must leave alone, so a doorway is never boxed in. */
+  keepClear: { minX: number; maxX: number; minZ: number; maxZ: number }[];
 }
 
+export interface HomeLayout {
+  level: number;
+  rooms: HomeRoomLayout[];
+  /** Walkable floor: one region per room, plus the ways between them. */
+  regions: FloorRegion[];
+  /** Straight runs of stair to build, foot first. */
+  stairs: { x: number; fromZ: number; toZ: number; toY: number; width: number }[];
+}
+
+/** Width of every inside doorway, and of the stair run. */
+const INNER_DOOR = 1.8;
+/** How far a doorway's walkable region reaches into the rooms at either end. */
+const THRESHOLD_REACH = 0.9;
+/** Gap between the back-to-back walls of two adjoining rooms. */
+const WALL_GAP = 0.3;
+
+/**
+ * The cottage's plan at a given upgrade level.
+ *
+ * The first two upgrades grow the one room, which is the reward the player can
+ * see from the doorway. The third adds a back room, and the fourth a loft up a
+ * flight of stairs behind it — so the last two upgrades give the cottage
+ * somewhere new rather than more of the same.
+ *
+ * Rooms past the first keep fixed positions, because the furniture in them is
+ * saved in cottage-local metres: the main room grows symmetrically about the
+ * origin and then stops, so nothing already placed ever ends up outside a wall.
+ */
 export function homeLayoutFor(level: number): HomeLayout {
-  // Each upgrade grows the cottage, which is the reward the player can see.
   const sizes = [
     { w: 7.5, d: 6.5 },
     { w: 9.5, d: 8 },
     { w: 12, d: 9.5 },
-    { w: 14, d: 11 },
+    { w: 12, d: 9.5 },
   ];
-  const size = sizes[Math.min(level - 1, sizes.length - 1)];
-  return { level, gridHalfW: size.w / 2, gridHalfD: size.d / 2 };
-}
+  const size = sizes[Math.min(Math.max(level, 1) - 1, sizes.length - 1)];
+  const halfD = size.d / 2;
 
-export function createHomeInterior(level: number): InteriorScene {
-  const layout = homeLayoutFor(level);
-  const width = layout.gridHalfW * 2;
-  const depth = layout.gridHalfD * 2;
+  const rooms: HomeRoomLayout[] = [];
+  const regions: FloorRegion[] = [];
+  const stairs: HomeLayout['stairs'] = [];
 
-  const room = buildRoom({
+  const main: HomeRoomLayout = {
+    id: 'main',
     name: 'Cottage',
-    width,
-    depth,
+    x: 0,
+    z: 0,
+    floorY: 0,
+    width: size.w,
+    depth: size.d,
     height: 3.4,
     floor: 'plank',
     wallColor: '#f2e6cf',
     trimColor: '#fdf8ec',
     windows: level >= 2 ? 3 : 2,
-    lights: level >= 3
-      ? [{ x: -width * 0.22, z: -depth * 0.1, color: '#ffdcb0' }, { x: width * 0.22, z: -depth * 0.1, color: '#ffdcb0' }]
-      : [{ x: 0, z: -depth * 0.12, color: '#ffdcb0', intensity: 20 }],
+    frontDoor: true,
+    openings: [],
+    grid: { minX: -size.w / 2 + 0.6, maxX: size.w / 2 - 0.6, minZ: -halfD + 0.6, maxZ: halfD - 1.2 },
+    // The front door, which a sofa across it would make unusable.
+    keepClear: [{ minX: -1.6, maxX: 1.6, minZ: halfD - 2.2, maxZ: halfD }],
+  };
+  rooms.push(main);
+  regions.push(roomRegion(main));
+
+  if (level >= 3) {
+    // The back room's front wall sits against the main room's back wall.
+    const backDepth = 6;
+    const frontPlane = -halfD - WALL_GAP;
+    const back: HomeRoomLayout = {
+      id: 'back',
+      name: 'BackRoom',
+      x: 0,
+      z: frontPlane - backDepth / 2,
+      floorY: 0,
+      width: 8,
+      depth: backDepth,
+      height: 3.1,
+      floor: 'tile',
+      wallColor: '#e2ebe4',
+      trimColor: '#f8fbf6',
+      windows: 2,
+      frontDoor: false,
+      openings: [{ side: 'front', width: INNER_DOOR }],
+      grid: { minX: -3.4, maxX: 3.4, minZ: frontPlane - backDepth + 0.6, maxZ: frontPlane - 0.6 },
+      keepClear: [],
+    };
+    main.openings.push({ side: 'back', width: INNER_DOOR });
+    rooms.push(back);
+    regions.push(roomRegion(back));
+    regions.push(doorwayRegion(0, -halfD + 0.3, back.z + backDepth / 2 - 0.3, 0));
+    keepDoorwaysClear(main, back);
+
+    if (level >= 4) {
+      // A straight run of stairs off the back of the cottage, up to the loft.
+      const backPlane = back.z - backDepth / 2;
+      const run = 4;
+      const loftY = 2.2;
+      const loftDepth = 6.5;
+      const loft: HomeRoomLayout = {
+        id: 'loft',
+        name: 'Loft',
+        x: 0,
+        z: backPlane - run - loftDepth / 2,
+        floorY: loftY,
+        width: 8,
+        depth: loftDepth,
+        height: 2.9,
+        floor: 'plank',
+        wallColor: '#eee1ec',
+        trimColor: '#fdf6fb',
+        windows: 3,
+        frontDoor: false,
+        openings: [{ side: 'front', width: INNER_DOOR }],
+        grid: {
+          minX: -3.4,
+          maxX: 3.4,
+          minZ: backPlane - run - loftDepth + 0.6,
+          maxZ: backPlane - run - 0.6,
+        },
+        keepClear: [],
+      };
+      back.openings.push({ side: 'back', width: INNER_DOOR });
+      rooms.push(loft);
+      regions.push(roomRegion(loft));
+
+      const footZ = backPlane - 0.3;
+      const headZ = backPlane - run + 0.3;
+      regions.push({
+        minX: -INNER_DOOR / 2,
+        maxX: INNER_DOOR / 2,
+        minZ: loft.z + loftDepth / 2 - 0.3 - THRESHOLD_REACH,
+        maxZ: backPlane + THRESHOLD_REACH,
+        floorY: 0,
+        ramp: { axis: 'z', from: footZ, to: headZ, toY: loftY },
+      });
+      stairs.push({ x: 0, fromZ: footZ, toZ: headZ, toY: loftY, width: INNER_DOOR });
+      keepDoorwaysClear(back, loft);
+    }
+  }
+
+  return { level, rooms, regions, stairs };
+}
+
+function roomRegion(room: HomeRoomLayout): FloorRegion {
+  return {
+    minX: room.x - room.width / 2 + WALL_THICKNESS_M,
+    maxX: room.x + room.width / 2 - WALL_THICKNESS_M,
+    minZ: room.z - room.depth / 2 + WALL_THICKNESS_M,
+    maxZ: room.z + room.depth / 2 - WALL_THICKNESS_M,
+    floorY: room.floorY,
+  };
+}
+
+/** The walkable slot through a doorway, reaching into the room at either end. */
+function doorwayRegion(x: number, nearZ: number, farZ: number, floorY: number): FloorRegion {
+  return {
+    minX: x - INNER_DOOR / 2,
+    maxX: x + INNER_DOOR / 2,
+    minZ: Math.min(nearZ, farZ) - THRESHOLD_REACH,
+    maxZ: Math.max(nearZ, farZ) + THRESHOLD_REACH,
+    floorY,
+  };
+}
+
+/** Keeps the stretch of floor either side of a shared doorway free of furniture. */
+function keepDoorwaysClear(nearer: HomeRoomLayout, further: HomeRoomLayout): void {
+  nearer.keepClear.push({
+    minX: -INNER_DOOR / 2 - 0.3,
+    maxX: INNER_DOOR / 2 + 0.3,
+    minZ: nearer.z - nearer.depth / 2,
+    maxZ: nearer.z - nearer.depth / 2 + 1.8,
   });
+  further.keepClear.push({
+    minX: -INNER_DOOR / 2 - 0.3,
+    maxX: INNER_DOOR / 2 + 0.3,
+    minZ: further.z + further.depth / 2 - 1.8,
+    maxZ: further.z + further.depth / 2,
+  });
+}
+
+/** Mirrors the room kit's wall thickness, which the plan has to allow for. */
+const WALL_THICKNESS_M = 0.3;
+
+export function createHomeInterior(level: number): InteriorScene {
+  const layout = homeLayoutFor(level);
+  const main = layout.rooms[0];
+  const width = main.width;
+  const depth = main.depth;
 
   const group = new Group();
-  group.add(room.group);
+  const built: { room: BuiltRoom; layout: HomeRoomLayout }[] = [];
+  const colliders: { x: number; z: number; radius: number }[] = [];
 
-  // A hearth gives the cottage a focal point from the first minute.
+  for (const roomLayout of layout.rooms) {
+    const room = buildRoom({
+      name: roomLayout.name,
+      width: roomLayout.width,
+      depth: roomLayout.depth,
+      height: roomLayout.height,
+      floor: roomLayout.floor,
+      wallColor: roomLayout.wallColor,
+      trimColor: roomLayout.trimColor,
+      windows: roomLayout.windows,
+      doorway: roomLayout.frontDoor,
+      openings: roomLayout.openings,
+      floorY: roomLayout.floorY,
+      // Only the room on the ground grows a plinth; the loft is held up by the
+      // stairs and would otherwise trail a block of masonry through the air.
+      plinth: roomLayout.floorY === 0,
+      lights: lightsFor(roomLayout, level),
+    });
+    room.group.position.x = roomLayout.x;
+    room.group.position.z = roomLayout.z;
+    group.add(room.group);
+    built.push({ room, layout: roomLayout });
+  }
+
+  const mainRoom = built[0].room;
+
+  for (const run of layout.stairs) group.add(buildStairRun(run));
+
+  // A raised room needs something under it, or it reads as a slab of floor
+  // hanging in the air behind the cottage.
+  for (const roomLayout of layout.rooms) {
+    if (roomLayout.floorY <= 0) continue;
+    const undercroft = new Mesh(
+      new BoxGeometry(roomLayout.width, roomLayout.floorY, roomLayout.depth),
+      createStylizedMaterial({ color: '#b8ad99', roughness: 0.95 }),
+    );
+    undercroft.position.set(roomLayout.x, roomLayout.floorY / 2, roomLayout.z);
+    undercroft.receiveShadow = true;
+    undercroft.userData.noFade = true;
+    group.add(undercroft);
+  }
+
+  // A hearth gives the cottage a focal point from the first minute. It is
+  // modelled around its own origin so it can be stood against whichever wall
+  // the plan leaves free.
   const hearth = new Group();
   const stone = createStylizedMaterial({ color: PALETTE.rock.light, roughness: 0.95, flatShading: true });
   const surround = new Mesh(roundedBoxGeometry(1.9, 1.5, 0.6, 0.14), stone);
-  surround.position.set(0, 0.75, -depth / 2 + 0.4);
+  surround.position.set(0, 0.75, 0);
   surround.castShadow = true;
   hearth.add(surround);
 
   const opening = new Mesh(new BoxGeometry(1.05, 0.85, 0.4), createStylizedMaterial({ color: '#2b241f', roughness: 1 }));
-  opening.position.set(0, 0.44, -depth / 2 + 0.55);
+  opening.position.set(0, 0.44, 0.15);
   hearth.add(opening);
 
   const fireMaterial = new MeshStandardMaterial({
@@ -100,25 +331,51 @@ export function createHomeInterior(level: number): InteriorScene {
   });
   const fire = new Mesh(new SphereGeometry(0.3, 10, 8), fireMaterial);
   fire.scale.set(1.4, 1, 0.6);
-  fire.position.set(0, 0.28, -depth / 2 + 0.55);
+  fire.position.set(0, 0.28, 0.15);
   hearth.add(fire);
 
   const fireLight = new PointLight('#ff9a4a', 5, 9, 2);
-  fireLight.position.set(0, 0.6, -depth / 2 + 0.9);
+  fireLight.position.set(0, 0.6, 0.5);
   hearth.add(fireLight);
 
   const mantel = new Mesh(roundedBoxGeometry(2.1, 0.12, 0.34, 0.05), createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.88 }));
-  mantel.position.set(0, 1.54, -depth / 2 + 0.5);
+  mantel.position.set(0, 1.54, 0.1);
   mantel.castShadow = true;
   hearth.add(mantel);
+
+  // The back wall becomes a doorway once the cottage has a room behind it, so
+  // the hearth turns to face across the room from the side instead.
+  const hearthRugSpot = new Vector3();
+  if (layout.rooms.length > 1) {
+    hearth.position.set(-width / 2 + 0.4, 0, depth / 2 - 2.2);
+    hearth.rotation.y = Math.PI / 2;
+    colliders.push({ x: -width / 2 + 0.7, z: depth / 2 - 2.2, radius: 1.1 });
+    hearthRugSpot.set(-width / 2 + 2.4, 0.005, depth / 2 - 2.2);
+  } else {
+    hearth.position.set(0, 0, -depth / 2 + 0.4);
+    colliders.push({ x: 0, z: -depth / 2 + 0.5, radius: 1.1 });
+    hearthRugSpot.set(0, 0.005, -depth / 2 + 2.4);
+  }
   group.add(hearth);
 
+  // Each fitting lives in whichever room the plan has room for it: the kitchen
+  // moves to the back room when there is one, and the wardrobe up to the loft.
+  const backRoom = layout.rooms.find((r) => r.id === 'back') ?? main;
+  const loft = layout.rooms.find((r) => r.id === 'loft') ?? main;
+
   const anchors: Record<string, Vector3> = {
-    exit: room.exit.clone(),
-    wardrobe: new Vector3(-layout.gridHalfW + 0.9, 0, -layout.gridHalfD + 1.4),
-    storage: new Vector3(layout.gridHalfW - 0.9, 0, -layout.gridHalfD + 1.4),
-    kitchen: new Vector3(layout.gridHalfW - 1.1, 0, 0.6),
+    exit: mainRoom.exit.clone(),
+    wardrobe: new Vector3(loft.x - loft.width / 2 + 1.1, loft.floorY, loft.z - loft.depth / 2 + 1.4),
+    storage: new Vector3(main.x + width / 2 - 1.1, 0, main.z - depth / 2 + 1.4),
+    kitchen: new Vector3(backRoom.x + backRoom.width / 2 - 1.1, backRoom.floorY, backRoom.z + 0.6),
   };
+  if (loft === main) {
+    anchors.wardrobe = new Vector3(-width / 2 + 1.1, 0, -depth / 2 + 1.4);
+  }
+  if (backRoom === main) {
+    anchors.kitchen = new Vector3(width / 2 - 1.1, 0, 0.6);
+    anchors.storage = new Vector3(width / 2 - 1.1, 0, -depth / 2 + 1.4);
+  }
 
   // Wardrobe: where the player changes their look.
   const wardrobe = new Group();
@@ -161,12 +418,12 @@ export function createHomeInterior(level: number): InteriorScene {
   // cottage still reads as lived in rather than a display box.
   const hearthRug = makeKitMesh('furniture.rugRound', { scale: 1.1, tint: '#e4c4b0' });
   if (hearthRug) {
-    hearthRug.position.set(0, 0.005, -depth / 2 + 2.4);
+    hearthRug.position.copy(hearthRugSpot);
     group.add(hearthRug);
   }
   const doorPlant = makeKitMesh('furniture.plantSmall', { scale: 1.4 });
   if (doorPlant) {
-    doorPlant.position.set(layout.gridHalfW - 0.9, 0, layout.gridHalfD - 1.0);
+    doorPlant.position.set(width / 2 - 0.9, 0, depth / 2 - 1.0);
     group.add(doorPlant);
   }
 
@@ -182,16 +439,19 @@ export function createHomeInterior(level: number): InteriorScene {
   kitchen.position.copy(anchors.kitchen);
   group.add(kitchen);
 
+  colliders.push(
+    { x: anchors.wardrobe.x, z: anchors.wardrobe.z, radius: 0.7 },
+    { x: anchors.storage.x, z: anchors.storage.z, radius: 0.6 },
+    { x: anchors.kitchen.x, z: anchors.kitchen.z, radius: 0.8 },
+  );
+
   return {
     id: 'home',
     group,
-    room,
-    colliders: [
-      { x: 0, z: -depth / 2 + 0.5, radius: 1.1 },
-      { x: anchors.wardrobe.x, z: anchors.wardrobe.z, radius: 0.7 },
-      { x: anchors.storage.x, z: anchors.storage.z, radius: 0.6 },
-      { x: anchors.kitchen.x, z: anchors.kitchen.z, radius: 0.8 },
-    ],
+    room: mainRoom,
+    rooms: built.map((entry) => ({ room: entry.room, origin: new Vector3(entry.layout.x, entry.layout.floorY, entry.layout.z) })),
+    regions: layout.regions,
+    colliders,
     anchors,
     ambience: 'interior',
     music: 'music.home',
@@ -204,6 +464,58 @@ export function createHomeInterior(level: number): InteriorScene {
       fire.scale.y = 1 + Math.sin(time * 7.3) * 0.12;
     },
   };
+}
+
+function lightsFor(room: HomeRoomLayout, level: number): NonNullable<RoomOptions['lights']>  {
+  if (room.id !== 'main') {
+    return [{ x: 0, z: 0, color: '#ffdcb0', intensity: 15 }];
+  }
+  return level >= 3
+    ? [
+        { x: -room.width * 0.22, z: -room.depth * 0.1, color: '#ffdcb0' },
+        { x: room.width * 0.22, z: -room.depth * 0.1, color: '#ffdcb0' },
+      ]
+    : [{ x: 0, z: -room.depth * 0.12, color: '#ffdcb0', intensity: 20 }];
+}
+
+/**
+ * A straight flight of stairs running along -Z, with a closed side on each
+ * flank so it reads as built into the cottage rather than floating.
+ */
+function buildStairRun(run: { x: number; fromZ: number; toZ: number; toY: number; width: number }): Group {
+  const stairs = new Group();
+  stairs.name = 'Stairs';
+  const tread = createStylizedMaterial({ color: PALETTE.wood.plank, roughness: 0.88 });
+  const stringer = createStylizedMaterial({ color: '#a8763f', roughness: 0.9 });
+
+  const length = Math.abs(run.toZ - run.fromZ);
+  const steps = Math.max(4, Math.round(run.toY / 0.2));
+  const rise = run.toY / steps;
+  const going = length / steps;
+  const direction = Math.sign(run.toZ - run.fromZ) || -1;
+
+  for (let i = 0; i < steps; i++) {
+    // Each tread is a solid block down to the floor, so there is nothing to
+    // see through from the camera looking down the flight.
+    const top = rise * (i + 1);
+    const step = new Mesh(roundedBoxGeometry(run.width, top, going + 0.04, 0.02), tread);
+    step.position.set(run.x, top / 2, run.fromZ + direction * (going * (i + 0.5)));
+    step.castShadow = true;
+    step.receiveShadow = true;
+    stairs.add(step);
+  }
+
+  const pitch = Math.atan2(run.toY, length);
+  for (const side of [-1, 1]) {
+    const rail = new Mesh(roundedBoxGeometry(0.12, 0.9, Math.hypot(length, run.toY), 0.04), stringer);
+    rail.position.set(run.x + side * (run.width / 2 + 0.06), run.toY / 2 + 0.45, (run.fromZ + run.toZ) / 2);
+    // Tilted so the end at the top of the flight is the one that is raised.
+    rail.rotation.x = -pitch * direction;
+    rail.castShadow = true;
+    stairs.add(rail);
+  }
+
+  return stairs;
 }
 
 // --- Museum ------------------------------------------------------------------

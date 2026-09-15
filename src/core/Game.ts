@@ -61,7 +61,8 @@ import { Relationships } from '@/relationships/Relationships';
 import { ShopSystem } from '@/shops/ShopSystem';
 import { HomeFurnishing } from '@/housing/HomeFurnishing';
 import { SaveSystem, createNewSave } from '@/save/SaveSystem';
-import { SAVE_VERSION, type SaveDataV7 } from '@/save/schema';
+import { SAVE_VERSION, type SaveDataV8 } from '@/save/schema';
+import { festivalIsOpen, festivalOn, nextFestival, type FestivalDef } from '@/data/events';
 import { DEFAULT_LOOK, type CharacterLook } from '@/data/clothing';
 import { FURNITURE_BY_ID, HOUSE_STYLES_BY_ID } from '@/data/furniture';
 import { CRAFTING, RECIPES } from '@/data/recipes';
@@ -80,6 +81,7 @@ import { TitleScreen } from '@/ui/TitleScreen';
 import { TouchControls } from '@/ui/TouchControls';
 import { playerPortrait, villagerPortrait } from '@/ui/portraits';
 import {
+  openCalendar,
   openCooking,
   openCrafting,
   openHome,
@@ -125,6 +127,28 @@ function worldAnchors(interior: InteriorScene): Record<string, Vector3> {
     out[key] = new Vector3(local.x + INTERIOR_ORIGIN.x, local.y + INTERIOR_ORIGIN.y, local.z + INTERIOR_ORIGIN.z);
   }
   return out;
+}
+
+/** Used where a room's offset within its scene is nothing. */
+const ZERO = new Vector3();
+
+/** The footprint of every room in a scene, in interior-local metres. */
+function interiorExtent(interior: InteriorScene): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const rooms = interior.rooms ?? [{ room: interior.room, origin: ZERO }];
+  const extent = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const { room, origin } of rooms) {
+    extent.minX = Math.min(extent.minX, room.bounds.minX + origin.x);
+    extent.maxX = Math.max(extent.maxX, room.bounds.maxX + origin.x);
+    extent.minZ = Math.min(extent.minZ, room.bounds.minZ + origin.z);
+    extent.maxZ = Math.max(extent.maxZ, room.bounds.maxZ + origin.z);
+  }
+  return extent;
+}
+
+/** "6 PM" — for announcing when a festival opens. */
+function formatHour(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
 type Mode = 'title' | 'exterior' | 'interior' | 'decorating' | 'building';
@@ -506,7 +530,7 @@ export class Game {
 
   // --- Save ----------------------------------------------------------------
 
-  private applySave(data: SaveDataV7): void {
+  private applySave(data: SaveDataV8): void {
     this.time.load(data.clock.day, data.clock.minutes);
     // The elapsed-minute counter is absolute (day * 1440 + minutes); seeding it
     // with the time of day alone made the first frame after a load advance the
@@ -563,6 +587,11 @@ export class Game {
     this.announcedOnDay.clear();
     this.landscaping.load(data.world.decor);
     this.reef.load(data.world.reef, this.time.day);
+    this.festivalsAttended = new Set(data.world.festivalsAttended);
+    // Loading into the middle of a festival afternoon should find the square
+    // already decorated and full, not waiting for the hour to turn.
+    this.activeFestival = null;
+    this.updateFestival();
 
     Object.assign(this.settings, {
       masterVolume: data.settings.masterVolume,
@@ -578,14 +607,8 @@ export class Game {
     this.renderer.autoQuality = this.settings.autoQuality;
     this.renderer.applyQuality(this.settings.quality);
 
-    // Furniture needs the home interior's bounds, which depend on the level.
-    const layout = homeLayoutFor(this.homeLevel);
-    this.furnishing.setBounds({
-      minX: -layout.gridHalfW + 0.6,
-      maxX: layout.gridHalfW - 0.6,
-      minZ: -layout.gridHalfD + 0.6,
-      maxZ: layout.gridHalfD - 1.2,
-    });
+    // Furniture needs the cottage's plan, which depends on the level.
+    this.applyHomeLayout();
     this.furnishing.load(data.home.placed);
 
     const season = this.time.season;
@@ -596,6 +619,10 @@ export class Game {
   }
 
   private townWorks = { bridge: false, stairs: false, lighthouse: false };
+  /** Days whose festival the player has already taken part in. */
+  private festivalsAttended = new Set<number>();
+  /** The festival the square is given over to right now, if any. */
+  private activeFestival: FestivalDef | null = null;
   /** Where the player is standing, for the region banner. */
   private currentRegion: RegionId = 'town';
   /** The region being settled into, which is not yet `currentRegion`. */
@@ -604,7 +631,7 @@ export class Game {
   /** The day each region was last announced, so arriving is once a day rather than once ever. */
   private announcedOnDay = new Map<RegionId, number>();
 
-  snapshot(): SaveDataV7 {
+  snapshot(): SaveDataV8 {
     return {
       version: SAVE_VERSION,
       slot: this.slot,
@@ -653,6 +680,7 @@ export class Game {
           .map((n) => ({ id: n.id, harvestedOnDay: n.harvestedOnDay })),
         townWorks: { ...this.townWorks },
         orchardOpen: this.props.orchardGate.isOpen,
+        festivalsAttended: [...this.festivalsAttended],
       },
       quests: this.quests.serialize(),
       relationships: this.relationships.serialize(),
@@ -697,6 +725,8 @@ export class Game {
         this.farm.advance(delta, this.time.day);
       }
       this.lastMinutes = minutesNow;
+      // Cheap, and the square has to open on the hour rather than on the day.
+      this.updateFestival();
     }
     this.weather.update(dt);
 
@@ -875,13 +905,38 @@ export class Game {
       const interior = this.activeInterior;
       if (interior) {
         const b = interior.room.bounds;
+        const circles = [
+          ...interior.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius })),
+          ...(interior.id === 'home'
+            ? this.furnishing.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius }))
+            : []),
+        ];
+        // A room with more than one rectangle of floor is walked by its
+        // regions, which also carry the floor up a staircase; everything else
+        // is one room and one bounding box.
+        if (interior.regions) {
+          return {
+            circles,
+            boxes: [],
+            regions: interior.regions.map((region) => ({
+              minX: region.minX + INTERIOR_ORIGIN.x,
+              maxX: region.maxX + INTERIOR_ORIGIN.x,
+              minZ: region.minZ + INTERIOR_ORIGIN.z,
+              maxZ: region.maxZ + INTERIOR_ORIGIN.z,
+              floorY: region.floorY,
+              ramp: region.ramp
+                ? {
+                    ...region.ramp,
+                    from: region.ramp.from + (region.ramp.axis === 'x' ? INTERIOR_ORIGIN.x : INTERIOR_ORIGIN.z),
+                    to: region.ramp.to + (region.ramp.axis === 'x' ? INTERIOR_ORIGIN.x : INTERIOR_ORIGIN.z),
+                  }
+                : undefined,
+            })),
+            fixedHeight: 0,
+          };
+        }
         return {
-          circles: [
-            ...interior.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius })),
-            ...(interior.id === 'home'
-              ? this.furnishing.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius }))
-              : []),
-          ],
+          circles,
           boxes: [],
           bounds: {
             minX: b.minX + INTERIOR_ORIGIN.x,
@@ -894,7 +949,7 @@ export class Game {
       }
     }
     return {
-      circles: [...this.props.colliders, ...this.landscaping.colliders],
+      circles: [...this.props.colliders, ...this.props.festivalColliders, ...this.landscaping.colliders],
       boxes: this.buildings.colliders,
       // The shelf is where the dive happens, so the player has to be able to
       // swim out onto it rather than stopping at waist depth.
@@ -1098,16 +1153,21 @@ export class Game {
   private updateInteriorWalls(cameraPosition: Vector3): void {
     const interior = this.activeInterior;
     if (!interior) return;
-    const cx = cameraPosition.x - INTERIOR_ORIGIN.x;
-    const cz = cameraPosition.z - INTERIOR_ORIGIN.z;
-    const length = Math.max(0.001, Math.hypot(cx, cz));
-
-    for (const wall of interior.room.walls) {
-      // A wall whose outward normal points toward the camera is between the
-      // camera and the room.
-      const facing = (wall.nx * cx + wall.nz * cz) / length;
-      const visible = facing < 0.35;
-      for (const part of wall.parts) part.visible = visible;
+    // Every room is judged against its own centre: in a cottage with a back
+    // room and a loft, the wall between the camera and each of them is a
+    // different wall, and hiding the main room's would not open up the others.
+    const rooms = interior.rooms ?? [{ room: interior.room, origin: ZERO }];
+    for (const { room, origin } of rooms) {
+      const cx = cameraPosition.x - INTERIOR_ORIGIN.x - origin.x;
+      const cz = cameraPosition.z - INTERIOR_ORIGIN.z - origin.z;
+      const length = Math.max(0.001, Math.hypot(cx, cz));
+      for (const wall of room.walls) {
+        // A wall whose outward normal points toward the camera is between the
+        // camera and the room.
+        const facing = (wall.nx * cx + wall.nz * cz) / length;
+        const visible = facing < 0.35;
+        for (const part of wall.parts) part.visible = visible;
+      }
     }
   }
 
@@ -1542,8 +1602,74 @@ export class Game {
 
     this.uiRoot.toast(`Day ${day} · ${this.time.season}`, 'good');
     this.uiRoot.showLocation(`Day ${day}`, this.time.season);
+
+    // Yesterday's decorations come down, and the calendar says its piece: what
+    // is on today, or what to be in the square for tomorrow.
+    this.updateFestival();
+    const coming = nextFestival(day);
+    if (coming && coming.inDays === 0) {
+      this.uiRoot.toast(`${coming.festival.name} today, from ${formatHour(coming.festival.from)}.`, 'rare');
+    } else if (coming && coming.inDays === 1) {
+      this.uiRoot.toast(`${coming.festival.name} in the square tomorrow.`, 'good');
+    }
     this.save.markDirty();
     this.save.write(this.snapshot());
+  }
+
+  // --- Festivals -----------------------------------------------------------
+
+  /**
+   * Opens or closes the day's festival.
+   *
+   * Called every frame and does nothing almost every time: the festival is a
+   * function of the day and the hour, so this is only ever noticing that one
+   * of them has crossed a boundary. When it has, the square is decorated and
+   * everybody with a station in it is sent there — or sent back to their day.
+   */
+  private updateFestival(): void {
+    const today = festivalOn(this.time.day);
+    const open = today && festivalIsOpen(today, this.time.hour) ? today : null;
+    if ((open?.id ?? null) === (this.activeFestival?.id ?? null)) return;
+
+    const opening = open !== null;
+    this.activeFestival = open;
+    const centre = LANDMARKS['square.center'];
+    this.props.setFestival(open?.decor ?? null, open?.accent);
+    this.villagers.setFestival(open
+      ? {
+          id: open.id,
+          stations: new Map(open.stations.map((station) => [
+            station.villagerId,
+            {
+              x: centre.x + station.x,
+              z: centre.z + station.z,
+              label: station.label,
+              activity: station.activity,
+            },
+          ])),
+        }
+      : null);
+
+    if (opening && open) {
+      this.uiRoot.toast(`${open.name} has started in the square.`, 'rare');
+      this.uiRoot.showLocation(open.name, 'Town Square');
+    }
+  }
+
+  /** Takes part in the day's festival, once. */
+  private joinFestival(): void {
+    const festival = this.activeFestival;
+    if (!festival || this.festivalsAttended.has(this.time.day)) return;
+    this.festivalsAttended.add(this.time.day);
+    this.addCoins(festival.activity.reward);
+    this.player.emote('cheer');
+    // Turning up is worth something with everyone, not just whoever you
+    // happen to be standing next to.
+    for (const villager of VILLAGERS) this.relationships.add(villager.id, 3);
+    this.villagers.greetFrom(this.player.position, 14);
+    this.uiRoot.toast(festival.activity.done, 'rare');
+    this.bus.emit('audio:sfx', { id: 'ui.select' });
+    this.save.markDirty();
   }
 
   // --- Interiors -----------------------------------------------------------
@@ -1574,7 +1700,9 @@ export class Game {
       // Interiors are viewed as open-topped models: the camera rides above the
       // walls and looks down through the missing ceiling, so nothing occludes
       // the room and the framing works for a cottage and a museum alike.
-      const b = interior.room.bounds;
+      // Wide enough for every room, so walking into the back of the cottage
+      // does not walk out from under the camera.
+      const b = interiorExtent(interior);
       const margin = 16;
       this.cameraRig.bounds = null;
       this.cameraRig.positionBounds = {
@@ -1710,9 +1838,11 @@ export class Game {
     if (this.input.justPressed('useTool')) {
       const piece = this.furnishing.nearest(local.x, local.z, 1.8);
       if (piece) {
-        const defId = this.furnishing.remove(piece.uid);
-        if (defId) {
-          this.uiRoot.toast('Stored.', 'neutral');
+        // Clearing a table takes what is standing on it, so the message says
+        // how much went away rather than implying one piece did.
+        const stored = this.furnishing.remove(piece.uid);
+        if (stored.length > 0) {
+          this.uiRoot.toast(stored.length > 1 ? `Stored ${stored.length} pieces.` : 'Stored.', 'neutral');
           this.save.markDirty();
         }
       }
@@ -1990,6 +2120,49 @@ export class Game {
         });
       }
       return options;
+    });
+
+    // The square's notice board is where the year is pinned up.
+    this.interactions.register('noticeBoard', () => {
+      const centre = LANDMARKS['square.center'];
+      const x = centre.x - 7.4;
+      const z = centre.z + 3.0;
+      if (Math.hypot(this.player.position.x - x, this.player.position.z - z) > 2.8) return null;
+      return {
+        id: 'town.calendar',
+        kind: 'read',
+        label: 'Read the notices',
+        detail: 'Calendar',
+        action: 'interact',
+        priority: 60,
+        worldX: x,
+        worldY: terrainHeight(x, z) + 2.8,
+        worldZ: z,
+        perform: () => openCalendar(this.panelContext()),
+      } satisfies InteractionOption;
+    });
+
+    this.interactions.register('festival', () => {
+      const festival = this.activeFestival;
+      if (!festival) return null;
+      const centre = LANDMARKS['square.center'];
+      const x = centre.x + festival.activity.x;
+      const z = centre.z + festival.activity.z;
+      if (Math.hypot(this.player.position.x - x, this.player.position.z - z) > 2.8) return null;
+      const been = this.festivalsAttended.has(this.time.day);
+      return {
+        id: 'festival.activity',
+        kind: 'custom',
+        label: festival.activity.label,
+        detail: festival.name,
+        action: 'interact',
+        priority: 88,
+        worldX: x,
+        worldY: terrainHeight(x, z) + 2.6,
+        worldZ: z,
+        ...(been ? { disabledReason: 'Once is enough for one year' } : {}),
+        perform: () => this.joinFestival(),
+      } satisfies InteractionOption;
     });
 
     this.interactions.register('trees', () => {
@@ -2673,6 +2846,7 @@ export class Game {
       townRating: this.lastTownRating,
       townWorks: this.townWorks,
       storyStage: this.quests.storyStage,
+      festivalsAttended: [...this.festivalsAttended],
       cooked: this.stats.cooked,
       stats: this.stats,
 
@@ -2932,6 +3106,21 @@ export class Game {
     this.save.markDirty();
   }
 
+  /**
+   * Hands the furnishing the cottage's current plan. Every room it names is a
+   * separate placement grid, so a piece in the back room stays in the back
+   * room and the loft's furniture stands at the top of the stairs.
+   */
+  private applyHomeLayout(): void {
+    const layout = homeLayoutFor(this.homeLevel);
+    this.furnishing.setRooms(layout.rooms.map((room) => ({
+      id: room.id,
+      bounds: room.grid,
+      floorY: room.floorY,
+      keepClear: room.keepClear,
+    })));
+  }
+
   private upgradeHome(): void {
     if (this.homeLevel >= 4) return;
     const cost = this.homeLevel * 2400;
@@ -2941,14 +3130,13 @@ export class Game {
     }
     this.addCoins(-cost);
     this.homeLevel += 1;
-    const layout = homeLayoutFor(this.homeLevel);
-    this.furnishing.setBounds({
-      minX: -layout.gridHalfW + 0.6,
-      maxX: layout.gridHalfW - 0.6,
-      minZ: -layout.gridHalfD + 0.6,
-      maxZ: layout.gridHalfD - 1.2,
-    });
-    this.uiRoot.toast('The cottage has grown.', 'rare');
+    this.applyHomeLayout();
+    this.uiRoot.toast(
+      this.homeLevel === 3 ? 'A whole room at the back, now.'
+        : this.homeLevel === 4 ? 'Stairs, and a loft at the top of them.'
+        : 'The cottage has grown.',
+      'rare',
+    );
     this.save.markDirty();
 
     // Rebuild the room if the player is standing in it.

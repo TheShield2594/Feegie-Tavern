@@ -8,6 +8,7 @@ import { disposeObject } from '@/util/three';
 import { EmoteBubble, type EmoteKind } from '@/rendering/WorldLabel';
 import { makeTool, TOOLS, type ToolId } from './Tools';
 import { SEA_LEVEL, isSwimmable, isWalkable, sampleWalkSurface, walkHeight, type Surface } from '@/world/heightfield';
+import { regionFloorY, type FloorRegion } from '@/world/InteriorKit';
 
 export interface MovementConstraints {
   /** Circles the player cannot walk into. */
@@ -16,6 +17,13 @@ export interface MovementConstraints {
   boxes: { x: number; z: number; halfW: number; halfD: number; rotation: number }[];
   /** When set, movement is confined to this axis-aligned rectangle (interiors). */
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /**
+   * When set, movement is confined to the union of these rectangles, and the
+   * floor height comes from whichever one the player is standing in. This is
+   * how a home with more than one room is walked: a room per region, plus a
+   * region for each doorway and staircase between them.
+   */
+  regions?: FloorRegion[];
   /** Lets the player leave the shallows for the shelf, rather than stopping at waist depth. */
   allowSwimming?: boolean;
   /** Skip terrain sampling and pin to this height (interiors). */
@@ -316,7 +324,14 @@ export class Player {
     }
 
     // --- Grounding ---------------------------------------------------------
-    if (constraints.fixedHeight !== undefined) {
+    if (constraints.regions) {
+      // The floor is whatever the region underfoot says it is, so a staircase
+      // between two rooms carries the player up with it.
+      this.position.y = this.floorHeightIn(constraints.regions, constraints.fixedHeight ?? 0);
+      this.surface = 'wood';
+      this.inWater = false;
+      this.swimDepth = 0;
+    } else if (constraints.fixedHeight !== undefined) {
       this.position.y = constraints.fixedHeight;
       this.surface = 'wood';
       this.inWater = false;
@@ -395,9 +410,34 @@ export class Player {
     }
   }
 
+  /**
+   * Highest floor the player is standing over. Regions overlap at thresholds,
+   * so where two meet the step up wins rather than the drop.
+   */
+  private floorHeightIn(regions: FloorRegion[], fallback: number): number {
+    let best: number | null = null;
+    for (const region of regions) {
+      if (this.position.x < region.minX || this.position.x > region.maxX) continue;
+      if (this.position.z < region.minZ || this.position.z > region.maxZ) continue;
+      const y = regionFloorY(region, this.position.x, this.position.z);
+      if (best === null || y > best) best = y;
+    }
+    return best ?? fallback;
+  }
+
   private isFree(x: number, z: number, constraints: MovementConstraints): boolean {
+    const regions = constraints.regions;
     const b = constraints.bounds;
-    if (b) {
+    if (regions) {
+      let inside = false;
+      for (const region of regions) {
+        if (x < region.minX + RADIUS || x > region.maxX - RADIUS) continue;
+        if (z < region.minZ + RADIUS || z > region.maxZ - RADIUS) continue;
+        inside = true;
+        break;
+      }
+      if (!inside) return false;
+    } else if (b) {
       if (x < b.minX + RADIUS || x > b.maxX - RADIUS || z < b.minZ + RADIUS || z > b.maxZ - RADIUS) return false;
     } else if (!(constraints.allowSwimming ? isSwimmable(x, z) : isWalkable(x, z))) {
       return false;

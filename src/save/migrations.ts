@@ -3,14 +3,20 @@ import { FURNITURE_BY_NAME } from '@/data/furniture';
 import { ITEMS_BY_NAME } from '@/data/items';
 import { SPECIES_BY_NAME } from '@/data/species';
 import type { InventoryItem, ItemCategory, Rarity } from '@/items/types';
-import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV7 } from './schema';
+import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV8 } from './schema';
 
 type Migration = (data: Record<string, unknown>) => Record<string, unknown>;
 
-/** The v6 shape: v7 minus the outdoor decoration and reef fields added since. */
-type LegacyV6 = Omit<SaveDataV7, 'version' | 'world'> & {
+/** The v7 shape: v8 minus the festival attendance added since. */
+type LegacyV7 = Omit<SaveDataV8, 'version' | 'world'> & {
+  version: 7;
+  world: Omit<SaveDataV8['world'], 'festivalsAttended'>;
+};
+
+/** The v6 shape: v7 minus the outdoor decoration and reef fields. */
+type LegacyV6 = Omit<LegacyV7, 'version' | 'world'> & {
   version: 6;
-  world: Omit<SaveDataV7['world'], 'decor' | 'reef'>;
+  world: Omit<LegacyV7['world'], 'decor' | 'reef'>;
 };
 
 /** The v5 shape: v6 minus the orchard gate. */
@@ -173,7 +179,7 @@ const migrate4to5: Migration = (data) => {
         .filter(Boolean)
     : [];
 
-  const relationships: SaveDataV7['relationships'] = {};
+  const relationships: SaveDataV8['relationships'] = {};
   const legacyFriendship = (data.friendship ?? {}) as Record<string, unknown>;
   const legacyRequests = (data.requests ?? {}) as Record<string, unknown>;
   for (const [name, value] of Object.entries(legacyFriendship)) {
@@ -251,7 +257,7 @@ const migrate4to5: Migration = (data) => {
       minutes: Math.max(0, Math.min(1439, Math.round(num(data.time, 480)))),
     },
     weather: {
-      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV7['weather']['kind']) ?? 'clear',
+      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV8['weather']['kind']) ?? 'clear',
       remaining: 240,
     },
     player: {
@@ -292,7 +298,7 @@ const migrate4to5: Migration = (data) => {
       // wearing is the one style the player carries over as owned.
       ownedStyles: [styleId],
       ownedFurniture,
-      placed: placed as SaveDataV7['home']['placed'],
+      placed: placed as SaveDataV8['home']['placed'],
     },
     farm: { plots },
     world: {
@@ -365,6 +371,25 @@ const migrate6to7: Migration = (data) => {
 };
 
 /**
+ * v7 → v8: the festival calendar.
+ *
+ * Nothing in an older save says which festivals its player has already been
+ * to, and a save from before there were any has been to none — so every
+ * upgraded island starts the list empty and the next festival is its first.
+ */
+const migrate7to8: Migration = (data) => {
+  const world = (data.world ?? {}) as Record<string, unknown>;
+  return {
+    ...data,
+    version: 8,
+    world: {
+      ...world,
+      festivalsAttended: Array.isArray(world.festivalsAttended) ? world.festivalsAttended : [],
+    },
+  };
+};
+
+/**
  * Migrations keyed by the version they upgrade *from*. Running them in sequence
  * takes any historical save up to SAVE_VERSION.
  */
@@ -372,10 +397,11 @@ export const MIGRATIONS: Record<number, Migration> = {
   4: migrate4to5,
   5: migrate5to6,
   6: migrate6to7,
+  7: migrate7to8,
 };
 
 export interface MigrationResult {
-  data: SaveDataV7;
+  data: SaveDataV8;
   migratedFrom: number | null;
 }
 
@@ -404,7 +430,7 @@ export function detectVersion(data: AnySaveData): number {
  * them the moment it is handed one and an absent field would throw from inside
  * a `for ... of` rather than from here.
  */
-function assertCurrent(data: AnySaveData): asserts data is SaveDataV7 {
+function assertCurrent(data: AnySaveData): asserts data is SaveDataV8 {
   const d = data as Record<string, unknown>;
   if (d.version !== SAVE_VERSION) {
     throw new Error(`Save does not declare version ${SAVE_VERSION} (found ${String(d.version)})`);
@@ -416,7 +442,7 @@ function assertCurrent(data: AnySaveData): asserts data is SaveDataV7 {
   }
 
   const world = d.world as Record<string, unknown>;
-  const lists = ['gardens', 'decor', 'reef', 'gatherables'];
+  const lists = ['gardens', 'decor', 'reef', 'gatherables', 'festivalsAttended'];
   const malformed = lists.filter((key) => !Array.isArray(world[key]));
   if (malformed.length > 0) {
     throw new Error(`Save has malformed world list(s): ${malformed.join(', ')}`);

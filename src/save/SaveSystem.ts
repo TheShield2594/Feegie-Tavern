@@ -8,9 +8,10 @@ import {
   LEGACY_V4_KEY_PREFIX,
   LEGACY_V5_KEY_PREFIX,
   LEGACY_V6_KEY_PREFIX,
+  LEGACY_V7_KEY_PREFIX,
   SAVE_KEY_PREFIX,
   SAVE_VERSION,
-  type SaveDataV7,
+  type SaveDataV8,
 } from './schema';
 
 export interface SlotSummary {
@@ -27,8 +28,8 @@ export interface SlotSummary {
 
 export const SLOT_COUNT = 3;
 
-export function createNewSave(slot: number): SaveDataV7 {
-  const relationships: SaveDataV7['relationships'] = {};
+export function createNewSave(slot: number): SaveDataV8 {
+  const relationships: SaveDataV8['relationships'] = {};
   for (const v of VILLAGERS) {
     relationships[v.id] = { friendship: v.startingFriendship, lastTalkedDay: 0, giftsGiven: 0 };
   }
@@ -62,6 +63,7 @@ export function createNewSave(slot: number): SaveDataV7 {
       gatherables: [],
       townWorks: { bridge: false, stairs: false, lighthouse: false },
       orchardOpen: false,
+      festivalsAttended: [],
     },
     quests: { activeId: 'museum', progress: 0, issuedDay: 1, completedIds: [] },
     relationships,
@@ -95,7 +97,7 @@ export class SaveSystem {
   }
 
   /** Reads a slot, running migrations if the stored blob predates the current schema. */
-  read(slot: number): { data: SaveDataV7; migratedFrom: number | null } | null {
+  read(slot: number): { data: SaveDataV8; migratedFrom: number | null } | null {
     if (!this.storage) return null;
 
     let raw = this.storage.getItem(this.key(slot));
@@ -103,7 +105,7 @@ export class SaveSystem {
 
     // Older schemas, newest first. `migrate` takes whichever turns up the rest
     // of the way; the old key is left in place as a fallback.
-    for (const prefix of [LEGACY_V6_KEY_PREFIX, LEGACY_V5_KEY_PREFIX, LEGACY_V4_KEY_PREFIX]) {
+    for (const prefix of [LEGACY_V7_KEY_PREFIX, LEGACY_V6_KEY_PREFIX, LEGACY_V5_KEY_PREFIX, LEGACY_V4_KEY_PREFIX]) {
       if (raw) break;
       raw = this.storage.getItem(`${prefix}${slot}`);
       if (raw) source = 'legacy';
@@ -161,13 +163,13 @@ export class SaveSystem {
     return Array.from({ length: SLOT_COUNT }, (_, i) => this.summary(i + 1));
   }
 
-  write(data: SaveDataV7): void {
+  write(data: SaveDataV8): void {
     this.writeRaw(data.slot, data);
     this.dirty = false;
     this.bus.emit('save:written', { slot: data.slot });
   }
 
-  private writeRaw(slot: number, data: SaveDataV7): void {
+  private writeRaw(slot: number, data: SaveDataV8): void {
     if (!this.storage) return;
     try {
       data.savedAt = Date.now();
@@ -180,6 +182,7 @@ export class SaveSystem {
   erase(slot: number): void {
     if (!this.storage) return;
     this.storage.removeItem(this.key(slot));
+    this.storage.removeItem(`${LEGACY_V7_KEY_PREFIX}${slot}`);
     this.storage.removeItem(`${LEGACY_V6_KEY_PREFIX}${slot}`);
     this.storage.removeItem(`${LEGACY_V5_KEY_PREFIX}${slot}`);
     this.storage.removeItem(`${LEGACY_V4_KEY_PREFIX}${slot}`);
@@ -191,7 +194,7 @@ export class SaveSystem {
   }
 
   /** Called each frame; writes at most once every `interval` seconds. */
-  tick(dt: number, snapshot: () => SaveDataV7, interval = 20): void {
+  tick(dt: number, snapshot: () => SaveDataV8, interval = 20): void {
     this.autosaveTimer += dt;
     if (this.autosaveTimer < interval) return;
     this.autosaveTimer = 0;

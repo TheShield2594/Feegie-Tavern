@@ -18,6 +18,17 @@ import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { makeWindow, roundedBoxGeometry, surfaces } from './BuildingKit';
 
+/** Which wall of a room an opening is cut into, named from inside it. */
+export type RoomSide = 'front' | 'back' | 'left' | 'right';
+
+/** A gap cut through one wall, either the front door or a way into another room. */
+export interface RoomOpening {
+  side: RoomSide;
+  /** Centre of the gap along the wall, in metres from the wall's middle. */
+  offset?: number;
+  width?: number;
+}
+
 export interface RoomOptions {
   width: number;
   depth: number;
@@ -30,8 +41,25 @@ export interface RoomOptions {
   /** A doorway gap in the +Z wall, at local x = 0. */
   doorway?: boolean;
   doorwayWidth?: number;
+  /**
+   * Further gaps cut through any wall — the ways between the rooms of a
+   * multi-room home. Unlike the front door these get no daylight threshold,
+   * because there is no daylight on the other side of them.
+   */
+  openings?: RoomOpening[];
+  /**
+   * Windows are skipped on any wall carrying an interior opening, so a back
+   * room's doorway is not competing with a window for the same stretch of wall.
+   */
   /** Warm ceiling lights. */
   lights?: { x: number; z: number; color?: string; intensity?: number }[];
+  /** The room's floor height, for a raised room such as a loft. */
+  floorY?: number;
+  /**
+   * Draws the plinth and skirt that ground a room seen from outside. Off for a
+   * room that is stacked on another, where they would hang in mid-air.
+   */
+  plinth?: boolean;
   name?: string;
 }
 
@@ -41,6 +69,41 @@ export interface RoomWall {
   /** Outward normal, pointing away from the room's centre. */
   nx: number;
   nz: number;
+}
+
+/**
+ * A rectangle of walkable floor inside an interior.
+ *
+ * One room is one region, and the ways between rooms are regions of their own
+ * that overlap the rooms at either end, so a player crossing a threshold is
+ * always inside at least one of them. A region that ramps carries the floor up
+ * with it, which is what makes a staircase walkable.
+ */
+export interface FloorRegion {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  /** Floor height throughout, or at the foot of a ramp. */
+  floorY: number;
+  ramp?: {
+    axis: 'x' | 'z';
+    /** Coordinate where the climb starts, at `floorY`. */
+    from: number;
+    /** Coordinate where it ends, at `toY`. */
+    to: number;
+    toY: number;
+  };
+}
+
+/** Floor height at a point in a region, following its ramp if it has one. */
+export function regionFloorY(region: FloorRegion, x: number, z: number): number {
+  const ramp = region.ramp;
+  if (!ramp) return region.floorY;
+  const span = ramp.to - ramp.from;
+  if (Math.abs(span) < 1e-6) return ramp.toY;
+  const t = Math.min(1, Math.max(0, ((ramp.axis === 'x' ? x : z) - ramp.from) / span));
+  return region.floorY + (ramp.toY - region.floorY) * t;
 }
 
 export interface BuiltRoom {
@@ -59,6 +122,10 @@ export interface BuiltRoom {
 }
 
 const WALL_THICKNESS = 0.3;
+/** Height of every door opening, inside and out. */
+const DOOR_HEIGHT = 2.5;
+/** Width of a doorway between two rooms when the caller does not say. */
+const DEFAULT_INNER_DOOR_WIDTH = 1.8;
 
 function makeFloorTexture(kind: NonNullable<RoomOptions['floor']>): CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -170,7 +237,10 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     windows = 2,
     doorway = true,
     doorwayWidth = 2.0,
+    openings = [],
     lights = [],
+    floorY = 0,
+    plinth = true,
     name = 'Room',
   } = options;
 
@@ -195,18 +265,18 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
   group.add(floorMesh);
 
   // --- Walls ---------------------------------------------------------------
-  const wallMaterial = surfaces.plaster(wallColor);
   const trimMaterial = createStylizedMaterial({ color: trimColor, roughness: 0.85 });
   const windowGlass: MeshStandardMaterial[] = [];
 
   const walls: RoomWall[] = [];
 
-  const addWall = (w: number, x: number, z: number, rotation: number, nx = 0, nz = 0) => {
-    const parts: Mesh[] = [];
+  /** One run of wall between two gaps, or a whole wall when there are none. */
+  const addSegment = (parts: Mesh[], length: number, x: number, z: number, rotation: number) => {
+    if (length <= 0.001) return;
     // Each wall gets its own material so one can be dimmed or hidden alone.
     // A rounded-box rather than a BoxGeometry: its UVs are in metres, so the
     // plaster grain tiles at one density on a 7 m cottage wall and a 36 m hall.
-    const wall = new Mesh(roundedBoxGeometry(w, height, WALL_THICKNESS, 0.02), surfaces.plaster(wallColor));
+    const wall = new Mesh(roundedBoxGeometry(length, height, WALL_THICKNESS, 0.02), surfaces.plaster(wallColor));
     wall.position.set(x, height / 2, z);
     wall.rotation.y = rotation;
     wall.castShadow = true;
@@ -215,58 +285,104 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     group.add(wall);
     parts.push(wall);
 
-    const skirting = new Mesh(new BoxGeometry(w, 0.22, WALL_THICKNESS + 0.06), trimMaterial.clone());
+    const skirting = new Mesh(new BoxGeometry(length, 0.22, WALL_THICKNESS + 0.06), trimMaterial.clone());
     skirting.position.set(x, 0.11, z);
     skirting.rotation.y = rotation;
     skirting.userData.noFade = true;
     group.add(skirting);
     parts.push(skirting);
 
-    const picture = new Mesh(new BoxGeometry(w, 0.1, WALL_THICKNESS + 0.05), trimMaterial.clone());
+    const picture = new Mesh(new BoxGeometry(length, 0.1, WALL_THICKNESS + 0.05), trimMaterial.clone());
     picture.position.set(x, height - 0.32, z);
     picture.rotation.y = rotation;
     picture.userData.noFade = true;
     group.add(picture);
     parts.push(picture);
-
-    // Group the wall so the renderer can hide the one nearest the camera and
-    // present the room as an open-fronted model.
-    if (nx !== 0 || nz !== 0) walls.push({ parts, nx, nz });
   };
 
-  // Back and sides are solid; the front wall carries the doorway.
-  addWall(width, 0, -halfD, 0, 0, -1);
-  addWall(depth, -halfW, 0, Math.PI / 2, -1, 0);
-  addWall(depth, halfW, 0, Math.PI / 2, 1, 0);
+  /**
+   * Builds one side of the room as a run of wall broken by its gaps, and
+   * groups the result so the renderer can hide the whole side at once and
+   * present the room as an open-fronted model.
+   */
+  const addWallRun = (side: RoomSide, gaps: { offset: number; width: number; exterior: boolean }[]) => {
+    const alongDepth = side === 'left' || side === 'right';
+    const span = alongDepth ? depth : width;
+    const rotation = alongDepth ? Math.PI / 2 : 0;
+    const fixed = side === 'front' ? halfD : side === 'back' ? -halfD : side === 'left' ? -halfW : halfW;
+    const nx = side === 'left' ? -1 : side === 'right' ? 1 : 0;
+    const nz = side === 'front' ? 1 : side === 'back' ? -1 : 0;
+    // A point on the wall, given how far along it sits from the middle.
+    const at = (along: number) => (alongDepth ? { x: fixed, z: along } : { x: along, z: fixed });
 
-  if (doorway) {
-    const sideWidth = (width - doorwayWidth) / 2;
-    addWall(sideWidth, -(doorwayWidth / 2 + sideWidth / 2), halfD, 0, 0, 1);
-    addWall(sideWidth, doorwayWidth / 2 + sideWidth / 2, halfD, 0, 0, 1);
+    const parts: Mesh[] = [];
+    const sorted = [...gaps].sort((a, b) => a.offset - b.offset);
+    let cursor = -span / 2;
+    for (const gap of sorted) {
+      const gapStart = gap.offset - gap.width / 2;
+      const gapEnd = gap.offset + gap.width / 2;
+      const segment = at((cursor + gapStart) / 2);
+      addSegment(parts, gapStart - cursor, segment.x, segment.z, rotation);
+      cursor = gapEnd;
 
-    // Lintel above the opening.
-    const lintel = new Mesh(roundedBoxGeometry(doorwayWidth + 0.4, height - 2.5, WALL_THICKNESS, 0.02), wallMaterial);
-    lintel.position.set(0, height - (height - 2.5) / 2, halfD);
-    lintel.userData.noFade = true;
-    group.add(lintel);
-    walls[walls.length - 1]?.parts.push(lintel);
+      // Lintel above the opening.
+      const spot = at(gap.offset);
+      const lintel = new Mesh(
+        roundedBoxGeometry(gap.width + 0.4, height - DOOR_HEIGHT, WALL_THICKNESS, 0.02),
+        surfaces.plaster(wallColor),
+      );
+      lintel.position.set(spot.x, height - (height - DOOR_HEIGHT) / 2, spot.z);
+      lintel.rotation.y = rotation;
+      lintel.userData.noFade = true;
+      group.add(lintel);
+      parts.push(lintel);
 
-    const frame = new Mesh(roundedBoxGeometry(doorwayWidth + 0.36, 2.6, 0.16, 0.06), trimMaterial);
-    frame.rotation.x = Math.PI / 2;
-    frame.position.set(0, 1.3, halfD - 0.16);
-    group.add(frame);
+      // An upright cased frame: a jamb either side and a head across the top,
+      // which is a door frame whichever side of it the player is standing on.
+      for (const dir of [-1, 1]) {
+        const jamb = new Mesh(roundedBoxGeometry(0.14, DOOR_HEIGHT, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
+        const post = at(gap.offset + (dir * gap.width) / 2);
+        jamb.position.set(post.x, DOOR_HEIGHT / 2, post.z);
+        jamb.rotation.y = rotation;
+        jamb.userData.noFade = true;
+        group.add(jamb);
+        parts.push(jamb);
+      }
+      const head = new Mesh(roundedBoxGeometry(gap.width + 0.28, 0.14, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
+      head.position.set(spot.x, DOOR_HEIGHT, spot.z);
+      head.rotation.y = rotation;
+      head.userData.noFade = true;
+      group.add(head);
+      parts.push(head);
 
-    // A warm strip of daylight on the floor at the threshold.
-    const threshold = new Mesh(
-      new PlaneGeometry(doorwayWidth, 1.1),
-      new MeshStandardMaterial({ color: 0xfff0cc, emissive: 0xfff0cc, emissiveIntensity: 0.28, transparent: true, opacity: 0.32 }),
-    );
-    threshold.rotation.x = -Math.PI / 2;
-    threshold.position.set(0, 0.012, halfD - 0.6);
-    group.add(threshold);
-  } else {
-    addWall(width, 0, halfD, 0, 0, 1);
-  }
+      if (gap.exterior) {
+        // A warm strip of daylight on the floor at the threshold. Only the way
+        // out gets one; there is no daylight through an inside doorway.
+        const threshold = new Mesh(
+          new PlaneGeometry(gap.width, 1.1),
+          new MeshStandardMaterial({ color: 0xfff0cc, emissive: 0xfff0cc, emissiveIntensity: 0.28, transparent: true, opacity: 0.32 }),
+        );
+        threshold.rotation.x = -Math.PI / 2;
+        threshold.rotation.z = rotation;
+        threshold.position.set(spot.x - nx * 0.6, 0.012, spot.z - nz * 0.6);
+        group.add(threshold);
+      }
+    }
+    const tail = at((cursor + span / 2) / 2);
+    addSegment(parts, span / 2 - cursor, tail.x, tail.z, rotation);
+
+    walls.push({ parts, nx, nz });
+  };
+
+  const gapsFor = (side: RoomSide) => {
+    const gaps = openings
+      .filter((opening) => opening.side === side)
+      .map((opening) => ({ offset: opening.offset ?? 0, width: opening.width ?? DEFAULT_INNER_DOOR_WIDTH, exterior: false }));
+    if (doorway && side === 'front') gaps.push({ offset: 0, width: doorwayWidth, exterior: true });
+    return gaps;
+  };
+
+  for (const side of ['back', 'left', 'right', 'front'] as RoomSide[]) addWallRun(side, gapsFor(side));
 
   // --- Windows -------------------------------------------------------------
   // Split between the back wall and the sides: the camera hides whichever wall
@@ -282,34 +398,41 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     windowGlass.push(built.glass);
   };
 
-  const backCount = Math.max(1, Math.ceil(windows / 2));
+  // A wall with a doorway through it has no room for glass as well, so the
+  // windows go to whichever sides are still solid.
+  const cutInto = new Set(openings.map((opening) => opening.side));
+  const backCount = cutInto.has('back') ? 0 : Math.max(1, Math.ceil(windows / 2));
   for (let i = 0; i < backCount; i++) {
     const spacing = width / (backCount + 1);
     addInteriorWindow(-halfW + spacing * (i + 1), -halfD + WALL_THICKNESS / 2 + 0.02, 0);
   }
   for (let i = 0; i < windows - backCount; i++) {
     const side = i % 2 === 0 ? -1 : 1;
+    if (cutInto.has(side < 0 ? 'left' : 'right')) continue;
     const z = -halfD * 0.3 + Math.floor(i / 2) * (depth * 0.35);
     addInteriorWindow(side * (halfW - WALL_THICKNESS / 2 - 0.02), z, side * Math.PI / 2);
   }
 
   // A plinth under the floor grounds the room when it is seen from outside.
-  const plinth = new Mesh(
-    new BoxGeometry(width + 1.4, 0.7, depth + 1.4),
-    createStylizedMaterial({ color: '#b8ad99', roughness: 0.95 }),
-  );
-  plinth.position.y = -0.36;
-  plinth.receiveShadow = true;
-  plinth.userData.noFade = true;
-  group.add(plinth);
+  // A room stacked on another has floor below it already, so it goes without.
+  if (plinth) {
+    const base = new Mesh(
+      new BoxGeometry(width + 1.4, 0.7, depth + 1.4),
+      createStylizedMaterial({ color: '#b8ad99', roughness: 0.95 }),
+    );
+    base.position.y = -0.36;
+    base.receiveShadow = true;
+    base.userData.noFade = true;
+    group.add(base);
 
-  const skirt = new Mesh(
-    new BoxGeometry(width + 1.9, 0.24, depth + 1.9),
-    createStylizedMaterial({ color: '#a49a86', roughness: 0.96 }),
-  );
-  skirt.position.y = -0.74;
-  skirt.userData.noFade = true;
-  group.add(skirt);
+    const skirt = new Mesh(
+      new BoxGeometry(width + 1.9, 0.24, depth + 1.9),
+      createStylizedMaterial({ color: '#a49a86', roughness: 0.96 }),
+    );
+    skirt.position.y = -0.74;
+    skirt.userData.noFade = true;
+    group.add(skirt);
+  }
 
   // --- Ceiling and lights --------------------------------------------------
   const ceiling = new Mesh(new PlaneGeometry(width, depth), createStylizedMaterial({ color: trimColor, roughness: 0.95 }));
@@ -355,6 +478,10 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
     group.add(fixture);
   }
 
+  // The room carries its own floor height, so a loft is built flat and then
+  // lifted rather than every mesh in it having to know how high it sits.
+  group.position.y = floorY;
+
   return {
     group,
     walls,
@@ -364,10 +491,10 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
       minZ: -halfD + WALL_THICKNESS,
       maxZ: halfD - WALL_THICKNESS,
     },
-    entry: new Vector3(0, 0, halfD - 1.6),
-    exit: new Vector3(0, 0, halfD - 0.5),
+    entry: new Vector3(0, floorY, halfD - 1.6),
+    exit: new Vector3(0, floorY, halfD - 0.5),
     windowGlass,
     lights: pointLights,
-    floorY: 0,
+    floorY,
   };
 }

@@ -12,6 +12,7 @@ import {
   type CharacterLook,
 } from '@/data/clothing';
 import { PUBLIC_WORKS, STORY_BEATS } from '@/data/quests';
+import { upcomingFestivals, type FestivalDef } from '@/data/events';
 import { VILLAGERS } from '@/data/villagers';
 import { iconFor } from '@/items/ItemIcons';
 import { getItemDef } from '@/data/items';
@@ -47,6 +48,8 @@ export interface PanelContext {
   townWorks: { bridge: boolean; stairs: boolean; lighthouse: boolean };
   storyStage: number;
   cooked: number;
+  /** Days whose festival the player has already been to. */
+  festivalsAttended: number[];
   stats: { totalCaught: number; totalSold: number; harvested: number };
 
   inventoryStacks: (sort: string, filter: ItemCategory | 'all') => Stack[];
@@ -736,6 +739,13 @@ export function openTownHall(context: PanelContext): void {
 
 // --- Home decoration ---------------------------------------------------------
 
+/** What the next upgrade buys, keyed by the level being upgraded from. */
+const HOME_UPGRADES: Record<number, string> = {
+  1: 'Extend the cottage for more floor space.',
+  2: 'Extend the cottage, and add a room at the back.',
+  3: 'Add a staircase and a loft above the back room.',
+};
+
 export function openHome(context: PanelContext): void {
   context.ui.open({
     id: 'home',
@@ -792,12 +802,12 @@ export function openHome(context: PanelContext): void {
           el('div', { class: 'art', html: Icons.home(56) }),
           el('div', { style: 'flex:1 1 auto' }, [
             el('h3', { text: `Cottage level ${context.homeLevel}` }),
-            el('p', { class: 'cc-muted', text: context.homeLevel >= 4 ? 'Fully extended — there is room for everything now.' : `Extend the cottage for more floor space. ${formatCoins(upgradeCost)} shells.` }),
+            el('p', { class: 'cc-muted', text: context.homeLevel >= 4 ? 'Fully extended — there is room for everything now.' : `${HOME_UPGRADES[context.homeLevel]} ${formatCoins(upgradeCost)} shells.` }),
             context.homeLevel < 4
               ? el('button', {
                   class: `cc-btn ${canUpgrade ? 'primary' : ''}`,
                   style: 'margin-top:10px',
-                  text: canUpgrade ? 'Extend the cottage' : 'Save up first',
+                  text: canUpgrade ? (context.homeLevel >= 2 ? 'Build the extension' : 'Extend the cottage') : 'Save up first',
                   disabled: !canUpgrade,
                   onclick: () => { context.upgradeHome(); panel.refresh(); },
                 })
@@ -806,7 +816,7 @@ export function openHome(context: PanelContext): void {
         ]),
         el('div', { class: 'cc-section' }, [
           el('h4', { text: 'Decorate' }),
-          el('p', { class: 'cc-muted', style: 'margin-bottom:10px', text: 'Step into decorating mode to move, rotate and store furniture in the room itself.' }),
+          el('p', { class: 'cc-muted', style: 'margin-bottom:10px', text: 'Step into decorating mode to move, rotate and store furniture in the room itself. Carry a piece through a doorway to move it to another room, or set a small one down on a table.' }),
           el('button', {
             class: 'cc-btn primary',
             text: 'Enter decorating mode',
@@ -818,6 +828,75 @@ export function openHome(context: PanelContext): void {
       );
     },
   });
+}
+
+// --- Calendar ----------------------------------------------------------------
+
+/**
+ * The year ahead, one card per festival.
+ *
+ * The point of it is the top card: what is next, and how long there is to get
+ * ready for it. Everything below is there so a player who misses one can see
+ * when it comes round again rather than having to wait and find out.
+ */
+export function openCalendar(context: PanelContext): void {
+  context.ui.open({
+    id: 'calendar',
+    eyebrow: 'The Year',
+    title: 'Calendar',
+    width: 720,
+    build: (body) => {
+      const attended = new Set(context.festivalsAttended);
+      const entries = upcomingFestivals(context.day);
+
+      const whenLabel = (inDays: number) =>
+        inDays === 0 ? 'Today' : inDays === 1 ? 'Tomorrow' : `In ${inDays} days`;
+
+      // Name on its own line, then the date and the countdown side by side: in
+      // a three-across grid a pill beside the name leaves it wrapping mid-word.
+      const card = (festival: FestivalDef, inDays: number, lead: boolean) => {
+        const been = attended.has(context.day + inDays);
+        return el('div', { class: 'cc-card', style: lead ? `border-color:${festival.accent}` : '' }, [
+          el('h3', { text: festival.name }),
+          el('div', { class: 'row', style: 'align-items:center;gap:8px;margin:2px 0 8px;flex-wrap:wrap' }, [
+            el('p', {
+              // Wide enough that the date never breaks mid-phrase: where the
+              // countdown will not fit beside it, the countdown wraps instead.
+              style: 'flex:1 1 150px;min-width:150px;margin:0',
+              text: `${festival.season} · day ${festival.dayOfSeason} · from ${hourLabel(festival.from)}`,
+            }),
+            el('span', {
+              class: 'cc-pill subtle',
+              style: `color:${festival.accent};font-weight:800;flex:0 0 auto`,
+              text: whenLabel(inDays),
+            }),
+          ]),
+          el('p', { class: 'cc-muted', text: festival.blurb }),
+          inDays === 0 && been
+            ? el('p', { style: 'color:var(--sun);font-weight:800;font-size:12.5px', text: 'You have been already.' })
+            : el('span'),
+        ]);
+      };
+
+      const next = entries[0];
+      const grid = el('div', { class: 'cc-grid wide' });
+      for (const entry of entries.slice(1)) grid.append(card(entry.festival, entry.inDays, false));
+
+      body.append(
+        el('p', { class: 'cc-muted', style: 'margin-bottom:16px', text: 'Everything happens in the town square, and everyone shuts up shop for it.' }),
+        next
+          ? el('div', { class: 'cc-section' }, [el('h4', { text: 'Next' }), card(next.festival, next.inDays, true)])
+          : el('span'),
+        el('div', { class: 'cc-section' }, [el('h4', { text: 'Later in the year' }), grid]),
+      );
+    },
+  });
+}
+
+/** "6 PM" — the calendar's only clock, so it does not need the time system. */
+function hourLabel(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
 // --- Settings ----------------------------------------------------------------

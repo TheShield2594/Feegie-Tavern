@@ -17,6 +17,7 @@ import {
   Vector3,
 } from 'three';
 import { kitGeometry, kitMaterial, makeKitMesh } from '@/assets/registry';
+import type { FestivalDecor } from '@/data/events';
 import { createStylizedMaterial } from '@/rendering/materials';
 import { PALETTE } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
@@ -93,6 +94,19 @@ export class Props {
   private campfire: { light: PointLight; glow: MeshStandardMaterial; position: Vector3 } | null = null;
   /** The Secret Orchard's gate, and the collider that keeps it secret. */
   readonly orchardGate: OrchardGate;
+
+  /**
+   * Decoration raised over the town square on a festival day and taken down
+   * again afterwards. Built the first time a festival calls for it, then kept
+   * and hidden: the same handful of sets come round every year, and more than
+   * one festival shares a set in its own colour.
+   */
+  private festivalGroup: Group | null = null;
+  private festivalSets = new Map<FestivalDecor, Group>();
+  private festivalLights: PointLight[] = [];
+  private festivalKind: FestivalDecor | null = null;
+  /** Circles the square's festival furniture adds while it is up. */
+  private festivalBlockers: { x: number; z: number; radius: number }[] = [];
   /** The moored rowboat, kept so `update` can ride it on the swell. */
   private rowboat: { group: Group; x: number; z: number; heading: number } | null = null;
 
@@ -1115,6 +1129,12 @@ export class Props {
       this.lampLights[i].intensity = glow * 6.0 * flicker;
       this.lampGlass[i].emissiveIntensity = glow * 1.5 * flicker;
     }
+    for (let i = 0; i < this.festivalLights.length; i++) {
+      // Festival lanterns come up with the evening, a little out of step with
+      // one another, so the square lights by degrees rather than at a stroke.
+      const flicker = 1 + Math.sin(time * 5.1 + i * 1.7) * 0.06;
+      this.festivalLights[i].intensity = glow * 5.5 * flicker;
+    }
     if (this.waterTrough) {
       this.waterTrough.position.y = 0.62 + Math.sin(time * 1.4) * 0.012;
     }
@@ -1168,6 +1188,197 @@ export class Props {
     return [];
   }
 
+  // --- Festivals -----------------------------------------------------------
+
+  /**
+   * Raises one of the festival sets over the square, or takes down whatever is
+   * up. Idempotent: called every time the clock is checked, and does nothing
+   * when the square already looks the way it is being asked to.
+   */
+  setFestival(kind: FestivalDecor | null, accent = '#f4b5c7'): void {
+    if (kind === this.festivalKind) return;
+    this.festivalKind = kind;
+
+    if (!this.festivalGroup) {
+      const centre = LANDMARKS['square.center'];
+      this.festivalGroup = new Group();
+      this.festivalGroup.name = 'FestivalDecor';
+      this.festivalGroup.position.set(centre.x, terrainHeight(centre.x, centre.z), centre.z);
+      this.group.add(this.festivalGroup);
+    }
+
+    for (const [id, set] of this.festivalSets) set.visible = id === kind;
+    this.festivalBlockers = [];
+    this.festivalLights = [];
+    if (!kind) return;
+
+    let set = this.festivalSets.get(kind);
+    if (!set) {
+      set = this.buildFestivalSet(kind, accent);
+      this.festivalSets.set(kind, set);
+      this.festivalGroup.add(set);
+    } else {
+      // The same set serves more than one festival, in that festival's colour.
+      for (const material of set.userData.tinted as MeshStandardMaterial[]) material.color.set(accent);
+    }
+    set.visible = true;
+    this.festivalLights = set.userData.lights as PointLight[];
+    for (const light of this.festivalLights) light.color.set(accent);
+    const centre = LANDMARKS['square.center'];
+    this.festivalBlockers = (set.userData.blockers as { x: number; z: number; radius: number }[])
+      .map((b) => ({ x: centre.x + b.x, z: centre.z + b.z, radius: b.radius }));
+  }
+
+  /** Circles the player collides with while a festival is up. */
+  get festivalColliders(): { x: number; z: number; radius: number }[] {
+    return this.festivalBlockers;
+  }
+
+  /** Bunting poles ring the square; each set hangs its own thing from them. */
+  private buildFestivalSet(kind: FestivalDecor, accent: string): Group {
+    const set = new Group();
+    set.name = `Festival_${kind}`;
+    const tinted: MeshStandardMaterial[] = [];
+    const lights: PointLight[] = [];
+    const blockers: { x: number; z: number; radius: number }[] = [];
+
+    const accentMaterial = createStylizedMaterial({ color: accent, roughness: 0.88, side: DoubleSide });
+    tinted.push(accentMaterial);
+    const cream = createStylizedMaterial({ color: '#f8efdc', roughness: 0.9, side: DoubleSide });
+    const timber = createStylizedMaterial({ color: PALETTE.wood.beam, roughness: 0.92 });
+
+    // Eight poles just outside the paving, clear of the benches and the beds.
+    const RING = 9.6;
+    const POLES = 8;
+    const poleTop = 3.4;
+    const poleAt = (i: number) => {
+      const a = (i / POLES) * Math.PI * 2 + Math.PI / POLES;
+      return { x: Math.cos(a) * RING, z: Math.sin(a) * RING };
+    };
+    for (let i = 0; i < POLES; i++) {
+      const spot = poleAt(i);
+      const pole = new Mesh(new CylinderGeometry(0.07, 0.09, poleTop, 7), timber);
+      pole.position.set(spot.x, poleTop / 2, spot.z);
+      pole.castShadow = true;
+      set.add(pole);
+    }
+
+    for (let i = 0; i < POLES; i++) {
+      const a = poleAt(i);
+      const b = poleAt((i + 1) % POLES);
+      const span = Math.hypot(b.x - a.x, b.z - a.z);
+      const heading = Math.atan2(b.x - a.x, b.z - a.z);
+
+      // The line the set hangs from, laid along the run between two poles
+      // rather than composed out of Euler angles, which for a cylinder is easy
+      // to get subtly wrong.
+      const cord = new Mesh(new CylinderGeometry(0.02, 0.02, span, 5), timber);
+      cord.position.set((a.x + b.x) / 2, poleTop - 0.3, (a.z + b.z) / 2);
+      cord.quaternion.setFromUnitVectors(
+        FESTIVAL_UP,
+        new Vector3(b.x - a.x, 0, b.z - a.z).normalize(),
+      );
+      set.add(cord);
+
+      if (kind === 'lanterns') {
+        for (let n = 1; n <= 2; n++) {
+          const t = n / 3;
+          const sag = Math.sin(t * Math.PI) * 0.36;
+          const lantern = new Mesh(new SphereGeometry(0.28, 12, 9), accentMaterial);
+          lantern.scale.set(1, 0.85, 1);
+          lantern.position.set(a.x + (b.x - a.x) * t, poleTop - 0.62 - sag, a.z + (b.z - a.z) * t);
+          set.add(lantern);
+          // Two strands in four carry a light, which is enough to turn the
+          // square gold without putting sixteen point lights in the scene.
+          if (i % 2 === 0 && n === 1) {
+            const glow = new PointLight(accent, 0, 9, 2);
+            glow.position.copy(lantern.position);
+            set.add(glow);
+            lights.push(glow);
+          }
+        }
+        continue;
+      }
+
+      // Bunting: alternating flags along a sagging line.
+      const flags = 7;
+      for (let n = 0; n < flags; n++) {
+        const t = (n + 0.5) / flags;
+        const sag = Math.sin(t * Math.PI) * 0.42;
+        const flag = new Mesh(new ConeGeometry(0.17, 0.42, 3), n % 2 ? accentMaterial : cream);
+        flag.position.set(a.x + (b.x - a.x) * t, poleTop - 0.34 - sag, a.z + (b.z - a.z) * t);
+        flag.rotation.set(Math.PI, heading, 0);
+        set.add(flag);
+      }
+    }
+
+    if (kind === 'stalls') {
+      // Trestles round the edge of the paving, out of the way of the fountain.
+      for (const spot of [{ x: -8.2, z: 1.8 }, { x: 0.5, z: -8.4 }, { x: 8.6, z: -1.2 }]) {
+        const stall = new Group();
+        const heading = Math.atan2(-spot.x, -spot.z);
+        const top = new Mesh(roundedBoxGeometry(2.6, 0.12, 1.0, 0.05), timber);
+        top.position.y = 0.92;
+        top.castShadow = true;
+        stall.add(top);
+        for (const dx of [-1.15, 1.15]) {
+          for (const dz of [-0.4, 0.4]) {
+            const leg = new Mesh(new CylinderGeometry(0.06, 0.06, 0.9, 6), timber);
+            leg.position.set(dx, 0.45, dz);
+            stall.add(leg);
+          }
+          const post = new Mesh(new CylinderGeometry(0.05, 0.05, 2.2, 6), timber);
+          post.position.set(dx, 1.1, 0);
+          stall.add(post);
+        }
+        const awning = new Mesh(roundedBoxGeometry(2.8, 0.1, 1.4, 0.05), accentMaterial);
+        awning.position.set(0, 2.2, -0.1);
+        awning.rotation.x = 0.18;
+        awning.castShadow = true;
+        stall.add(awning);
+        stall.position.set(spot.x, 0, spot.z);
+        stall.rotation.y = heading;
+        set.add(stall);
+        blockers.push({ x: spot.x, z: spot.z, radius: 1.3 });
+      }
+    }
+
+    // The one thing there is to do, wherever it is the player walks up to: a
+    // trestle under a garland arch, on the door side of the fountain.
+    const focus = new Group();
+    const table = new Mesh(roundedBoxGeometry(1.8, 0.12, 0.8, 0.05), timber);
+    table.position.y = 0.88;
+    table.castShadow = true;
+    focus.add(table);
+    for (const dx of [-0.75, 0.75]) {
+      const leg = new Mesh(new CylinderGeometry(0.06, 0.06, 0.88, 6), timber);
+      leg.position.set(dx, 0.44, 0);
+      focus.add(leg);
+      const upright = new Mesh(new CylinderGeometry(0.06, 0.06, 2.4, 6), timber);
+      upright.position.set(dx, 1.2, 0);
+      upright.castShadow = true;
+      focus.add(upright);
+    }
+    const arch = new Mesh(new TorusGeometry(0.78, 0.1, 6, 18, Math.PI), accentMaterial);
+    arch.position.set(0, 2.4, 0);
+    arch.rotation.z = 0;
+    focus.add(arch);
+    for (let i = 0; i < 5; i++) {
+      const a = Math.PI * (0.12 + (i / 4) * 0.76);
+      const bloom = new Mesh(new SphereGeometry(0.13, 8, 6), i % 2 ? accentMaterial : cream);
+      bloom.position.set(Math.cos(a) * 0.78, 2.4 + Math.sin(a) * 0.78, 0);
+      focus.add(bloom);
+    }
+    focus.position.set(0, 0, 5.4);
+    set.add(focus);
+    blockers.push({ x: 0, z: 5.4, radius: 0.9 });
+
+    set.userData.tinted = tinted;
+    set.userData.lights = lights;
+    set.userData.blockers = blockers;
+    return set;
+  }
+
   dispose(): void {
     this.group.traverse((child) => {
       const mesh = child as Mesh;
@@ -1175,6 +1386,9 @@ export class Props {
     });
   }
 }
+
+/** A cylinder's own axis, for aiming bunting cords along a run. */
+const FESTIVAL_UP = new Vector3(0, 1, 0);
 
 /** In-game days before a harvested node comes back. */
 const NODE_COOLDOWNS: Record<GatherNode['kind'], number> = {
