@@ -337,14 +337,27 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
       group.add(lintel);
       parts.push(lintel);
 
-      if (gap.exterior) {
-        const frame = new Mesh(roundedBoxGeometry(gap.width + 0.36, 2.6, 0.16, 0.06), trimMaterial);
-        frame.rotation.x = Math.PI / 2;
-        frame.rotation.z = rotation;
-        frame.position.set(spot.x - nx * 0.16, 1.3, spot.z - nz * 0.16);
-        group.add(frame);
+      // An upright cased frame: a jamb either side and a head across the top,
+      // which is a door frame whichever side of it the player is standing on.
+      for (const dir of [-1, 1]) {
+        const jamb = new Mesh(roundedBoxGeometry(0.14, DOOR_HEIGHT, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
+        const post = at(gap.offset + (dir * gap.width) / 2);
+        jamb.position.set(post.x, DOOR_HEIGHT / 2, post.z);
+        jamb.rotation.y = rotation;
+        jamb.userData.noFade = true;
+        group.add(jamb);
+        parts.push(jamb);
+      }
+      const head = new Mesh(roundedBoxGeometry(gap.width + 0.28, 0.14, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
+      head.position.set(spot.x, DOOR_HEIGHT, spot.z);
+      head.rotation.y = rotation;
+      head.userData.noFade = true;
+      group.add(head);
+      parts.push(head);
 
-        // A warm strip of daylight on the floor at the threshold.
+      if (gap.exterior) {
+        // A warm strip of daylight on the floor at the threshold. Only the way
+        // out gets one; there is no daylight through an inside doorway.
         const threshold = new Mesh(
           new PlaneGeometry(gap.width, 1.1),
           new MeshStandardMaterial({ color: 0xfff0cc, emissive: 0xfff0cc, emissiveIntensity: 0.28, transparent: true, opacity: 0.32 }),
@@ -353,24 +366,6 @@ export function buildRoom(options: RoomOptions): BuiltRoom {
         threshold.rotation.z = rotation;
         threshold.position.set(spot.x - nx * 0.6, 0.012, spot.z - nz * 0.6);
         group.add(threshold);
-      } else {
-        // An inside doorway: an upright cased frame, since there is a room
-        // rather than daylight on the far side of it.
-        for (const dir of [-1, 1]) {
-          const jamb = new Mesh(roundedBoxGeometry(0.14, DOOR_HEIGHT, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
-          const post = at(gap.offset + (dir * gap.width) / 2);
-          jamb.position.set(post.x, DOOR_HEIGHT / 2, post.z);
-          jamb.rotation.y = rotation;
-          jamb.userData.noFade = true;
-          group.add(jamb);
-          parts.push(jamb);
-        }
-        const head = new Mesh(roundedBoxGeometry(gap.width + 0.28, 0.14, WALL_THICKNESS + 0.08, 0.04), trimMaterial.clone());
-        head.position.set(spot.x, DOOR_HEIGHT, spot.z);
-        head.rotation.y = rotation;
-        head.userData.noFade = true;
-        group.add(head);
-        parts.push(head);
       }
     }
     const tail = at((cursor + span / 2) / 2);
