@@ -462,6 +462,11 @@ export class Game {
     this.wasDiving = false;
     this.pendingDiveCards = [];
     this.cancelDiveCards();
+    // The card on screen goes too. `closeAll` only reaches panels, and this
+    // one lives in the overlay, so a reveal caught mid-dwell by a quit would
+    // otherwise sit over the title vista waiting for a frame loop that has
+    // moved on.
+    this.catchCard.dismiss(true);
     this.underwater = 0;
     // `update` returns before `updateAudioMix` in title mode, so the muffle
     // has to be lifted here or the title music stays underwater.
@@ -3120,6 +3125,9 @@ export class Game {
   dispose(): void {
     this.running = false;
     this.cancelDiveCards();
+    // Nothing will tick the card's timer once the loop stops, so it has to be
+    // taken down here rather than left to expire.
+    this.catchCard.dismiss(true);
     this.input.dispose();
     this.terrain.dispose();
     this.water.dispose();
