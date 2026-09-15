@@ -804,6 +804,10 @@ export class Game {
       if (diving) {
         this.pendingDiveCards = [];
         this.cancelDiveCards();
+        // Whatever is still on screen goes with them. `updateDiveCards` holds
+        // the queue while under, but an already-open card is not its to close,
+        // and it would otherwise hang over the seabed for the rest of its dwell.
+        this.catchCard.dismiss(true);
       } else {
         this.resolveDiveCatches();
       }
