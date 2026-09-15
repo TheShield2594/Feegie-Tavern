@@ -127,6 +127,22 @@ function worldAnchors(interior: InteriorScene): Record<string, Vector3> {
   return out;
 }
 
+/** Used where a room's offset within its scene is nothing. */
+const ZERO = new Vector3();
+
+/** The footprint of every room in a scene, in interior-local metres. */
+function interiorExtent(interior: InteriorScene): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const rooms = interior.rooms ?? [{ room: interior.room, origin: ZERO }];
+  const extent = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const { room, origin } of rooms) {
+    extent.minX = Math.min(extent.minX, room.bounds.minX + origin.x);
+    extent.maxX = Math.max(extent.maxX, room.bounds.maxX + origin.x);
+    extent.minZ = Math.min(extent.minZ, room.bounds.minZ + origin.z);
+    extent.maxZ = Math.max(extent.maxZ, room.bounds.maxZ + origin.z);
+  }
+  return extent;
+}
+
 type Mode = 'title' | 'exterior' | 'interior' | 'decorating' | 'building';
 
 export class Game {
@@ -578,14 +594,8 @@ export class Game {
     this.renderer.autoQuality = this.settings.autoQuality;
     this.renderer.applyQuality(this.settings.quality);
 
-    // Furniture needs the home interior's bounds, which depend on the level.
-    const layout = homeLayoutFor(this.homeLevel);
-    this.furnishing.setBounds({
-      minX: -layout.gridHalfW + 0.6,
-      maxX: layout.gridHalfW - 0.6,
-      minZ: -layout.gridHalfD + 0.6,
-      maxZ: layout.gridHalfD - 1.2,
-    });
+    // Furniture needs the cottage's plan, which depends on the level.
+    this.applyHomeLayout();
     this.furnishing.load(data.home.placed);
 
     const season = this.time.season;
@@ -875,13 +885,38 @@ export class Game {
       const interior = this.activeInterior;
       if (interior) {
         const b = interior.room.bounds;
+        const circles = [
+          ...interior.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius })),
+          ...(interior.id === 'home'
+            ? this.furnishing.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius }))
+            : []),
+        ];
+        // A room with more than one rectangle of floor is walked by its
+        // regions, which also carry the floor up a staircase; everything else
+        // is one room and one bounding box.
+        if (interior.regions) {
+          return {
+            circles,
+            boxes: [],
+            regions: interior.regions.map((region) => ({
+              minX: region.minX + INTERIOR_ORIGIN.x,
+              maxX: region.maxX + INTERIOR_ORIGIN.x,
+              minZ: region.minZ + INTERIOR_ORIGIN.z,
+              maxZ: region.maxZ + INTERIOR_ORIGIN.z,
+              floorY: region.floorY,
+              ramp: region.ramp
+                ? {
+                    ...region.ramp,
+                    from: region.ramp.from + (region.ramp.axis === 'x' ? INTERIOR_ORIGIN.x : INTERIOR_ORIGIN.z),
+                    to: region.ramp.to + (region.ramp.axis === 'x' ? INTERIOR_ORIGIN.x : INTERIOR_ORIGIN.z),
+                  }
+                : undefined,
+            })),
+            fixedHeight: 0,
+          };
+        }
         return {
-          circles: [
-            ...interior.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius })),
-            ...(interior.id === 'home'
-              ? this.furnishing.colliders.map((c) => ({ x: c.x + INTERIOR_ORIGIN.x, z: c.z + INTERIOR_ORIGIN.z, radius: c.radius }))
-              : []),
-          ],
+          circles,
           boxes: [],
           bounds: {
             minX: b.minX + INTERIOR_ORIGIN.x,
@@ -1098,16 +1133,21 @@ export class Game {
   private updateInteriorWalls(cameraPosition: Vector3): void {
     const interior = this.activeInterior;
     if (!interior) return;
-    const cx = cameraPosition.x - INTERIOR_ORIGIN.x;
-    const cz = cameraPosition.z - INTERIOR_ORIGIN.z;
-    const length = Math.max(0.001, Math.hypot(cx, cz));
-
-    for (const wall of interior.room.walls) {
-      // A wall whose outward normal points toward the camera is between the
-      // camera and the room.
-      const facing = (wall.nx * cx + wall.nz * cz) / length;
-      const visible = facing < 0.35;
-      for (const part of wall.parts) part.visible = visible;
+    // Every room is judged against its own centre: in a cottage with a back
+    // room and a loft, the wall between the camera and each of them is a
+    // different wall, and hiding the main room's would not open up the others.
+    const rooms = interior.rooms ?? [{ room: interior.room, origin: ZERO }];
+    for (const { room, origin } of rooms) {
+      const cx = cameraPosition.x - INTERIOR_ORIGIN.x - origin.x;
+      const cz = cameraPosition.z - INTERIOR_ORIGIN.z - origin.z;
+      const length = Math.max(0.001, Math.hypot(cx, cz));
+      for (const wall of room.walls) {
+        // A wall whose outward normal points toward the camera is between the
+        // camera and the room.
+        const facing = (wall.nx * cx + wall.nz * cz) / length;
+        const visible = facing < 0.35;
+        for (const part of wall.parts) part.visible = visible;
+      }
     }
   }
 
@@ -1574,7 +1614,9 @@ export class Game {
       // Interiors are viewed as open-topped models: the camera rides above the
       // walls and looks down through the missing ceiling, so nothing occludes
       // the room and the framing works for a cottage and a museum alike.
-      const b = interior.room.bounds;
+      // Wide enough for every room, so walking into the back of the cottage
+      // does not walk out from under the camera.
+      const b = interiorExtent(interior);
       const margin = 16;
       this.cameraRig.bounds = null;
       this.cameraRig.positionBounds = {
@@ -2934,6 +2976,21 @@ export class Game {
     this.save.markDirty();
   }
 
+  /**
+   * Hands the furnishing the cottage's current plan. Every room it names is a
+   * separate placement grid, so a piece in the back room stays in the back
+   * room and the loft's furniture stands at the top of the stairs.
+   */
+  private applyHomeLayout(): void {
+    const layout = homeLayoutFor(this.homeLevel);
+    this.furnishing.setRooms(layout.rooms.map((room) => ({
+      id: room.id,
+      bounds: room.grid,
+      floorY: room.floorY,
+      keepClear: room.keepClear,
+    })));
+  }
+
   private upgradeHome(): void {
     if (this.homeLevel >= 4) return;
     const cost = this.homeLevel * 2400;
@@ -2943,14 +3000,13 @@ export class Game {
     }
     this.addCoins(-cost);
     this.homeLevel += 1;
-    const layout = homeLayoutFor(this.homeLevel);
-    this.furnishing.setBounds({
-      minX: -layout.gridHalfW + 0.6,
-      maxX: layout.gridHalfW - 0.6,
-      minZ: -layout.gridHalfD + 0.6,
-      maxZ: layout.gridHalfD - 1.2,
-    });
-    this.uiRoot.toast('The cottage has grown.', 'rare');
+    this.applyHomeLayout();
+    this.uiRoot.toast(
+      this.homeLevel === 3 ? 'A whole room at the back, now.'
+        : this.homeLevel === 4 ? 'Stairs, and a loft at the top of them.'
+        : 'The cottage has grown.',
+      'rare',
+    );
     this.save.markDirty();
 
     // Rebuild the room if the player is standing in it.

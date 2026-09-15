@@ -33,11 +33,33 @@ const HELD_LIFT = 0.28;
 /** Fallback surface height for a supporting piece that does not declare one. */
 const DEFAULT_SURFACE_HEIGHT = 0.75;
 
+/** One room of the home, as far as furniture placement is concerned. */
+export interface FurnishingRoom {
+  id: string;
+  /** Where furniture may go, in the home's own local metres. */
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Height of this room's floor, so a loft's furniture stands on the loft. */
+  floorY: number;
+  /** Stretches of floor to leave alone — doorways, mainly. */
+  keepClear: { minX: number; maxX: number; minZ: number; maxZ: number }[];
+}
+
+const DEFAULT_ROOM: FurnishingRoom = {
+  id: 'main',
+  bounds: { minX: -3.5, maxX: 3.5, minZ: -3, maxZ: 3 },
+  floorY: 0,
+  keepClear: [],
+};
+
 /**
  * Furniture in the player's cottage.
  *
  * Pieces snap to a half-metre grid, rotate in quarter turns, refuse to overlap,
- * and hug the wall when they are meant to. Small pieces stack: a lamp put down
+ * and hug the wall when they are meant to. A home with more than one room keeps
+ * one set of pieces per room: every piece names the room it is in, and a piece
+ * carried through a doorway changes hands as it crosses.
+ *
+ * Small pieces stack: a lamp put down
  * over a table takes the table's surface instead of the floor, and from then on
  * it is the table's passenger — it travels with it and is stored with it.
  * Decorating mode drives one piece at a time with the same controls as the rest
@@ -50,7 +72,7 @@ export class HomeFurnishing {
   /** The piece currently being moved, if decorating. */
   editing: PlacedPiece | null = null;
   private ghost: Mesh | null = null;
-  private bounds = { minX: -3.5, maxX: 3.5, minZ: -3, maxZ: 3 };
+  private rooms: FurnishingRoom[] = [DEFAULT_ROOM];
 
   constructor(private bus: EventBus) {
     this.group.name = 'HomeFurniture';
@@ -68,12 +90,67 @@ export class HomeFurnishing {
     this.group.add(this.ghost);
   }
 
-  setBounds(bounds: { minX: number; maxX: number; minZ: number; maxZ: number }): void {
-    this.bounds = bounds;
+  /**
+   * Tells the furnishing which rooms the cottage has. Called whenever the plan
+   * changes — on load, and when an upgrade adds a room.
+   */
+  setRooms(rooms: FurnishingRoom[]): void {
+    this.rooms = rooms.length > 0 ? rooms : [DEFAULT_ROOM];
+    // A room may have grown, or gone; settle everything back inside one.
+    for (const piece of this.pieces) this.reseat(piece);
+  }
+
+  /** The room a piece belongs to, falling back to the first. */
+  private roomOf(id: string): FurnishingRoom {
+    return this.rooms.find((room) => room.id === id) ?? this.rooms[0];
+  }
+
+  /** The room a point is in, or the nearest one when it is between them. */
+  private roomAt(x: number, z: number): FurnishingRoom {
+    let nearest = this.rooms[0];
+    let bestDistance = Infinity;
+    for (const room of this.rooms) {
+      const b = room.bounds;
+      const dx = Math.max(b.minX - x, 0, x - b.maxX);
+      const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+      const distance = dx * dx + dz * dz;
+      if (distance === 0) return room;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        nearest = room;
+      }
+    }
+    return nearest;
+  }
+
+  /** Height of a piece above the home's floor, its room's own floor included. */
+  private worldY(piece: PlacedPiece): number {
+    return this.roomOf(piece.room).floorY + piece.y;
+  }
+
+  /** Puts a piece back inside its room, for when the plan has changed under it. */
+  private reseat(piece: PlacedPiece): void {
+    if (!this.rooms.some((room) => room.id === piece.room)) {
+      const spot = this.findFreeSpot(piece.def);
+      if (spot) {
+        piece.room = spot.room;
+        piece.x = spot.x;
+        piece.z = spot.z;
+        piece.y = 0;
+        piece.supportedBy = null;
+      } else {
+        piece.room = this.rooms[0].id;
+      }
+    }
+    const b = this.roomOf(piece.room).bounds;
+    const size = this.rotatedSize(this.footprintMetres(piece.def), piece.rotation);
+    piece.x = clamp(piece.x, b.minX + size.w / 2, Math.max(b.minX + size.w / 2, b.maxX - size.w / 2));
+    piece.z = clamp(piece.z, b.minZ + size.d / 2, Math.max(b.minZ + size.d / 2, b.maxZ - size.d / 2));
+    piece.group.position.set(piece.x, this.worldY(piece), piece.z);
   }
 
   /** Adds a piece, finding a free spot if none is given. */
-  place(defId: string, at?: { x: number; z: number; y?: number; rotation?: number }): PlacedPiece | null {
+  place(defId: string, at?: { x: number; z: number; y?: number; rotation?: number; room?: string }): PlacedPiece | null {
     const built = makeFurniture(defId);
     if (!built) return null;
 
@@ -90,14 +167,14 @@ export class HomeFurnishing {
       y: spot.y ?? 0,
       z: spot.z,
       rotation: spot.rotation ?? 0,
-      room: 'main',
+      room: spot.room ?? this.roomAt(spot.x, spot.z).id,
       group: built.group,
       def: built.def,
       light: built.light,
       supportedBy: null,
     };
 
-    built.group.position.set(piece.x, piece.y, piece.z);
+    built.group.position.set(piece.x, this.worldY(piece), piece.z);
     built.group.rotation.y = piece.rotation;
     this.group.add(built.group);
     this.pieces.push(piece);
@@ -173,6 +250,7 @@ export class HomeFurnishing {
     let bestTop = -Infinity;
     for (const other of this.pieces) {
       if (other === ignore || other.supportedBy === ignore.uid) continue;
+      if (other.room !== ignore.room) continue;
       const top = this.surfaceTopOf(other);
       if (top === null || top <= bestTop) continue;
       const size = this.rotatedSize(this.footprintMetres(other.def), other.rotation);
@@ -190,7 +268,7 @@ export class HomeFurnishing {
     this.editing = piece;
     // Remembered so a cancelled edit puts the piece back where it started
     // rather than leaving the half-finished move committed.
-    this.editOrigin = { x: piece.x, y: piece.y, z: piece.z, rotation: piece.rotation, supportedBy: piece.supportedBy };
+    this.editOrigin = { x: piece.x, y: piece.y, z: piece.z, rotation: piece.rotation, room: piece.room, supportedBy: piece.supportedBy };
     // Whatever is standing on it travels with it, held in the piece's own frame
     // so a quarter turn carries its passengers round with it.
     this.carried = this.passengersOf(piece.uid).map((passenger) => {
@@ -203,8 +281,8 @@ export class HomeFurnishing {
       this.ghost.visible = true;
     }
     // Lift the piece slightly so it reads as "held".
-    piece.group.position.y = piece.y + HELD_LIFT;
-    for (const rider of this.carried) rider.piece.group.position.y = rider.piece.y + HELD_LIFT;
+    piece.group.position.y = this.worldY(piece) + HELD_LIFT;
+    for (const rider of this.carried) rider.piece.group.position.y = this.worldY(rider.piece) + HELD_LIFT;
     this.bus.emit('audio:sfx', { id: 'ui.select' });
   }
 
@@ -216,20 +294,25 @@ export class HomeFurnishing {
     const size = this.footprintMetres(piece.def);
     const rotated = this.rotatedSize(size, piece.rotation);
 
+    // The piece belongs to whichever room the player has carried it into.
+    const room = this.roomAt(targetX, targetZ);
+    piece.room = room.id;
+    const bounds = room.bounds;
+
     let x = Math.round(targetX / GRID) * GRID;
     let z = Math.round(targetZ / GRID) * GRID;
-    x = clamp(x, this.bounds.minX + rotated.w / 2, this.bounds.maxX - rotated.w / 2);
-    z = clamp(z, this.bounds.minZ + rotated.d / 2, this.bounds.maxZ - rotated.d / 2);
+    x = clamp(x, bounds.minX + rotated.w / 2, bounds.maxX - rotated.w / 2);
+    z = clamp(z, bounds.minZ + rotated.d / 2, bounds.maxZ - rotated.d / 2);
 
     // Wall-mounted pieces snap flat against the nearest wall.
     if (piece.def.surface === 'wall') {
-      const toBack = Math.abs(z - this.bounds.minZ);
-      const toLeft = Math.abs(x - this.bounds.minX);
-      const toRight = Math.abs(x - this.bounds.maxX);
+      const toBack = Math.abs(z - bounds.minZ);
+      const toLeft = Math.abs(x - bounds.minX);
+      const toRight = Math.abs(x - bounds.maxX);
       const nearest = Math.min(toBack, toLeft, toRight);
-      if (nearest === toBack) { z = this.bounds.minZ + 0.2; piece.rotation = 0; }
-      else if (nearest === toLeft) { x = this.bounds.minX + 0.2; piece.rotation = Math.PI / 2; }
-      else { x = this.bounds.maxX - 0.2; piece.rotation = -Math.PI / 2; }
+      if (nearest === toBack) { z = bounds.minZ + 0.2; piece.rotation = 0; }
+      else if (nearest === toLeft) { x = bounds.minX + 0.2; piece.rotation = Math.PI / 2; }
+      else { x = bounds.maxX - 0.2; piece.rotation = -Math.PI / 2; }
     }
 
     // A small piece takes whatever surface is under the cursor, and the floor
@@ -240,14 +323,15 @@ export class HomeFurnishing {
 
     piece.x = x;
     piece.z = z;
+    const resting = this.worldY(piece);
     // Floor pieces float while carried; wall fittings stay put against their wall.
-    piece.group.position.set(x, piece.def.surface === 'wall' ? piece.y : piece.y + HELD_LIFT, z);
+    piece.group.position.set(x, piece.def.surface === 'wall' ? resting : resting + HELD_LIFT, z);
     piece.group.rotation.y = piece.rotation;
     this.followCarried();
 
     const valid = this.isFree(piece, x, z, piece.y);
     if (this.ghost) {
-      this.ghost.position.set(x, piece.y + 0.02, z);
+      this.ghost.position.set(x, resting + 0.02, z);
       this.ghost.rotation.z = -piece.rotation;
       this.ghost.scale.set(rotated.w, rotated.d, 1);
       (this.ghost.material as MeshStandardMaterial).color.set(valid ? 0x7fd6a8 : 0xd97a6a);
@@ -271,8 +355,8 @@ export class HomeFurnishing {
       this.bus.emit('audio:sfx', { id: 'ui.error' });
       return false;
     }
-    piece.group.position.y = piece.y;
-    for (const rider of this.carried) rider.piece.group.position.y = rider.piece.y;
+    piece.group.position.y = this.worldY(piece);
+    for (const rider of this.carried) rider.piece.group.position.y = this.worldY(rider.piece);
     this.editing = null;
     this.editOrigin = null;
     this.carried = [];
@@ -289,12 +373,13 @@ export class HomeFurnishing {
       piece.y = this.editOrigin.y;
       piece.z = this.editOrigin.z;
       piece.rotation = this.editOrigin.rotation;
+      piece.room = this.editOrigin.room;
       piece.supportedBy = this.editOrigin.supportedBy;
     }
-    piece.group.position.set(piece.x, piece.y, piece.z);
+    piece.group.position.set(piece.x, this.worldY(piece), piece.z);
     piece.group.rotation.y = piece.rotation;
     this.followCarried();
-    for (const rider of this.carried) rider.piece.group.position.y = rider.piece.y;
+    for (const rider of this.carried) rider.piece.group.position.y = this.worldY(rider.piece);
     this.editing = null;
     this.editOrigin = null;
     this.carried = [];
@@ -302,7 +387,7 @@ export class HomeFurnishing {
     this.bus.emit('audio:sfx', { id: 'ui.back' });
   }
 
-  private editOrigin: { x: number; y: number; z: number; rotation: number; supportedBy: string | null } | null = null;
+  private editOrigin: { x: number; y: number; z: number; rotation: number; room: string; supportedBy: string | null } | null = null;
   /** Pieces riding on the one being moved, in its local frame. */
   private carried: { piece: PlacedPiece; localX: number; localZ: number; localRotation: number }[] = [];
 
@@ -317,9 +402,10 @@ export class HomeFurnishing {
       rider.piece.x = support.x + offset.x;
       rider.piece.z = support.z + offset.z;
       rider.piece.y = top ?? support.y;
+      rider.piece.room = support.room;
       rider.piece.rotation = rider.localRotation + support.rotation;
       rider.piece.group.rotation.y = rider.piece.rotation;
-      rider.piece.group.position.set(rider.piece.x, rider.piece.y + held, rider.piece.z);
+      rider.piece.group.position.set(rider.piece.x, this.worldY(rider.piece) + held, rider.piece.z);
     }
   }
 
@@ -338,8 +424,20 @@ export class HomeFurnishing {
    */
   private isFree(piece: PlacedPiece, x: number, z: number, y = piece.y): boolean {
     const a = this.rotatedSize(this.footprintMetres(piece.def), piece.rotation);
+
+    // A doorway is not somewhere to put a sofa, however much space is free.
+    if (piece.def.kind !== 'rug') {
+      for (const keep of this.roomOf(piece.room).keepClear) {
+        if (Math.abs(x - (keep.minX + keep.maxX) / 2) >= (a.w + keep.maxX - keep.minX) / 2) continue;
+        if (Math.abs(z - (keep.minZ + keep.maxZ) / 2) >= (a.d + keep.maxZ - keep.minZ) / 2) continue;
+        return false;
+      }
+    }
+
     for (const other of this.pieces) {
       if (other === piece) continue;
+      // Rooms are separate sets; nothing in one can be in another's way.
+      if (other.room !== piece.room) continue;
       // The piece it is standing on, and anything travelling with it, are not
       // in its way.
       if (other.uid === piece.supportedBy || other.supportedBy === piece.uid) continue;
@@ -381,10 +479,10 @@ export class HomeFurnishing {
 
   bounds3(): Box3 {
     const box = new Box3();
-    box.setFromCenterAndSize(
-      new Vector3(0, 1, 0),
-      new Vector3(this.bounds.maxX - this.bounds.minX, 3, this.bounds.maxZ - this.bounds.minZ),
-    );
+    for (const room of this.rooms) {
+      box.expandByPoint(new Vector3(room.bounds.minX, room.floorY, room.bounds.minZ));
+      box.expandByPoint(new Vector3(room.bounds.maxX, room.floorY + 3, room.bounds.maxZ));
+    }
     return box;
   }
 
@@ -407,7 +505,10 @@ export class HomeFurnishing {
     const ordered = [...data].sort((a, b) => a.y - b.y);
     for (const raw of ordered) {
       if (!FURNITURE_BY_ID.has(raw.defId)) continue;
-      this.place(raw.defId, { x: raw.x, y: raw.y, z: raw.z, rotation: raw.rotation });
+      const placed = this.place(raw.defId, { x: raw.x, y: raw.y, z: raw.z, rotation: raw.rotation, room: raw.room });
+      // A piece saved in a room this cottage does not have yet — or no longer
+      // has — is found a spot rather than dropped.
+      if (placed) this.reseat(placed);
     }
     this.resolveSupports();
   }
@@ -426,23 +527,27 @@ export class HomeFurnishing {
         // Whatever held it up is gone; put it back on the floor rather than
         // leaving it hanging.
         piece.y = 0;
-        piece.group.position.y = 0;
+        piece.group.position.y = this.worldY(piece);
         continue;
       }
       piece.supportedBy = support.uid;
       piece.y = this.surfaceTopOf(support)!;
-      piece.group.position.y = piece.y;
+      piece.group.position.y = this.worldY(piece);
     }
   }
 
-  private findFreeSpot(def: FurnitureDef): { x: number; z: number; y?: number; rotation?: number } | null {
+  /** The first free square metre, searching the rooms in plan order. */
+  private findFreeSpot(def: FurnitureDef): { x: number; z: number; y?: number; rotation?: number; room: string } | null {
     const size = this.footprintMetres(def);
-    for (let z = this.bounds.minZ + size.d / 2; z <= this.bounds.maxZ - size.d / 2; z += GRID) {
-      for (let x = this.bounds.minX + size.w / 2; x <= this.bounds.maxX - size.w / 2; x += GRID) {
-        // Leave the doorway clear so the player never materialises inside a sofa.
-        if (z > this.bounds.maxZ - 2.2 && Math.abs(x) < 1.6) continue;
-        const probe = { def, rotation: 0, x, z, y: 0, supportedBy: null } as PlacedPiece;
-        if (this.isFree(probe, x, z, 0)) return { x: Math.round(x / GRID) * GRID, z: Math.round(z / GRID) * GRID };
+    for (const room of this.rooms) {
+      const b = room.bounds;
+      for (let z = b.minZ + size.d / 2; z <= b.maxZ - size.d / 2; z += GRID) {
+        for (let x = b.minX + size.w / 2; x <= b.maxX - size.w / 2; x += GRID) {
+          const probe = { def, rotation: 0, x, z, y: 0, room: room.id, supportedBy: null } as PlacedPiece;
+          if (this.isFree(probe, x, z, 0)) {
+            return { x: Math.round(x / GRID) * GRID, z: Math.round(z / GRID) * GRID, room: room.id };
+          }
+        }
       }
     }
     return null;

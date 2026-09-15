@@ -736,6 +736,13 @@ export function openTownHall(context: PanelContext): void {
 
 // --- Home decoration ---------------------------------------------------------
 
+/** What the next upgrade buys, keyed by the level being upgraded from. */
+const HOME_UPGRADES: Record<number, string> = {
+  1: 'Extend the cottage for more floor space.',
+  2: 'Extend the cottage, and add a room at the back.',
+  3: 'Add a staircase and a loft above the back room.',
+};
+
 export function openHome(context: PanelContext): void {
   context.ui.open({
     id: 'home',
@@ -792,12 +799,12 @@ export function openHome(context: PanelContext): void {
           el('div', { class: 'art', html: Icons.home(56) }),
           el('div', { style: 'flex:1 1 auto' }, [
             el('h3', { text: `Cottage level ${context.homeLevel}` }),
-            el('p', { class: 'cc-muted', text: context.homeLevel >= 4 ? 'Fully extended — there is room for everything now.' : `Extend the cottage for more floor space. ${formatCoins(upgradeCost)} shells.` }),
+            el('p', { class: 'cc-muted', text: context.homeLevel >= 4 ? 'Fully extended — there is room for everything now.' : `${HOME_UPGRADES[context.homeLevel]} ${formatCoins(upgradeCost)} shells.` }),
             context.homeLevel < 4
               ? el('button', {
                   class: `cc-btn ${canUpgrade ? 'primary' : ''}`,
                   style: 'margin-top:10px',
-                  text: canUpgrade ? 'Extend the cottage' : 'Save up first',
+                  text: canUpgrade ? (context.homeLevel >= 2 ? 'Build the extension' : 'Extend the cottage') : 'Save up first',
                   disabled: !canUpgrade,
                   onclick: () => { context.upgradeHome(); panel.refresh(); },
                 })
@@ -806,7 +813,7 @@ export function openHome(context: PanelContext): void {
         ]),
         el('div', { class: 'cc-section' }, [
           el('h4', { text: 'Decorate' }),
-          el('p', { class: 'cc-muted', style: 'margin-bottom:10px', text: 'Step into decorating mode to move, rotate and store furniture in the room itself.' }),
+          el('p', { class: 'cc-muted', style: 'margin-bottom:10px', text: 'Step into decorating mode to move, rotate and store furniture in the room itself. Carry a piece through a doorway to move it to another room, or set a small one down on a table.' }),
           el('button', {
             class: 'cc-btn primary',
             text: 'Enter decorating mode',
