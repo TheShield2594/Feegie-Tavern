@@ -208,6 +208,29 @@ const KITS = {
       'fish',
     ].map((file) => ({ file, roles: ['whole'] })),
   },
+
+  resources: {
+    // KayKit ships per-model `.gltf` + `.bin` under `Assets/gltf`, not the GLB
+    // the Kenney kits use, so this is the one kit built through `format: 'gltf'`.
+    dir: 'Assets/gltf',
+    out: 'public/assets/models/resources/resources.glb',
+    mode: 'bake-atlas',
+    format: 'gltf',
+    // One shared 1024x1024 atlas across the whole pack, exactly like the Kenney
+    // colormap kits — same bake-atlas path, only the container differs.
+    atlas: 'Assets/gltf/resource_bits_texture.png',
+    // Standalone drops, so grounded and centred like the survival props, not
+    // origin-preserved.
+    //
+    // Only the two the game actually places: the log for `mat.wood` and the
+    // stone chunks for `mat.stone`. The pack's ore, metal, fuel and textile
+    // bits have no system to consume them — there is no mining or crafting — and
+    // ASSET_PLAN §5 is "import only the models actually placed".
+    sources: [
+      { file: 'Wood_Log_A', roles: ['whole'] },
+      { file: 'Stone_Chunks_Small', roles: ['whole'] },
+    ],
+  },
 };
 
 /** Splits a GLB into its JSON chunk and its binary chunk. */
@@ -227,6 +250,34 @@ function readGlb(path) {
   }
   if (!json) throw new Error(`no JSON chunk: ${path}`);
   return { json, bin };
+}
+
+/**
+ * Splits a `.gltf` (JSON + a sibling `.bin`) into the same `{ json, bin }`
+ * shape `readGlb` returns.
+ *
+ * KayKit's Resource Bits ships this form — one `.gltf`, one external `.bin` and
+ * one shared texture per pack — rather than the self-contained GLB the Kenney
+ * kits use. Only a single external buffer is supported, which is what the pack
+ * has; a `data:` URI buffer is decoded too. `readAccessor` treats `bin` as
+ * buffer 0, so a multi-buffer glTF would be misread and is rejected here
+ * instead.
+ */
+function readGltf(path) {
+  const json = JSON.parse(readFileSync(path, 'utf8'));
+  const dir = dirname(path);
+  const buffers = (json.buffers ?? []).map((b) => {
+    if (!b.uri) throw new Error(`${path}: GLB-embedded buffer (no uri) is unsupported here`);
+    if (b.uri.startsWith('data:')) return Buffer.from(b.uri.slice(b.uri.indexOf(',') + 1), 'base64');
+    return readFileSync(join(dir, decodeURIComponent(b.uri)));
+  });
+  if (buffers.length !== 1) throw new Error(`${path}: expected exactly one buffer, got ${buffers.length}`);
+  return { json, bin: buffers[0] };
+}
+
+/** Reads a source model by container: GLB for the Kenney kits, glTF for KayKit. */
+function readModel(path, format) {
+  return format === 'gltf' ? readGltf(path) : readGlb(path);
 }
 
 /** Byte width of each glTF component type. */
@@ -486,8 +537,8 @@ const transformNormal = (n, x, y, z) => {
  * Pulls one model out of a source GLB as `{ role -> { positions, normals,
  * indices } }`, compacted so each role carries only its own vertices.
  */
-function extractParts(path, wantedRoles, atlas = null, bakeMaterials = false) {
-  const { json, bin } = readGlb(path);
+function extractParts(path, wantedRoles, atlas = null, bakeMaterials = false, format = 'glb') {
+  const { json, bin } = readModel(path, format);
   const parts = new Map();
   const matrices = meshMatrices(json);
   let dropped = 0;
@@ -801,7 +852,8 @@ if (atlas) console.log(`atlas ${kit.atlas} — ${atlas.width}x${atlas.height}, b
 
 const models = [];
 for (const source of kit.sources) {
-  const parts = extractParts(join(sourceDir, `${source.file}.glb`), source.roles, atlas, kit.mode === 'bake-materials');
+  const ext = kit.format === 'gltf' ? 'gltf' : 'glb';
+  const parts = extractParts(join(sourceDir, `${source.file}.${ext}`), source.roles, atlas, kit.mode === 'bake-materials', kit.format);
   for (const role of source.roles) {
     if (!parts.has(role)) throw new Error(`${source.file}: no primitive with role "${role}"`);
   }

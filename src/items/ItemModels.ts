@@ -19,8 +19,8 @@ import type { ItemVisual } from './types';
  * stays procedural until a pear exists.
  */
 const KIT_ITEMS: Record<string, { id: string; scale: number }> = {
-  'mat.wood': { id: 'drop.wood', scale: 0.75 },
-  'mat.stone': { id: 'drop.stone', scale: 0.8 },
+  'mat.wood': { id: 'resource.wood', scale: 0.7 },
+  'mat.stone': { id: 'resource.stone', scale: 0.7 },
   'crop.pumpkin': { id: 'item.pumpkin', scale: 0.5 },
   'crop.strawberry': { id: 'item.strawberry', scale: 0.9 },
   'meal.pearTart': { id: 'item.pie', scale: 0.55 },

@@ -12,7 +12,9 @@
  */
 
 /** A single downloaded pack, optimised into one GLB. */
-export type KitId = 'nature' | 'buildings' | 'furniture' | 'props' | 'items' | 'fish' | 'animals' | 'characters';
+export type KitId =
+  | 'nature' | 'buildings' | 'furniture' | 'props' | 'items' | 'resources'
+  | 'fish' | 'animals' | 'characters';
 
 export interface KitDef {
   id: KitId;
@@ -29,6 +31,7 @@ export const KITS: KitDef[] = [
   { id: 'furniture',  file: 'assets/models/furniture/furniture.glb',   source: 'Kenney — Furniture Kit',             licence: 'CC0-1.0' },
   { id: 'props',      file: 'assets/models/props/props.glb',           source: 'Kenney — Survival Kit',              licence: 'CC0-1.0' },
   { id: 'items',      file: 'assets/models/items/items.glb',           source: 'Kenney — Food Kit',                  licence: 'CC0-1.0' },
+  { id: 'resources',  file: 'assets/models/resources/resources.glb',   source: 'Kay Lousberg (KayKit) — Resource Bits', licence: 'CC0-1.0' },
   { id: 'fish',       file: 'assets/models/fish/fish.glb',             source: 'Quaternius — LowPoly Animated Fish', licence: 'CC0-1.0' },
   { id: 'animals',    file: 'assets/models/animals/animals.glb',       source: 'Quaternius — Animated Animals',      licence: 'CC0-1.0' },
   { id: 'characters', file: 'assets/models/characters/characters.glb', source: 'KayKit — Characters',                licence: 'CC0-1.0' },
@@ -190,8 +193,11 @@ export const MODELS: ModelDef[] = [
   { id: 'props.tent',      kit: 'props', node: 'tent',           normalize: prop(2.8) },
   { id: 'props.log',       kit: 'props', node: 'tree-log',       normalize: prop(2.8) },
 
-  { id: 'drop.wood',       kit: 'props', node: 'resource-wood',  normalize: prop(2.8) },
-  { id: 'drop.stone',      kit: 'props', node: 'resource-stone', normalize: prop(2.8) },
+  // The gatherable wood and stone drops moved to the KayKit Resource Bits kit
+  // below (`resource.wood` / `resource.stone`), which reads better as a felled
+  // log and a stone pile than the Survival Kit's generic chunks. The
+  // `resource-wood` / `resource-stone` nodes still sit in `props.glb`, simply
+  // unreferenced now.
 
   // Named `tools.*` rather than `tool.*` on purpose: `tool.axe` is already a
   // sound id in `audio/sounds.ts`, and the two tables are read side by side.
@@ -259,6 +265,19 @@ export const MODELS: ModelDef[] = [
   { id: 'item.soup',       kit: 'items', node: 'bowl-soup',     normalize: prop(2.0) },
   { id: 'item.dinner',     kit: 'items', node: 'plate-dinner',  normalize: prop(2.0) },
   { id: 'item.sushi',      kit: 'items', node: 'sushi-salmon',  normalize: prop(2.0) },
+
+  // --- Resource Bits --------------------------------------------------------
+  //
+  // The gatherable-material drops `items/ItemModels.ts` shows for `mat.wood` and
+  // `mat.stone`. Only these two of the pack's ~75 models are used: the ore,
+  // metal, fuel and textile bits have no system to consume them (no mining or
+  // crafting), and §5 is "import only the models actually placed".
+  //
+  // Baked from the pack's shared atlas like the other colour kits, so
+  // `keepVertexColors`. Scales normalise each model to roughly one unit so the
+  // per-drop scale in `ItemModels` reads the same across both.
+  { id: 'resource.wood',   kit: 'resources', node: 'Wood_Log_A',         normalize: prop(0.74) },
+  { id: 'resource.stone',  kit: 'resources', node: 'Stone_Chunks_Small', normalize: prop(0.89) },
 ];
 
 export const MODELS_BY_ID = new Map<string, ModelDef>(MODELS.map((m) => [m.id, m]));

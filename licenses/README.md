@@ -41,6 +41,7 @@ least one of them, which the rule above forbids.
 | `kenney-survival-kit-CC0.txt` | Kenney — Survival Kit 2.0 | CC0, read in-archive 2026-09-14 |
 | `kenney-furniture-kit-CC0.txt` | Kenney — Furniture Kit 2.0 | CC0, read in-archive 2026-09-14 |
 | `kenney-food-kit-CC0.txt` | Kenney — Food Kit 2.0 | CC0, read in-archive 2026-09-14 |
+| `kaykit-resource-bits-CC0.txt` | Kay Lousberg (KayKit) — Resource Bits 1.0 | CC0, read in-archive 2026-09-15 |
 | `fonts-OFL.txt` | Nunito (UI font) | **SIL OFL 1.1** — the one licence here with a condition; shipping this file is the condition |
 
 ### Not yet present
@@ -51,7 +52,7 @@ Nothing below has shipped, so no licence file exists for it. See
 | File | Pack |
 | --- | --- |
 | `quaternius-CC0.txt` | Quaternius — Stylized Nature, Animated Animals, Animated Fish |
-| `kaykit-CC0.txt` | Kay Lousberg — Characters, Character Animations, Resource Bits |
+| `kaykit-CC0.txt` | Kay Lousberg — Characters, Character Animations (Resource Bits has shipped — see above) |
 | `tallbeard-CC0.txt` | Tallbeard Studios — Music Loop Bundle |
 | `polyhaven-CC0.txt` | Poly Haven — HDRIs |
 | `freesound/<id>-<licence>.txt` | Individual Freesound ambience recordings |

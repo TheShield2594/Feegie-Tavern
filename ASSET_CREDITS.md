@@ -19,8 +19,9 @@ condition — its `OFL.txt` ships in `licenses/`.
 | `nature` | Kenney — Nature Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 10 |
 | `buildings` | Kenney — Fantasy Town Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 23 |
 | `furniture` | Kenney — Furniture Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 20 |
-| `props` | Kenney — Survival Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 18 |
+| `props` | Kenney — Survival Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 16 |
 | `items` | Kenney — Food Kit | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 16 |
+| `resources` | Kay Lousberg (KayKit) — Resource Bits | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | 2 |
 | `fish` | Quaternius — LowPoly Animated Fish | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `animals` | Quaternius — Animated Animals | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
 | `characters` | KayKit — Characters | [CC0 1.0 Universal (public domain dedication)](https://creativecommons.org/publicdomain/zero/1.0/) | not required | — |
