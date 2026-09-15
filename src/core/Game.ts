@@ -100,6 +100,9 @@ import { disposeObject } from '@/util/three';
 const INTERIOR_ORIGIN = new Vector3(1000, 0, 0);
 
 /** How far in front of the player the net reaches, in metres. */
+/** Breath between one dive reveal leaving the screen and the next arriving. */
+const DIVE_CARD_GAP = 0.45;
+
 const NET_REACH = 2.6;
 /** Half the width of the swing's arc. A little over a quarter turn either way. */
 const NET_HALF_ANGLE = Math.PI * 0.42;
@@ -460,6 +463,9 @@ export class Game {
     this.pendingDiveCards = [];
     this.cancelDiveCards();
     this.underwater = 0;
+    // `update` returns before `updateAudioMix` in title mode, so the muffle
+    // has to be lifted here or the title music stays underwater.
+    this.audio.setUnderwater(0);
     this.cameraRig.terrainClamp = true;
     this.cameraRig.heightCeiling = null;
     this.hud.hideAirMeter();
@@ -664,6 +670,7 @@ export class Game {
     this.input.update(dt);
     this.audio.update(dt);
     this.catchCard.update(dt);
+    this.updateDiveCards(dt);
     this.dialogue.update(dt);
     this.uiRoot.update();
 
@@ -789,8 +796,12 @@ export class Game {
       // Just under the surface: a boom that swings over the shallows would
       // otherwise lift the view out of the water mid-dive.
       this.cameraRig.heightCeiling = diving ? SEA_LEVEL - 0.5 : null;
-      if (diving) this.pendingDiveCards = [];
-      else this.resolveDiveCatches();
+      if (diving) {
+        this.pendingDiveCards = [];
+        this.cancelDiveCards();
+      } else {
+        this.resolveDiveCatches();
+      }
     }
 
     if (diving && !paused) {
@@ -806,26 +817,45 @@ export class Game {
     }
   }
 
-  /** Reveals what the dive brought up, one card after another. */
+  /** Queues what the dive brought up, to be revealed one card at a time. */
   private resolveDiveCatches(): void {
-    const cards = this.pendingDiveCards;
+    this.diveCardQueue = this.pendingDiveCards;
     this.pendingDiveCards = [];
-    // The handles are kept because the reveal outlives the call: come up with
-    // three creatures and the last card is still a second and a half away.
-    // Quitting inside that window would otherwise drop it on the title screen,
-    // or on whichever island is loaded next.
-    cards.forEach((show, index) => {
-      this.diveCardTimers.push(window.setTimeout(() => show(), index * 720));
-    });
+    this.diveCardGap = 0;
   }
 
-  /** Reveals still waiting to fire, so a session boundary can call them off. */
-  private diveCardTimers: number[] = [];
+  /** Reveals still waiting their turn. */
+  private diveCardQueue: (() => void)[] = [];
+  /** Counts down between one reveal leaving and the next arriving. */
+  private diveCardGap = 0;
 
-  /** Drops any catch card that has been scheduled but not yet shown. */
+  /**
+   * Hands the reveals out one at a time, each waiting for the last to go.
+   *
+   * A card holds the screen for over three seconds and `CatchCard.show`
+   * dismisses whatever is already there, so a fixed stagger would cut every
+   * card but the final one off mid-read. Driving it from the frame loop also
+   * means the queue is tied to the session rather than to timers that outlive
+   * it: surface with an armful, duck straight back under, and the rest of the
+   * reveals wait rather than appearing over the seabed.
+   */
+  private updateDiveCards(dt: number): void {
+    if (this.diveCardQueue.length === 0 || this.player.diving) return;
+    if (this.catchCard.isOpen) {
+      this.diveCardGap = DIVE_CARD_GAP;
+      return;
+    }
+    if (this.diveCardGap > 0) {
+      this.diveCardGap -= dt;
+      return;
+    }
+    this.diveCardQueue.shift()?.();
+  }
+
+  /** Drops any reveal that has been queued but not yet shown. */
   private cancelDiveCards(): void {
-    for (const timer of this.diveCardTimers) window.clearTimeout(timer);
-    this.diveCardTimers = [];
+    this.diveCardQueue = [];
+    this.diveCardGap = 0;
   }
 
   /** Tracks the dive across frames so the camera only switches on the change. */
