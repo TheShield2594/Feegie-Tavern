@@ -12,6 +12,7 @@ import {
   type CharacterLook,
 } from '@/data/clothing';
 import { PUBLIC_WORKS, STORY_BEATS } from '@/data/quests';
+import { upcomingFestivals, type FestivalDef } from '@/data/events';
 import { VILLAGERS } from '@/data/villagers';
 import { iconFor } from '@/items/ItemIcons';
 import { getItemDef } from '@/data/items';
@@ -47,6 +48,8 @@ export interface PanelContext {
   townWorks: { bridge: boolean; stairs: boolean; lighthouse: boolean };
   storyStage: number;
   cooked: number;
+  /** Days whose festival the player has already been to. */
+  festivalsAttended: number[];
   stats: { totalCaught: number; totalSold: number; harvested: number };
 
   inventoryStacks: (sort: string, filter: ItemCategory | 'all') => Stack[];
@@ -825,6 +828,75 @@ export function openHome(context: PanelContext): void {
       );
     },
   });
+}
+
+// --- Calendar ----------------------------------------------------------------
+
+/**
+ * The year ahead, one card per festival.
+ *
+ * The point of it is the top card: what is next, and how long there is to get
+ * ready for it. Everything below is there so a player who misses one can see
+ * when it comes round again rather than having to wait and find out.
+ */
+export function openCalendar(context: PanelContext): void {
+  context.ui.open({
+    id: 'calendar',
+    eyebrow: 'The Year',
+    title: 'Calendar',
+    width: 720,
+    build: (body) => {
+      const attended = new Set(context.festivalsAttended);
+      const entries = upcomingFestivals(context.day);
+
+      const whenLabel = (inDays: number) =>
+        inDays === 0 ? 'Today' : inDays === 1 ? 'Tomorrow' : `In ${inDays} days`;
+
+      // Name on its own line, then the date and the countdown side by side: in
+      // a three-across grid a pill beside the name leaves it wrapping mid-word.
+      const card = (festival: FestivalDef, inDays: number, lead: boolean) => {
+        const been = attended.has(context.day + inDays);
+        return el('div', { class: 'cc-card', style: lead ? `border-color:${festival.accent}` : '' }, [
+          el('h3', { text: festival.name }),
+          el('div', { class: 'row', style: 'align-items:center;gap:8px;margin:2px 0 8px;flex-wrap:wrap' }, [
+            el('p', {
+              // Wide enough that the date never breaks mid-phrase: where the
+              // countdown will not fit beside it, the countdown wraps instead.
+              style: 'flex:1 1 150px;min-width:150px;margin:0',
+              text: `${festival.season} · day ${festival.dayOfSeason} · from ${hourLabel(festival.from)}`,
+            }),
+            el('span', {
+              class: 'cc-pill subtle',
+              style: `color:${festival.accent};font-weight:800;flex:0 0 auto`,
+              text: whenLabel(inDays),
+            }),
+          ]),
+          el('p', { class: 'cc-muted', text: festival.blurb }),
+          inDays === 0 && been
+            ? el('p', { style: 'color:var(--sun);font-weight:800;font-size:12.5px', text: 'You have been already.' })
+            : el('span'),
+        ]);
+      };
+
+      const next = entries[0];
+      const grid = el('div', { class: 'cc-grid wide' });
+      for (const entry of entries.slice(1)) grid.append(card(entry.festival, entry.inDays, false));
+
+      body.append(
+        el('p', { class: 'cc-muted', style: 'margin-bottom:16px', text: 'Everything happens in the town square, and everyone shuts up shop for it.' }),
+        next
+          ? el('div', { class: 'cc-section' }, [el('h4', { text: 'Next' }), card(next.festival, next.inDays, true)])
+          : el('span'),
+        el('div', { class: 'cc-section' }, [el('h4', { text: 'Later in the year' }), grid]),
+      );
+    },
+  });
+}
+
+/** "6 PM" — the calendar's only clock, so it does not need the time system. */
+function hourLabel(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
 // --- Settings ----------------------------------------------------------------

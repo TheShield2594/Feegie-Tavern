@@ -8,10 +8,11 @@ import type { WeatherKind } from '@/time/WeatherSystem';
  * Bump this whenever the shape below changes and add a matching entry to
  * MIGRATIONS in ./migrations.ts. Never edit an old migration — write a new one.
  */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
-export const SAVE_KEY_PREFIX = 'cozyCove.save.v7.slot';
+export const SAVE_KEY_PREFIX = 'cozyCove.save.v8.slot';
 /** Older keys, read once each so existing players keep their island. */
+export const LEGACY_V7_KEY_PREFIX = 'cozyCove.save.v7.slot';
 export const LEGACY_V6_KEY_PREFIX = 'cozyCove.save.v6.slot';
 export const LEGACY_V5_KEY_PREFIX = 'cozyCove.save.v5.slot';
 export const LEGACY_V4_KEY_PREFIX = 'cozyCoveSaveV4_slot';
@@ -83,8 +84,8 @@ export interface SettingsData {
   invertCameraX: boolean;
 }
 
-export interface SaveDataV7 {
-  version: 7;
+export interface SaveDataV8 {
+  version: 8;
   slot: number;
   savedAt: number;
   playtimeSeconds: number;
@@ -157,6 +158,11 @@ export interface SaveDataV7 {
     townWorks: { bridge: boolean; stairs: boolean; lighthouse: boolean };
     /** Whether the Secret Orchard's gate has been unlocked. */
     orchardOpen: boolean;
+    /**
+     * Days whose festival the player has already taken part in, so reloading
+     * an afternoon does not hand out the same keepsake twice.
+     */
+    festivalsAttended: number[];
   };
 
   quests: {
@@ -176,8 +182,8 @@ export interface SaveDataV7 {
   settings: SettingsData;
 }
 
-/** Any historical shape. Migrations narrow these into SaveDataV7. */
-export type AnySaveData = SaveDataV7 | Record<string, unknown>;
+/** Any historical shape. Migrations narrow these into SaveDataV8. */
+export type AnySaveData = SaveDataV8 | Record<string, unknown>;
 
 export const DEFAULT_SETTINGS: SettingsData = {
   masterVolume: 0.8,

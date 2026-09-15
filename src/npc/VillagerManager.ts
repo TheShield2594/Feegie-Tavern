@@ -11,11 +11,34 @@ export interface BuildingDoor {
   facing: number;
 }
 
+/** Where one villager stands during a festival, in world space. */
+export interface FestivalStanding {
+  x: number;
+  z: number;
+  label: string;
+  activity: ScheduleEntry['activity'];
+}
+
+/**
+ * A festival under way.
+ *
+ * `id` is what the manager watches: while it is unchanged nothing needs
+ * re-routing, and when it changes — a festival opening, or closing — everybody
+ * is sent somewhere new at once rather than waiting for the next hour.
+ */
+export interface ActiveFestival {
+  id: string;
+  stations: Map<string, FestivalStanding>;
+}
+
 /** The room the player is standing in, with its anchors in world space. */
 export interface ActiveInterior {
   building: BuildingId;
   anchors: Record<string, Vector3>;
 }
+
+/** Schedule index a festival station is filed under; no real schedule has it. */
+const FESTIVAL_ENTRY_INDEX = -1;
 
 /**
  * Owns every villager: their models, their navigation grid, and the hourly
@@ -35,6 +58,7 @@ export class VillagerManager {
 
   private lastHour = -1;
   private activeInterior: ActiveInterior | null = null;
+  private festival: ActiveFestival | null = null;
 
   constructor(
     private bus: EventBus,
@@ -56,6 +80,28 @@ export class VillagerManager {
 
   get(id: string): Villager | undefined {
     return this.villagers.get(id);
+  }
+
+  /**
+   * Puts a festival on, or takes it off.
+   *
+   * While one is on, anyone with a station in the square goes there instead of
+   * wherever the hour would have sent them — out of a shop, off a pier, and in
+   * one case out of bed. Everybody else keeps their day. Changing the festival
+   * re-routes at once rather than at the next hour, because the square filling
+   * up as the fair opens is the point of it.
+   */
+  setFestival(festival: ActiveFestival | null): void {
+    if ((this.festival?.id ?? null) === (festival?.id ?? null)) return;
+    this.festival = festival;
+    const hour = this.lastHour < 0 ? 0 : this.lastHour;
+    for (const villager of this.villagers.values()) this.routeToSchedule(villager, hour, false);
+    this.refreshPresence();
+  }
+
+  /** Where a villager is standing during the festival, if they have a station. */
+  private stationFor(villager: Villager): FestivalStanding | undefined {
+    return this.festival?.stations.get(villager.def.id);
   }
 
   /**
@@ -136,6 +182,24 @@ export class VillagerManager {
    * with a walk to the door from the inside.
    */
   private routeToSchedule(villager: Villager, hour: number, snap: boolean): void {
+    const station = this.stationFor(villager);
+    if (station) {
+      // A festival entry is not one of the villager's own, so it is filed under
+      // an index no schedule has. That way the hour after the square empties
+      // reads as a change and sends them back to their day.
+      villager.beginEntry(
+        { from: 0, at: 'square.center', label: station.label, activity: station.activity },
+        FESTIVAL_ENTRY_INDEX,
+        true,
+      );
+      villager.clearDoorTrip();
+      if (villager.indoors !== null) this.stepOutside(villager);
+      const spot = this.navigation.snapToOpen(station.x, station.z);
+      if (snap) villager.snapTo(spot.x, spot.z, station.activity);
+      else villager.goTo(spot.x, spot.z, station.activity);
+      return;
+    }
+
     const { entry, index } = villager.entryFor(hour);
     if (!villager.beginEntry(entry, index, snap)) return;
     villager.clearDoorTrip();
