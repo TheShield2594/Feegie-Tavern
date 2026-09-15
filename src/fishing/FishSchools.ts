@@ -1,6 +1,21 @@
-import { Color, Group, InstancedMesh, Object3D, SphereGeometry, Vector3 } from 'three';
+import {
+  BufferGeometry,
+  Color,
+  ConeGeometry,
+  CylinderGeometry,
+  Group,
+  InstancedMesh,
+  type Material,
+  Object3D,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three';
 import { createStylizedMaterial } from '@/rendering/materials';
+import { SPECIES_BY_ID } from '@/data/species';
+import type { SpeciesDef } from '@/items/types';
 import { Rng } from '@/util/rng';
+import { mergeGeometries } from '@/util/three';
 import {
   CREEK,
   SEA_LEVEL,
@@ -270,4 +285,309 @@ export class FishSchools {
     this.bodies.dispose();
     this.tails.dispose();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reef life
+// ---------------------------------------------------------------------------
+
+/** A sea creature sitting on the shelf, waiting to be swum down to. */
+export interface ReefCollectible {
+  id: number;
+  speciesId: string;
+  shape: ReefShape;
+  x: number;
+  y: number;
+  z: number;
+  /** Height above the seabed the creature holds station at. */
+  hover: number;
+  phase: number;
+  /** In-game day it was taken; -1 while it is still down there. */
+  takenOnDay: number;
+}
+
+type ReefShape = 'star' | 'jelly' | 'shell' | 'ammonite';
+
+/** Depth band each habitat occupies on the shelf, in metres of water. */
+const HABITAT_DEPTH: Record<string, [number, number]> = {
+  shallow: [1.0, 2.6],
+  beach: [1.0, 2.6],
+  reef: [1.8, 5.0],
+  deep: [4.6, 8.0],
+};
+
+/** How many creatures are down there at once. */
+const REEF_SLOTS = 26;
+/** Days before a collected creature's spot is worth visiting again. */
+const REEF_RESPAWN_DAYS = 1;
+
+/** Which of the four instanced silhouettes a sea creature is drawn with. */
+function reefShapeOf(species: SpeciesDef): ReefShape {
+  const shape = species.visual.shape;
+  return shape === 'jelly' || shape === 'shell' || shape === 'ammonite' ? shape : 'star';
+}
+
+/**
+ * The sea creatures a diver can collect.
+ *
+ * Built on the same instanced-and-culled pattern as {@link FishSchools} above,
+ * and for the same reason: these are dozens of small bodies drifting over the
+ * shelf, and drawing each one as its own object would cost more than the whole
+ * island. One instanced mesh per silhouette family, coloured per instance from
+ * the species table, so a new sea creature needs a table entry and nothing else.
+ *
+ * Placement is seeded, so the reef is in the same places every session — a spot
+ * worth swimming back to is only worth it if it is still there tomorrow.
+ */
+export class ReefLife {
+  readonly group = new Group();
+
+  private meshes = new Map<ReefShape, InstancedMesh>();
+  /** Slots per shape, in the order they occupy that shape's instance buffer. */
+  private bySlot = new Map<ReefShape, ReefCollectible[]>();
+  private collectibles: ReefCollectible[] = [];
+  private dummy = new Object3D();
+  private nextId = 1;
+
+  constructor(species: SpeciesDef[]) {
+    this.group.name = 'ReefLife';
+
+    const eligible = species.filter((s) => HABITAT_DEPTH[s.habitat ?? ''] !== undefined);
+    const rng = new Rng(9311);
+
+    // Scatter first, then group by silhouette, so each instanced mesh is sized
+    // to what actually landed rather than to the worst case.
+    let attempts = 0;
+    while (this.collectibles.length < REEF_SLOTS && attempts < 6000) {
+      attempts++;
+      const x = rng.spread(112);
+      const z = rng.spread(112);
+      const depth = waterDepth(x, z);
+      if (depth < HABITAT_DEPTH.shallow[0]) continue;
+
+      // The species is chosen by where the point landed rather than the other
+      // way round: that is what keeps the deep-water creatures in deep water
+      // without a second placement pass per habitat.
+      const suited = eligible.filter((s) => {
+        const band = HABITAT_DEPTH[s.habitat ?? ''];
+        return band && depth >= band[0] && depth <= band[1];
+      });
+      if (suited.length === 0) continue;
+
+      const pick = weightedReefPick(suited, rng);
+      this.collectibles.push({
+        id: this.nextId++,
+        speciesId: pick.id,
+        shape: reefShapeOf(pick),
+        x,
+        z,
+        y: SEA_LEVEL - depth,
+        // Jellies hang in the water; everything else sits on the bottom.
+        hover: pick.visual.shape === 'jelly' ? rng.range(0.9, 2.1) : rng.range(0.08, 0.22),
+        phase: rng.range(0, Math.PI * 2),
+        takenOnDay: -1,
+      });
+    }
+
+    for (const shape of ['star', 'jelly', 'shell', 'ammonite'] as ReefShape[]) {
+      const slots = this.collectibles.filter((c) => c.shape === shape);
+      if (slots.length === 0) continue;
+      const mesh = new InstancedMesh(reefGeometry(shape), reefMaterial(), slots.length);
+      mesh.name = `ReefLife_${shape}`;
+      mesh.frustumCulled = false;
+      mesh.castShadow = false;
+      this.meshes.set(shape, mesh);
+      this.bySlot.set(shape, slots);
+      this.group.add(mesh);
+
+      const tint = new Color();
+      slots.forEach((slot, index) => {
+        const def = SPECIES_BY_ID.get(slot.speciesId);
+        mesh.setColorAt(index, tint.set(def?.visual.primary ?? '#cfe0f5'));
+      });
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /** Everything currently down there, taken or not. Exposed for the map and tests. */
+  get all(): readonly ReefCollectible[] {
+    return this.collectibles;
+  }
+
+  /** Whether a creature is out at this hour, per its species' active hours. */
+  private isActive(collectible: ReefCollectible, hour: number, day: number): boolean {
+    if (collectible.takenOnDay >= 0 && day - collectible.takenOnDay < REEF_RESPAWN_DAYS) return false;
+    const def = SPECIES_BY_ID.get(collectible.speciesId);
+    if (!def?.activeHours) return true;
+    const [from, to] = def.activeHours;
+    return from <= to ? hour >= from && hour < to : hour >= from || hour < to;
+  }
+
+  /**
+   * The creature a diver at this point could reach, or null.
+   *
+   * Depth is part of the test, not just plan distance: a swimmer on the surface
+   * is several metres above a shell on the bottom, and being able to collect it
+   * without diving would make the dive decorative.
+   */
+  nearest(x: number, y: number, z: number, radius: number, hour: number, day: number): ReefCollectible | null {
+    let best: ReefCollectible | null = null;
+    let bestDistance = radius * radius;
+    for (const collectible of this.collectibles) {
+      if (!this.isActive(collectible, hour, day)) continue;
+      const dy = collectible.y + collectible.hover - y;
+      const d = (collectible.x - x) ** 2 + dy * dy + (collectible.z - z) ** 2;
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = collectible;
+      }
+    }
+    return best;
+  }
+
+  /** Takes a creature. It is gone until the reef restocks. */
+  collect(collectible: ReefCollectible, day: number): void {
+    collectible.takenOnDay = day;
+  }
+
+  /** Restores the ones whose respawn has come round. Called on a new day. */
+  refresh(day: number): void {
+    for (const collectible of this.collectibles) {
+      if (collectible.takenOnDay >= 0 && day - collectible.takenOnDay >= REEF_RESPAWN_DAYS) {
+        collectible.takenOnDay = -1;
+      }
+    }
+  }
+
+  /** Collected state, so a reef stripped today is still stripped after a reload. */
+  serialize(): { id: number; takenOnDay: number }[] {
+    return this.collectibles
+      .filter((c) => c.takenOnDay >= 0)
+      .map((c) => ({ id: c.id, takenOnDay: c.takenOnDay }));
+  }
+
+  /** Restores which creatures were taken, then lets the day's respawns through. */
+  load(data: { id: number; takenOnDay: number }[], day: number): void {
+    for (const collectible of this.collectibles) collectible.takenOnDay = -1;
+    for (const entry of data) {
+      const collectible = this.collectibles.find((c) => c.id === entry.id);
+      if (collectible) collectible.takenOnDay = entry.takenOnDay;
+    }
+    this.refresh(day);
+  }
+
+  /**
+   * Bobs and drifts the creatures, hiding anything out of its hours, already
+   * taken, or too far off to be worth a transform.
+   */
+  update(dt: number, time: number, hour: number, day: number, cameraX: number, cameraZ: number): void {
+    void dt;
+    for (const [shape, slots] of this.bySlot) {
+      const mesh = this.meshes.get(shape);
+      if (!mesh) continue;
+      for (let i = 0; i < slots.length; i++) {
+        const collectible = slots[i];
+        const distanceSq = (collectible.x - cameraX) ** 2 + (collectible.z - cameraZ) ** 2;
+        // Hidden rather than removed: a taken creature comes back, and so does
+        // one whose hour has come round again.
+        if (!this.isActive(collectible, hour, day) || distanceSq > 70 * 70) {
+          this.dummy.position.set(0, -1000, 0);
+          this.dummy.rotation.set(0, 0, 0);
+          this.dummy.scale.setScalar(0.001);
+        } else {
+          const bob = Math.sin(time * 0.8 + collectible.phase) * (collectible.hover > 0.5 ? 0.22 : 0.03);
+          this.dummy.position.set(collectible.x, collectible.y + collectible.hover + bob, collectible.z);
+          this.dummy.rotation.set(
+            Math.sin(time * 0.4 + collectible.phase) * 0.12,
+            collectible.phase,
+            Math.cos(time * 0.35 + collectible.phase) * 0.1,
+          );
+          this.dummy.scale.setScalar(1);
+        }
+        this.dummy.updateMatrix();
+        mesh.setMatrixAt(i, this.dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Releases the per-silhouette instanced meshes. */
+  dispose(): void {
+    for (const mesh of this.meshes.values()) {
+      mesh.geometry.dispose();
+      (mesh.material as Material).dispose();
+      mesh.dispose();
+    }
+  }
+}
+
+/** Rarer creatures are rarer on the shelf, not just rarer to land. */
+function weightedReefPick(candidates: SpeciesDef[], rng: Rng): SpeciesDef {
+  const weights = candidates.map((c) => (
+    c.rarity === 'common' ? 100 : c.rarity === 'uncommon' ? 40 : c.rarity === 'rare' ? 14 : 5
+  ));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let roll = rng.range(0, total);
+  for (let i = 0; i < candidates.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
+/** Shared material. Per-instance colour carries the species. */
+function reefMaterial() {
+  return createStylizedMaterial({ color: '#ffffff', roughness: 0.72 });
+}
+
+/**
+ * One merged geometry per silhouette family, at roughly life size for the
+ * creatures that use it. Deliberately the same shapes the item models and the
+ * 2D icons use, so a creature on the seabed and the same creature in the bag
+ * are recognisably one thing.
+ */
+function reefGeometry(shape: ReefShape): BufferGeometry {
+  const parts: BufferGeometry[] = [];
+
+  if (shape === 'star') {
+    const core = new SphereGeometry(0.1, 10, 8);
+    core.scale(1, 0.4, 1);
+    parts.push(core);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      const arm = new ConeGeometry(0.075, 0.3, 6);
+      arm.rotateZ(-Math.PI / 2);
+      arm.rotateY(-a);
+      arm.translate(Math.cos(a) * 0.17, 0, Math.sin(a) * 0.17);
+      parts.push(arm);
+    }
+  } else if (shape === 'jelly') {
+    const bell = new SphereGeometry(0.24, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    bell.scale(1, 0.8, 1);
+    parts.push(bell);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const tentacle = new CylinderGeometry(0.012, 0.006, 0.34, 4);
+      tentacle.translate(Math.cos(a) * 0.15, -0.17, Math.sin(a) * 0.15);
+      parts.push(tentacle);
+    }
+  } else if (shape === 'shell') {
+    const dome = new SphereGeometry(0.2, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    dome.scale(1, 0.7, 1);
+    parts.push(dome);
+    const rim = new TorusGeometry(0.19, 0.022, 6, 18);
+    rim.rotateX(Math.PI / 2);
+    parts.push(rim);
+  } else {
+    // A stack of shrinking, offset rings approximates the spiral cheaply.
+    for (let i = 0; i < 7; i++) {
+      const t = i / 7;
+      const ring = new TorusGeometry(0.24 * (1 - t * 0.8), 0.042 * (1 - t * 0.6), 6, 14);
+      const angle = t * Math.PI * 2.2;
+      ring.translate(Math.cos(angle) * 0.06 * t, 0, Math.sin(angle) * 0.06 * t);
+      parts.push(ring);
+    }
+  }
+
+  return mergeGeometries(parts);
 }

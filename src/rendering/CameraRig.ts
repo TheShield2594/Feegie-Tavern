@@ -32,6 +32,9 @@ export const CAMERA_PRESETS: Record<string, CameraPreset> = {
   exteriorWide: { distance: 22, height: 15, pitchOffset: -0.05, fov: 36 },
   interior: { distance: 9.2, height: 6.2, pitchOffset: 0.08, fov: 44 },
   fishing: { distance: 10.4, height: 5.4, pitchOffset: 0.1, fov: 38 },
+  // Low and close, so the boom stays under the surface with the diver rather
+  // than lifting out of the water and looking down at an opaque sea.
+  diving: { distance: 6.4, height: 0.9, pitchOffset: 0.18, fov: 46 },
   dialogue: { distance: 7.2, height: 4.2, pitchOffset: 0.14, fov: 36 },
   vista: { distance: 34, height: 26, pitchOffset: -0.1, fov: 34 },
 };
@@ -89,6 +92,12 @@ export class CameraRig {
   positionBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
   /** Keeps the camera above the island heightfield. Off indoors. */
   terrainClamp = true;
+  /**
+   * Hard ceiling on the camera's height. Diving sets it just under sea level
+   * so the view cannot pop out through the surface when the boom swings over
+   * shallower water.
+   */
+  heightCeiling: number | null = null;
 
   constructor(
     private camera: PerspectiveCamera,
@@ -206,6 +215,10 @@ export class CameraRig {
       }
       desired.y = Math.max(desired.y, floor);
     }
+
+    // Applied after the terrain lift, which would otherwise win and push the
+    // camera out of the water on a shelving seabed.
+    if (this.heightCeiling !== null) desired.y = Math.min(desired.y, this.heightCeiling);
 
     if (immediate) {
       this.currentPosition.copy(desired);

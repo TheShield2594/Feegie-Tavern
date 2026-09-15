@@ -24,25 +24,53 @@ const TEXTURE_SLOTS = [
  * up holding every material it ever built. Materials are de-duplicated because
  * a model routinely shares one across several meshes.
  *
- * Textures go too. Every texture in this project is built per call — the room
- * kit bakes a floor pattern, the building kit bakes sign lettering — so none of
- * them is a shared cache that another scene still needs.
+ * Textures go too — most are baked per call, like the building kit's sign
+ * lettering.
+ *
+ * Anything marked `userData.shared` is left alone. Several caches in the
+ * project hand the same instance to every caller that asks: the procedural
+ * texture bakery keys its output, and the asset registry keys kit geometry and
+ * kit materials. Those predate anything being torn down piecemeal — a scene
+ * used to be disposed whole, at which point freeing them was correct — but
+ * outdoor decorations are built and removed one at a time while the game runs,
+ * and taking up one bench must not free the plank texture the pier is drawn
+ * with. A caller that wants to own its copy clones it.
  */
+/**
+ * A copy of a geometry the caller owns outright, safe to dispose.
+ *
+ * `BufferGeometry.copy` assigns `userData` by reference rather than copying it,
+ * so a plain `clone()` of a shared geometry comes back still marked shared —
+ * and pointing at the original's own `userData`, where clearing the flag in
+ * place would un-share the original too. This hands back a copy with its own
+ * `userData` and the marker dropped, so {@link disposeObject} frees it like
+ * anything else while the registry's instance stays protected.
+ */
+export function cloneOwned(geometry: BufferGeometry): BufferGeometry {
+  const copy = geometry.clone();
+  copy.userData = { ...geometry.userData, shared: false };
+  return copy;
+}
+
 export function disposeObject(root: Object3D): void {
   const materials = new Set<Material>();
 
   root.traverse((child) => {
     const mesh = child as Mesh;
     if (!mesh.isMesh) return;
-    mesh.geometry?.dispose();
+    if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
     const material = mesh.material;
     if (Array.isArray(material)) for (const m of material) materials.add(m);
     else if (material) materials.add(material);
   });
 
   for (const material of materials) {
+    if (material.userData.shared) continue;
     const slots = material as unknown as Record<string, Texture | null | undefined>;
-    for (const slot of TEXTURE_SLOTS) slots[slot]?.dispose();
+    for (const slot of TEXTURE_SLOTS) {
+      const texture = slots[slot];
+      if (texture && !texture.userData.shared) texture.dispose();
+    }
     material.dispose();
   }
 }

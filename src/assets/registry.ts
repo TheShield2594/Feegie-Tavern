@@ -27,7 +27,11 @@ export function setAssets(assets: AssetManager | undefined): void {
 
 /** Geometry for a manifest id, or null when no kit supplies it. */
 export function kitGeometry(id: string): BufferGeometry | null {
-  return manager?.geometry(id) ?? null;
+  const geometry = manager?.geometry(id) ?? null;
+  // One instance is handed to every caller, so whoever tears down an object it
+  // is on must not free it. Callers that need to own theirs clone it.
+  if (geometry) geometry.userData.shared = true;
+  return geometry;
 }
 
 /** Whether a manifest id resolved to real geometry. */
@@ -54,6 +58,7 @@ export function kitMaterial(options: KitMaterialOptions = {}): MeshStandardMater
   let material = materialCache.get(key);
   if (!material) {
     material = createStylizedMaterial({ vertexColors: true, color: tint, roughness, wind, windScale, wetResponse });
+    material.userData.shared = true;
     materialCache.set(key, material);
   }
   return material;

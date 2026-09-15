@@ -1,5 +1,4 @@
 import {
-  Color,
   DoubleSide,
   Group,
   InstancedMesh,
@@ -10,21 +9,9 @@ import {
   Vector3,
 } from 'three';
 import { createStylizedMaterial } from '@/rendering/materials';
-import { PALETTE } from '@/rendering/palette';
 import { Rng } from '@/util/rng';
 import { clamp01, lerp, smoothstep } from '@/util/math';
-import { ISLAND_HALF, LANDMARKS, sampleSurface } from './heightfield';
-
-interface Butterfly {
-  anchor: Vector3;
-  phase: number;
-  speed: number;
-  radius: number;
-  height: number;
-  scale: number;
-  position: Vector3;
-  heading: number;
-}
+import { LANDMARKS } from './heightfield';
 
 interface Gull {
   centre: Vector3;
@@ -35,24 +22,24 @@ interface Gull {
   direction: 1 | -1;
 }
 
-const BUTTERFLY_COUNT = 36;
 const GULL_COUNT = 7;
 
 /**
- * Ambient animals: butterflies over the meadows by day, gulls wheeling over
- * the harbour and the lighthouse. Purely local and purely cosmetic — nothing
- * here is gameplay, and nothing here would ever need to be synchronised.
+ * Ambient animals: gulls wheeling over the harbour and the lighthouse. Purely
+ * local and purely cosmetic — nothing here is gameplay, and nothing here would
+ * ever need to be synchronised.
  *
- * Both are one instanced mesh per wing, so the whole population is four draw
- * calls, and both fade out by scaling to zero rather than toggling visibility,
- * so a butterfly never pops out of existence in front of the player.
+ * This used to fly a population of decorative butterflies over the meadows too.
+ * They are gone: `src/gathering/Insects.ts` now flies real ones that can be
+ * walked up to, startled and caught, and two visually identical populations
+ * where only one of them answers the net is worse than either alone.
+ *
+ * One instanced mesh per wing, so the whole flock is two draw calls, and they
+ * fade out by scaling to zero rather than toggling visibility, so a gull never
+ * pops out of existence in front of the player.
  */
 export class Wildlife {
   readonly group = new Group();
-
-  private butterflies: Butterfly[] = [];
-  private wingL: InstancedMesh;
-  private wingR: InstancedMesh;
 
   private gulls: Gull[] = [];
   private gullWingL: InstancedMesh;
@@ -63,78 +50,12 @@ export class Wildlife {
   private quat = new Quaternion();
   private scratch = new Vector3();
   private time = 0;
-  private butterflyLevel = 0;
   private gullLevel = 0;
 
-  /** Builds both populations and picks their anchors from the heightfield. */
+  /** Builds the flock and picks its roosts from the heightfield. */
   constructor() {
     this.group.name = 'Wildlife';
     const rng = new Rng(4242);
-
-    // --- Butterflies -----------------------------------------------------
-    const wing = new PlaneGeometry(0.16, 0.12);
-    // Hinge on the body edge so the flap rotates around it.
-    wing.translate(0.08, 0, 0);
-    const wingMaterial = createStylizedMaterial({
-      color: '#ffffff',
-      roughness: 0.9,
-      side: DoubleSide,
-      transparent: true,
-      opacity: 0.95,
-    });
-    this.wingL = new InstancedMesh(wing, wingMaterial, BUTTERFLY_COUNT);
-    this.wingR = new InstancedMesh(wing, wingMaterial, BUTTERFLY_COUNT);
-    this.wingL.name = 'ButterflyWingsL';
-    this.wingR.name = 'ButterflyWingsR';
-    this.wingL.frustumCulled = false;
-    this.wingR.frustumCulled = false;
-    this.wingL.castShadow = false;
-    this.wingR.castShadow = false;
-    this.group.add(this.wingL, this.wingR);
-
-    const tints = [...PALETTE.flowers, '#ffffff', '#f4d35e', '#8fc1e3'];
-    const color = new Color();
-    let placed = 0;
-    let attempts = 0;
-    // Half the population is seeded around the regions worth walking to, so
-    // arriving somewhere new always has something moving in it, and half is
-    // scattered so the rest of the island is not sterile by comparison.
-    const haunts = ['meadow.high', 'grove.west', 'orchard.secret', 'farm.terrace', 'creek.stones']
-      .map((key) => LANDMARKS[key])
-      .filter(Boolean);
-    while (placed < BUTTERFLY_COUNT && attempts < 3000) {
-      attempts++;
-      let x: number;
-      let z: number;
-      if (placed < BUTTERFLY_COUNT / 2 && haunts.length > 0) {
-        const haunt = haunts[placed % haunts.length];
-        x = haunt.x + rng.spread(11);
-        z = haunt.z + rng.spread(11);
-      } else {
-        x = rng.spread(ISLAND_HALF - 14);
-        z = rng.spread(ISLAND_HALF - 14);
-      }
-      const sample = sampleSurface(x, z);
-      if (sample.surface !== 'grass' || sample.height < 2.2 || sample.slope > 0.4) continue;
-      this.butterflies.push({
-        anchor: new Vector3(x, sample.height, z),
-        phase: rng.range(0, Math.PI * 2),
-        speed: rng.range(0.35, 0.7),
-        radius: rng.range(1.2, 3.2),
-        height: rng.range(0.6, 1.4),
-        scale: rng.range(0.8, 1.25),
-        position: new Vector3(x, sample.height + 1, z),
-        heading: 0,
-      });
-      color.set(rng.pick(tints));
-      this.wingL.setColorAt(placed, color);
-      this.wingR.setColorAt(placed, color);
-      placed++;
-    }
-    this.wingL.count = placed;
-    this.wingR.count = placed;
-    if (this.wingL.instanceColor) this.wingL.instanceColor.needsUpdate = true;
-    if (this.wingR.instanceColor) this.wingR.instanceColor.needsUpdate = true;
 
     // --- Gulls -----------------------------------------------------------
     const gullWing = new PlaneGeometry(0.9, 0.26);
@@ -164,59 +85,17 @@ export class Wildlife {
 
   /**
    * @param daylight 0 at night, 1 in full day.
-   * @param rain Precipitation, 0–1. Butterflies shelter; gulls thin out.
+   * @param rain Precipitation, 0–1. Gulls thin out in it.
    */
   update(dt: number, daylight: number, rain: number, season: string, wind: number, cameraX: number, cameraZ: number): void {
+    void season;
+    void wind;
     this.time += dt;
 
-    const butterflyTarget = smoothstep(0.25, 0.6, daylight) * (1 - clamp01(rain * 2.5)) * (season === 'Winter' ? 0 : 1);
-    this.butterflyLevel = lerp(this.butterflyLevel, butterflyTarget, 1 - Math.exp(-dt * 0.8));
     const gullTarget = smoothstep(0.1, 0.4, daylight) * (1 - clamp01(rain * 1.5) * 0.7);
     this.gullLevel = lerp(this.gullLevel, gullTarget, 1 - Math.exp(-dt * 0.6));
 
-    this.updateButterflies(dt, cameraX, cameraZ, wind);
     this.updateGulls(dt, cameraX, cameraZ);
-  }
-
-  /** Moves each butterfly on its figure-of-eight and writes both wings. */
-  private updateButterflies(dt: number, cameraX: number, cameraZ: number, wind: number): void {
-    const level = this.butterflyLevel;
-    const flap = this.time * 14;
-    for (let i = 0; i < this.butterflies.length; i++) {
-      const b = this.butterflies[i];
-      const dx = b.anchor.x - cameraX;
-      const dz = b.anchor.z - cameraZ;
-      if (dx * dx + dz * dz > 55 * 55 || level < 0.01) {
-        this.hide(this.wingL, i);
-        this.hide(this.wingR, i);
-        continue;
-      }
-
-      // A lazy figure-of-eight around the anchor, drifting with the wind.
-      const t = this.time * b.speed + b.phase;
-      const nx = b.anchor.x + Math.sin(t) * b.radius + wind * 0.4;
-      const nz = b.anchor.z + Math.sin(t * 2) * b.radius * 0.5;
-      const ny = b.anchor.y + b.height + Math.sin(t * 3.1) * 0.25 + Math.sin(flap * 0.5 + b.phase) * 0.04;
-      const vx = nx - b.position.x;
-      const vz = nz - b.position.z;
-      if (vx * vx + vz * vz > 1e-6) {
-        const heading = Math.atan2(vx, vz);
-        let delta = heading - b.heading;
-        while (delta > Math.PI) delta -= Math.PI * 2;
-        while (delta < -Math.PI) delta += Math.PI * 2;
-        b.heading += delta * Math.min(1, dt * 6);
-      }
-      b.position.set(nx, ny, nz);
-
-      const s = b.scale * level * 0.9;
-      const beat = Math.sin(flap + b.phase * 5);
-      const open = 0.35 + Math.abs(beat) * 1.05;
-      // Left wing: rotate about the body axis (local Z) by +open, right by -open.
-      this.writeWing(this.wingL, i, b.position, b.heading, open, s, 1);
-      this.writeWing(this.wingR, i, b.position, b.heading, -open, s, -1);
-    }
-    this.wingL.instanceMatrix.needsUpdate = true;
-    this.wingR.instanceMatrix.needsUpdate = true;
   }
 
   /** Moves each gull round its circuit with a slow glide-and-beat wing cycle. */
@@ -270,13 +149,11 @@ export class Wildlife {
     mesh.setMatrixAt(index, this.matrix);
   }
 
-  /** Releases the wing meshes and the geometry and material each pair shares. */
+  /** Releases the wing meshes and the geometry and material the pair shares. */
   dispose(): void {
-    // Each pair of wings shares one geometry and one material, so those are
-    // released once per species rather than once per wing.
-    for (const mesh of [this.wingL, this.wingR, this.gullWingL, this.gullWingR]) mesh.dispose();
-    this.wingL.geometry.dispose();
-    (this.wingL.material as { dispose(): void }).dispose();
+    // The pair of wings shares one geometry and one material, so those are
+    // released once rather than once per wing.
+    for (const mesh of [this.gullWingL, this.gullWingR]) mesh.dispose();
     this.gullWingL.geometry.dispose();
     (this.gullWingL.material as { dispose(): void }).dispose();
   }

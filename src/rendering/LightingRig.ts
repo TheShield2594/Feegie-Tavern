@@ -123,6 +123,15 @@ export interface LightingOutput {
   darkness: number;
 }
 
+/** The look under the surface: a blue-green ramp that swallows everything. */
+const UNDERWATER = {
+  fog: '#14515e',
+  fogDensity: 0.085,
+  tint: [0.62, 0.94, 1.02] as [number, number, number],
+  /** Colour of the flat fill that keeps the diver from reading as a silhouette. */
+  fill: '#6fb8c4',
+};
+
 /** Extra flat fill once the sun is down, so night shadows stay readable. */
 function darknessFill(sunHeight: number): number {
   return clamp01(-sunHeight * 3);
@@ -204,8 +213,18 @@ export class LightingRig {
 
   /**
    * @param focus Where the shadow frustum should centre — normally the player.
+   * @param underwater 0 dry, 1 fully submerged. Ramps the fog and the grade
+   * into the underwater look rather than switching to it, so surfacing reads
+   * as coming up rather than as a cut.
    */
-  update(time: TimeSnapshot, weather: WeatherProfile, lightningFlash: number, focus: Vector3, indoors: boolean): LightingOutput {
+  update(
+    time: TimeSnapshot,
+    weather: WeatherProfile,
+    lightningFlash: number,
+    focus: Vector3,
+    indoors: boolean,
+    underwater = 0,
+  ): LightingOutput {
     const hour = time.minutes / 60;
     const { a, b, t } = this.stopsFor(hour);
 
@@ -257,12 +276,30 @@ export class LightingRig {
     this.hemi.intensity = lerp(a.ambientIntensity, b.ambientIntensity, t) * 1.15 * lerp(1, 1.3, overcast) * (indoors ? 0.4 : 1);
     this.ambient.intensity = 0.16 + overcast * 0.12 + (indoors ? 0.06 : 0) + darknessFill(sunHeight) * 0.1;
 
+    // Under water the key light is most of the way gone and the grade takes
+    // another fifth off the exposure, which leaves the diver — the one thing
+    // that has to stay readable down there — as a black cut-out against the
+    // fog. Scattered light is what actually lights a body underwater, so the
+    // fill comes up rather than the sun.
+    if (underwater > 0) {
+      this.hemi.color.lerp(scratchA.set(UNDERWATER.fill), underwater * 0.8);
+      this.hemi.groundColor.lerp(scratchA.set(UNDERWATER.fog), underwater * 0.7);
+      this.hemi.intensity = lerp(this.hemi.intensity, 2.3, underwater);
+      this.ambient.intensity = lerp(this.ambient.intensity, 0.5, underwater);
+    }
+
     // --- Fog ---------------------------------------------------------------
     scratchA.set(a.fog);
     scratchB.set(b.fog);
     this.fog.color.copy(scratchA).lerp(scratchB, t);
     if (overcast > 0.2) this.fog.color.lerp(scratchA.set('#a8b4bd'), overcast * 0.35);
     this.fog.density = lerp(a.fogDensity, b.fogDensity, t) * weather.fog * (indoors ? 0.15 : 1);
+    if (underwater > 0) {
+      // Water is its own weather: the sky's colour and the day's haze stop
+      // mattering the moment the surface closes over the player's head.
+      this.fog.color.lerp(scratchB.set(UNDERWATER.fog), underwater);
+      this.fog.density = lerp(this.fog.density, UNDERWATER.fogDensity, underwater);
+    }
 
     // --- Sky ---------------------------------------------------------------
     const u = this.sky.uniforms;
@@ -302,13 +339,17 @@ export class LightingRig {
     const darkness = clamp01(1 - dayness) * (indoors ? 0.55 : 1);
 
     return {
-      tint: [tint[0] * (1 - gloom * 0.16), tint[1] * (1 - gloom * 0.13), tint[2] * (1 - gloom * 0.06)],
-      saturation: 1.04 * desat,
-      contrast: 1.035 - overcast * 0.03,
-      vignette: 0.26 + darkness * 0.16 + overcast * 0.05,
+      tint: [
+        lerp(tint[0] * (1 - gloom * 0.16), UNDERWATER.tint[0], underwater),
+        lerp(tint[1] * (1 - gloom * 0.13), UNDERWATER.tint[1], underwater),
+        lerp(tint[2] * (1 - gloom * 0.06), UNDERWATER.tint[2], underwater),
+      ],
+      saturation: lerp(1.04 * desat, 0.88, underwater),
+      contrast: lerp(1.035 - overcast * 0.03, 0.96, underwater),
+      vignette: 0.26 + darkness * 0.16 + overcast * 0.05 + underwater * 0.24,
       lift: lerp(a.lift, b.lift, t) + (weather.kind === 'fog' ? 0.03 : 0),
       flash: lightningFlash * 0.65,
-      exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.94, overcast),
+      exposure: lerp(a.exposure, b.exposure, t) * lerp(1, 0.94, overcast) * lerp(1, 0.82, underwater),
       bloom: 0.2 + darkness * 0.18 + (weather.kind === 'rain' || weather.kind === 'storm' ? 0.12 : 0),
       darkness,
     };

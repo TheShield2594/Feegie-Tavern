@@ -277,6 +277,95 @@ export function platformAt(x: number, z: number): Platform | null {
   return null;
 }
 
+/**
+ * A patch of ground the player has re-surfaced — a laid path, a stepping
+ * stone, a gravel square.
+ *
+ * The compile-time `PATHS` table shapes the island: it flattens the ground and
+ * is baked into the terrain mesh's vertex colours at load. Player-laid paths
+ * cannot do either without re-meshing the island every time a slab goes down,
+ * so they only repaint the *classification* — what the ground counts as for
+ * footsteps, particles and anything else that asks what it is standing on.
+ * The slab itself is a mesh the landscaping system owns.
+ */
+export interface SurfacePatch {
+  id: string;
+  x: number;
+  z: number;
+  radius: number;
+  surface: Surface;
+}
+
+/** Overlay patches, bucketed into cells so `sampleSurface` stays cheap. */
+const OVERLAY_CELL = 8;
+const overlayBuckets = new Map<number, SurfacePatch[]>();
+let overlayCount = 0;
+
+function overlayKey(cx: number, cz: number): number {
+  // A single integer key: the island is well inside ±1024 cells either way.
+  return ((cx + 512) << 11) | (cz + 512);
+}
+
+/** Every bucket a patch touches, so a patch straddling a cell edge is found from both. */
+function overlayCellsFor(patch: SurfacePatch): number[] {
+  const minX = Math.floor((patch.x - patch.radius) / OVERLAY_CELL);
+  const maxX = Math.floor((patch.x + patch.radius) / OVERLAY_CELL);
+  const minZ = Math.floor((patch.z - patch.radius) / OVERLAY_CELL);
+  const maxZ = Math.floor((patch.z + patch.radius) / OVERLAY_CELL);
+  const keys: number[] = [];
+  for (let cx = minX; cx <= maxX; cx++) {
+    for (let cz = minZ; cz <= maxZ; cz++) keys.push(overlayKey(cx, cz));
+  }
+  return keys;
+}
+
+/** Registers a patch, filed under every cell it touches. */
+export function addSurfacePatch(patch: SurfacePatch): void {
+  for (const key of overlayCellsFor(patch)) {
+    const bucket = overlayBuckets.get(key);
+    if (bucket) bucket.push(patch);
+    else overlayBuckets.set(key, [patch]);
+  }
+  overlayCount++;
+}
+
+/** Unregisters a patch by id, wherever it was filed. */
+export function removeSurfacePatch(id: string): void {
+  let removed = false;
+  for (const [key, bucket] of overlayBuckets) {
+    const index = bucket.findIndex((p) => p.id === id);
+    if (index < 0) continue;
+    bucket.splice(index, 1);
+    removed = true;
+    if (bucket.length === 0) overlayBuckets.delete(key);
+  }
+  if (removed) overlayCount = Math.max(0, overlayCount - 1);
+}
+
+/** Drops every patch — for loading a different island, or for a test. */
+export function clearSurfacePatches(): void {
+  overlayBuckets.clear();
+  overlayCount = 0;
+}
+
+/** The surface a patch paints over a point, or null where none reaches it. */
+export function surfacePatchAt(x: number, z: number): Surface | null {
+  // The overwhelmingly common case is an island with nothing laid on it, and
+  // this runs for every terrain vertex and every grounding sample.
+  if (overlayCount === 0) return null;
+  const bucket = overlayBuckets.get(overlayKey(Math.floor(x / OVERLAY_CELL), Math.floor(z / OVERLAY_CELL)));
+  if (!bucket) return null;
+  let best: Surface | null = null;
+  let bestDistance = Infinity;
+  for (const patch of bucket) {
+    const d = Math.hypot(x - patch.x, z - patch.z);
+    if (d > patch.radius || d >= bestDistance) continue;
+    bestDistance = d;
+    best = patch.surface;
+  }
+  return best;
+}
+
 function distanceToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
   const dx = bx - ax;
   const dz = bz - az;
@@ -533,6 +622,11 @@ export function sampleSurface(x: number, z: number): SurfaceSample {
   const creekDistance = distanceToCreek(x, z);
   if (creekDistance < CREEK.width * 0.85 && height > SEA_LEVEL) surface = 'dirt';
 
+  // Last, so a slab the player laid reads as what they laid, not as the grass
+  // it was put down on.
+  const patch = surfacePatchAt(x, z);
+  if (patch && height >= SEA_LEVEL) surface = patch;
+
   return { height, surface, slope };
 }
 
@@ -560,6 +654,31 @@ export function isWalkable(x: number, z: number): boolean {
   const sample = sampleSurface(x, z);
   // Waist-deep water and cliff faces are out; shallow shoreline is fine.
   if (sample.height < SEA_LEVEL - 0.55) return false;
+  return sample.slope < 0.72;
+}
+
+/**
+ * How deep the player may swim out before the shelf gives way.
+ *
+ * The seabed bottoms out at {@link SEABED_FLOOR}, so stopping a little short of
+ * it turns "the open ocean" into a soft wall the player meets by swimming into
+ * cold dark water rather than by hitting an invisible line in the shallows.
+ */
+export const MAX_SWIM_DEPTH = 8.2;
+
+/**
+ * Where the player can *get to* in water, as opposed to where they can stand.
+ *
+ * {@link isWalkable} stops at waist depth, which is the right answer for
+ * walking and the wrong one for a swimmer: it makes the whole shelf — and so
+ * everything the dive is for — unreachable. This is the same test with the
+ * water clause relaxed to the edge of the shelf.
+ */
+export function isSwimmable(x: number, z: number): boolean {
+  if (Math.abs(x) > ISLAND_HALF - 2 || Math.abs(z) > ISLAND_HALF - 2) return false;
+  if (platformAt(x, z)) return true;
+  const sample = sampleSurface(x, z);
+  if (sample.height < SEA_LEVEL) return SEA_LEVEL - sample.height <= MAX_SWIM_DEPTH;
   return sample.slope < 0.72;
 }
 

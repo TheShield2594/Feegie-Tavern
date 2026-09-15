@@ -3,14 +3,20 @@ import { FURNITURE_BY_NAME } from '@/data/furniture';
 import { ITEMS_BY_NAME } from '@/data/items';
 import { SPECIES_BY_NAME } from '@/data/species';
 import type { InventoryItem, ItemCategory, Rarity } from '@/items/types';
-import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV6 } from './schema';
+import { DEFAULT_SETTINGS, SAVE_VERSION, type AnySaveData, type SaveDataV7 } from './schema';
 
 type Migration = (data: Record<string, unknown>) => Record<string, unknown>;
 
-/** The v5 shape: v6 minus the fields added since. */
-type LegacyV5 = Omit<SaveDataV6, 'version' | 'world'> & {
+/** The v6 shape: v7 minus the outdoor decoration and reef fields added since. */
+type LegacyV6 = Omit<SaveDataV7, 'version' | 'world'> & {
+  version: 6;
+  world: Omit<SaveDataV7['world'], 'decor' | 'reef'>;
+};
+
+/** The v5 shape: v6 minus the orchard gate. */
+type LegacyV5 = Omit<LegacyV6, 'version' | 'world'> & {
   version: 5;
-  world: Omit<SaveDataV6['world'], 'orchardOpen'>;
+  world: Omit<LegacyV6['world'], 'orchardOpen'>;
 };
 
 let uidCounter = 0;
@@ -167,7 +173,7 @@ const migrate4to5: Migration = (data) => {
         .filter(Boolean)
     : [];
 
-  const relationships: SaveDataV6['relationships'] = {};
+  const relationships: SaveDataV7['relationships'] = {};
   const legacyFriendship = (data.friendship ?? {}) as Record<string, unknown>;
   const legacyRequests = (data.requests ?? {}) as Record<string, unknown>;
   for (const [name, value] of Object.entries(legacyFriendship)) {
@@ -245,7 +251,7 @@ const migrate4to5: Migration = (data) => {
       minutes: Math.max(0, Math.min(1439, Math.round(num(data.time, 480)))),
     },
     weather: {
-      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV6['weather']['kind']) ?? 'clear',
+      kind: (str(legacyWeather.type, 'Clear').toLowerCase() as SaveDataV7['weather']['kind']) ?? 'clear',
       remaining: 240,
     },
     player: {
@@ -286,7 +292,7 @@ const migrate4to5: Migration = (data) => {
       // wearing is the one style the player carries over as owned.
       ownedStyles: [styleId],
       ownedFurniture,
-      placed: placed as SaveDataV6['home']['placed'],
+      placed: placed as SaveDataV7['home']['placed'],
     },
     farm: { plots },
     world: {
@@ -329,16 +335,47 @@ const migrate5to6: Migration = (data) => {
 };
 
 /**
+ * v6 → v7: outdoor decoration, and the reef the diver works.
+ *
+ * `world.gardens` has been in the schema since v4 and nothing ever wrote to it;
+ * the prototype's saves, though, really do carry flower positions there. Rather
+ * than strand them, each one becomes a flower bed in the new `decor` list — so
+ * an island that was planted in the prototype comes back planted, and the beds
+ * can be picked up and moved like anything else the player put down.
+ */
+const migrate6to7: Migration = (data) => {
+  const world = (data.world ?? {}) as Record<string, unknown>;
+  const gardens = Array.isArray(world.gardens) ? world.gardens : [];
+  const decor = gardens.map((raw, index) => {
+    const g = (raw ?? {}) as Record<string, unknown>;
+    return {
+      uid: `d_legacy_${index}`,
+      defId: 'decor.flowerBed',
+      x: num(g.x, 0),
+      z: num(g.z, 0),
+      rotation: 0,
+      tint: str(g.color, '#f4b5c7'),
+    };
+  });
+  return {
+    ...data,
+    version: 7,
+    world: { ...world, gardens, decor, reef: [] },
+  };
+};
+
+/**
  * Migrations keyed by the version they upgrade *from*. Running them in sequence
  * takes any historical save up to SAVE_VERSION.
  */
 export const MIGRATIONS: Record<number, Migration> = {
   4: migrate4to5,
   5: migrate5to6,
+  6: migrate6to7,
 };
 
 export interface MigrationResult {
-  data: SaveDataV6;
+  data: SaveDataV7;
   migratedFrom: number | null;
 }
 
@@ -359,13 +396,30 @@ export function detectVersion(data: AnySaveData): number {
  * truncated record can reach here claiming to be current. Failing loudly keeps
  * that out of `applySave`, where the first `data.clock.day` would throw from
  * inside the frame loop instead of from a read the caller already guards.
+ *
+ * The version itself is one of the checks: a record that merely looks current
+ * enough to guess at is not current, and every blob that really is — written by
+ * `snapshot`, by `createNewSave`, or by the last migration in the chain —
+ * carries the number. The arrays are checked too, because `applySave` iterates
+ * them the moment it is handed one and an absent field would throw from inside
+ * a `for ... of` rather than from here.
  */
-function assertCurrent(data: AnySaveData): asserts data is SaveDataV6 {
+function assertCurrent(data: AnySaveData): asserts data is SaveDataV7 {
   const d = data as Record<string, unknown>;
+  if (d.version !== SAVE_VERSION) {
+    throw new Error(`Save does not declare version ${SAVE_VERSION} (found ${String(d.version)})`);
+  }
   const required = ['clock', 'player', 'museum', 'home', 'farm', 'world', 'quests', 'relationships', 'settings'];
   const missing = required.filter((key) => typeof d[key] !== 'object' || d[key] === null);
   if (missing.length > 0) {
     throw new Error(`Save is missing required section(s): ${missing.join(', ')}`);
+  }
+
+  const world = d.world as Record<string, unknown>;
+  const lists = ['gardens', 'decor', 'reef', 'gatherables'];
+  const malformed = lists.filter((key) => !Array.isArray(world[key]));
+  if (malformed.length > 0) {
+    throw new Error(`Save has malformed world list(s): ${malformed.join(', ')}`);
   }
 }
 

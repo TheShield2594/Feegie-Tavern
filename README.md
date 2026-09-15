@@ -83,10 +83,16 @@ when the game itself cannot be built (see issue #21).
 | Journal | `Q` | — |
 | Settings | `F` | Menu |
 | Cycle tool | `Z` / `C` | `LB` / `RB` |
+| Build / decorate | `B` | `L3` |
 | Emotes: wave · cheer · nod · sit | `1` `2` `3` `4` | D-pad |
 | Orbit camera | `O` / `P` | Right stick |
 | Zoom | `+` / `-` | `RT` / `LT` |
 | Performance overlay | `F3` | — |
+
+Underwater, `E` surfaces and `Space` collects; in build mode `Z` / `C` choose a
+piece or a colourway, `E` places a new one or puts down the one in hand, `Space`
+turns a held piece or takes back up the one you are standing next to — refunded
+in full, which is also how you move one — and `Esc` finishes.
 
 Touch controls (a virtual stick and four buttons) appear automatically on the
 first touch input.
@@ -101,7 +107,8 @@ src/
   rendering/   renderer + post chain, sky, lighting rig, camera, particles, weather FX,
                procedural surface textures, world-space labels and emote bubbles
   world/       heightfield, terrain, ocean + creek water, regions, foliage, scatter, wildlife,
-               props, region landmarks, buildings, interiors, minimap
+               props, region landmarks, buildings, interiors, minimap,
+               outdoor decoration placement and its models
   assets/      kit manifest, GLB loader, and the registry world systems pull kit geometry from
   player/      character rig, procedural animator, tools, movement controller
   npc/         navigation grid, villagers, schedules
@@ -127,6 +134,14 @@ texture and the map all read from it, so nothing can disagree about where the
 ground is. Coastal landmarks (the pier, the dunes, the driftwood log) are
 *measured* from the generated shoreline rather than hard-coded, so reshaping the
 island moves them with it.
+
+Two exceptions, both deliberate. `isSwimmable` is `isWalkable` with the water
+clause relaxed to the edge of the shelf: walking stops at waist depth, and a
+swimmer has to be able to leave it. And the surface classification carries a
+small runtime overlay (`addSurfacePatch`) so a path the player lays reads as a
+path underfoot — an overlay rather than a change to the terrain, because the
+mesh, the water's baked depth texture and the fish all read the heightfield and
+none of them should have to be rebuilt when somebody puts down a flagstone.
 
 ### The island is divided into regions
 
@@ -217,7 +232,7 @@ GLTF/GLB is the intended format for finished 3D assets.
 
 ## Saves and migration
 
-Saves live in `localStorage` under `cozyCove.save.v5.slot{1..3}`.
+Saves live in `localStorage` under `cozyCove.save.v7.slot{1..3}`.
 
 `src/save/schema.ts` declares the current schema version and
 `src/save/migrations.ts` holds one migration function per version step. On load
@@ -233,8 +248,8 @@ and crop growth is rescaled to the new four-stage cycle. Items with no matching
 definition keep a synthetic id so they still show, stack and sell rather than
 vanishing from a returning player's bag.
 
-To add a version: bump `SAVE_VERSION`, write `migrate5to6`, register it in
-`MIGRATIONS` under key `5`. Never edit a migration that has shipped.
+To add a version: bump `SAVE_VERSION`, write `migrate7to8`, register it in
+`MIGRATIONS` under key `7`. Never edit a migration that has shipped.
 
 ---
 
@@ -263,12 +278,31 @@ with doors, windows, signs, lamps and landscaping, a full day cycle with five
 weather states, animated characters, walkable interiors, and the complete
 interface.
 
+Three of the systems that were stubs are now built out:
+
+- **Diving.** The shelf is swimmable rather than stopping at waist depth. In
+  water over 1.5 m the player can go under, into a fogged blue-green layer with
+  caustics, light shafts, drifting motes and a muffled mix, and collect the sea
+  creatures living on the reef and the deep shelf. Air is a fixed breath, shown
+  as a meter; run it out and the body surfaces on its own. The catch cards wait
+  for the surface, which is what makes going up a decision.
+- **Insects.** Butterflies, beetles and dragonflies are instanced entities that
+  drift, settle and startle, spawned by habitat, region and time of day around
+  wherever the player is. The net now reaches for the nearest one in an arc in
+  front of the player instead of rolling the catalogue, so walking slowly rather
+  than running at one is the skill.
+- **Outdoor landscaping.** A build mode with the same grammar as decorating
+  indoors: flower beds, shrubs, fences, benches, lamps, signs and stepping
+  stones, bought at the point of placing and refunded in full when taken up.
+  Stepping stones repaint the ground's surface classification at runtime, so a
+  laid path sounds like one underfoot. The island's rating responds to what is
+  planted right now, and the whole layout survives a reload.
+
 Everything still outstanding is filed on the
 [issue tracker](https://github.com/TheShield2594/Feegie-Tavern/issues), roughly
 in these groups:
 
-- **Gameplay not yet built** — diving (#1), insects as world entities (#2),
-  outdoor landscaping (#4), multi-room housing (#5), tabletop placement (#6),
+- **Gameplay not yet built** — multi-room housing (#5), tabletop placement (#6),
   festivals (#7), deeper quests and a second story chapter (#19)
 - **Known bugs** — villagers never appear indoors (#3), unwired interaction
   hooks including doors and sleeping (#17), grass popping (#16), the rowboat
