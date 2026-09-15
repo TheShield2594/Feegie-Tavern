@@ -1710,9 +1710,11 @@ export class Game {
     if (this.input.justPressed('useTool')) {
       const piece = this.furnishing.nearest(local.x, local.z, 1.8);
       if (piece) {
-        const defId = this.furnishing.remove(piece.uid);
-        if (defId) {
-          this.uiRoot.toast('Stored.', 'neutral');
+        // Clearing a table takes what is standing on it, so the message says
+        // how much went away rather than implying one piece did.
+        const stored = this.furnishing.remove(piece.uid);
+        if (stored.length > 0) {
+          this.uiRoot.toast(stored.length > 1 ? `Stored ${stored.length} pieces.` : 'Stored.', 'neutral');
           this.save.markDirty();
         }
       }

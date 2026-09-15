@@ -1,5 +1,12 @@
 export type FurnitureKind = 'sofa' | 'table' | 'lamp' | 'rug' | 'music' | 'plant' | 'chair' | 'shelf' | 'bed';
 
+/**
+ * Where a piece is allowed to sit.
+ *
+ * `tabletop` is the small-item case: it takes a table or a shelf when one is
+ * under the cursor and falls back to the floor when there is not, so a lamp is
+ * never refused for want of somewhere to stand.
+ */
 export type PlacementSurface = 'floor' | 'wall' | 'tabletop';
 
 export interface FurnitureDef {
@@ -14,6 +21,11 @@ export interface FurnitureDef {
   surface: PlacementSurface;
   /** Whether small items can sit on top of it. */
   supportsTabletop?: boolean;
+  /**
+   * Height of the surface small items rest on, in metres above the piece's own
+   * base. Only read when `supportsTabletop` is set.
+   */
+  surfaceHeight?: number;
   palette: { primary: string; secondary: string; accent: string };
   /** Contribution to the cottage's cosiness rating. */
   cosiness: number;
@@ -42,6 +54,7 @@ export const FURNITURE: FurnitureDef[] = [
     footprint: { w: 3, d: 2 },
     surface: 'floor',
     supportsTabletop: true,
+    surfaceHeight: 0.79,
     palette: { primary: '#b98a58', secondary: '#8a6238', accent: '#e0c396' },
     cosiness: 4,
   },
@@ -52,7 +65,7 @@ export const FURNITURE: FurnitureDef[] = [
     price: 120,
     description: 'Casts exactly enough light for one person and one book.',
     footprint: { w: 1, d: 1 },
-    surface: 'floor',
+    surface: 'tabletop',
     palette: { primary: '#f2dfa8', secondary: '#5d6b74', accent: '#fff3cf' },
     cosiness: 5,
     light: { color: '#ffd9a0', intensity: 2.2, height: 1.3 },
@@ -75,7 +88,7 @@ export const FURNITURE: FurnitureDef[] = [
     price: 340,
     description: 'Three records. All of them are the sea.',
     footprint: { w: 2, d: 2 },
-    surface: 'floor',
+    surface: 'tabletop',
     supportsTabletop: false,
     palette: { primary: '#8a6238', secondary: '#3a3a42', accent: '#e0c396' },
     cosiness: 7,
@@ -87,7 +100,7 @@ export const FURNITURE: FurnitureDef[] = [
     price: 110,
     description: 'Thriving despite everything you have done to it.',
     footprint: { w: 1, d: 1 },
-    surface: 'floor',
+    surface: 'tabletop',
     palette: { primary: '#5f9a55', secondary: '#c9784f', accent: '#8fc47a' },
     cosiness: 4,
   },
@@ -100,6 +113,7 @@ export const FURNITURE: FurnitureDef[] = [
     footprint: { w: 3, d: 1 },
     surface: 'wall',
     supportsTabletop: true,
+    surfaceHeight: 1.34,
     palette: { primary: '#c4ab8b', secondary: '#8d7a5e', accent: '#e6d7bd' },
     cosiness: 4,
   },
